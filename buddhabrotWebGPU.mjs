@@ -270,6 +270,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     loop {
       if (iter >= u.maxIter) { break; }
       // 一度一時変数へ入れてから妥当性を確認する
+      let n = f32(iter);
       var _tmp_iter = ${customWGSLIteration};
       // WGSL には isnan / isfinite がないため、自己比較と上限値で判定する
       if (!(_tmp_iter.x == _tmp_iter.x) || !(_tmp_iter.y == _tmp_iter.y) || abs(_tmp_iter.x) > 1e20 || abs(_tmp_iter.y) > 1e20) {
@@ -320,6 +321,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     }
     for (var oi: u32 = 0u; oi < iter; oi = oi + 1u) {
       // 一時変数へ評価してから妥当性を確認する
+      let n = f32(oi);
       var _tmp_iter = ${customWGSLIteration};
       if (!(_tmp_iter.x == _tmp_iter.x) || !(_tmp_iter.y == _tmp_iter.y) || abs(_tmp_iter.x) > 1e20 || abs(_tmp_iter.y) > 1e20) {
         // 原点へ潰れて真っ黒にならないよう c へ戻す
@@ -478,9 +480,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     // Mandelbrot 以外でも反復式を WGSL 化できるなら GPU 経路を使う。
     // 変換できない式だけは、上位で CPU フォールバックできるよう例外にする。
     if (!customIterationSupported) {
-      throw new Error(
-        `GPU iteration kernel is not available for fractalType='${fractalType}'`,
-      )
+      throw new Error(`GPU iteration kernel is not available for fractalType='${fractalType}'`)
     }
 
     // band 情報を書き込む前に、重みと累積値を JS 側で正規化する。

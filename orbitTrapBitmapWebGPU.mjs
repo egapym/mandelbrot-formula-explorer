@@ -535,7 +535,7 @@ fn hslToRgb(h: f32, s: f32, l: f32) -> u32 {
   return packRgba(toByte(r), toByte(g), toByte(b), 255u);
 }
 
-fn safeNext(z: vec2<f32>, c: vec2<f32>) -> vec2<f32> {
+fn safeNext(z: vec2<f32>, c: vec2<f32>, n: f32) -> vec2<f32> {
   let z_next = ${iterationExpr};
   let valid = (z_next.x == z_next.x) && (z_next.y == z_next.y) &&
     abs(z_next.x) < ${MAX_VALID_VALUE_WGSL} && abs(z_next.y) < ${MAX_VALID_VALUE_WGSL};
@@ -660,7 +660,7 @@ fn computeIterValue(zInit: vec2<f32>, c: vec2<f32>) -> f32 {
       break;
     }
 
-    z = safeNext(z, c);
+    z = safeNext(z, c, f32(iter + 1));
     let oldIter = iter;
     iter = iter + 1;
     if (oldIter == i32(spec.dims.z)) {
@@ -765,7 +765,7 @@ fn computeTrapValue(zInit: vec2<f32>, c: vec2<f32>) -> f32 {
   var capturedResult = 0.0;
 
   for (var i = 0u; i < spec.dims.z; i = i + 1u) {
-    z = safeNext(z, c);
+    z = safeNext(z, c, f32(i));
 
     let dx = z.x - spec.trap0.z;
     let dy = z.y - spec.trap0.w;
@@ -1117,7 +1117,7 @@ fn computeTiaValue(zInit: vec2<f32>, c: vec2<f32>) -> f32 {
   var escaped = false;
 
   for (var i = 0u; i < spec.dims.z; i = i + 1u) {
-    z = safeNext(z, c);
+    z = safeNext(z, c, f32(i));
     var zq = dot(z, z);
     if (!(zq == zq) || zq > 3e38) {
       zq = 3e38;

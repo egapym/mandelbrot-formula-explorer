@@ -163,7 +163,7 @@ export function calculatePixelOrbitTrap(cr, ci, z0r, z0i, iterFn, maxIter, trapS
   let stepBitmapV = null
 
   for (let i = 0; i < maxIter; i++) {
-    const res = iterFn(zr, zi, cr, ci)
+    const res = iterFn(zr, zi, cr, ci, i)
     let nr = res[0]
     let ni = res[1]
     // 数値が無限 / NaN になった場合はセンチネル値で置換
@@ -435,7 +435,7 @@ function _computeTIA(cr, ci, z0r, z0i, iterFn, maxIter) {
   let escaped = false
 
   for (let i = 0; i < maxIter; i++) {
-    const res = iterFn(zr, zi, cr, ci)
+    const res = iterFn(zr, zi, cr, ci, i)
     let nr = res[0]
     let ni = res[1]
     if (!Number.isFinite(nr) || !Number.isFinite(ni)) {

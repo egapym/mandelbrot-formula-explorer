@@ -42,15 +42,7 @@ function hasVec2ResultShape(expr) {
 }
 
 function testRenderability(expr, opts = {}) {
-  const {
-    grid = 21,
-    maxIter = 100,
-    bailout = 4,
-    xmin = -2,
-    xmax = 2,
-    z0Real = 0,
-    z0Imag = 0,
-  } = opts
+  const { grid = 21, maxIter = 100, bailout = 4, xmin = -2, xmax = 2, z0Real = 0, z0Imag = 0 } = opts
   // Normalize expression and attempt to compile
   const normalizedExpr = expr.normalize ? expr.normalize('NFKC') : expr
   let compiled
@@ -74,14 +66,13 @@ function testRenderability(expr, opts = {}) {
       for (let it = 0; it < maxIter; it++) {
         let res
         try {
-          res = compiled(zR, zI, cr, ci)
+          res = compiled(zR, zI, cr, ci, it)
         } catch (e) {
           // runtime error for this probe
           runtimeErrors++
           break
         }
-        if ((!Array.isArray(res) && !(res instanceof Float64Array)) || res.length !== 2)
-          break
+        if ((!Array.isArray(res) && !(res instanceof Float64Array)) || res.length !== 2) break
         zR = res[0]
         zI = res[1]
         if (!Number.isFinite(zR) || !Number.isFinite(zI)) {
@@ -145,6 +136,7 @@ async function main() {
   results.push(testRenderability('|Re(z+1)| + i*|Im(z+c)| + c'))
   results.push(testRenderability('sin(z+1) + c'))
   results.push(testRenderability('sqrt(z+1) + c'))
+  results.push(testRenderability('mod(z*z, 1) + c'))
 
   for (const preset of functionPresets) {
     const expr = preset.expr || preset
@@ -168,21 +160,19 @@ async function main() {
     console.log(`${label} compiled=${compiledEmoji}   renders=${rendersEmoji}${nf}${re}   wgsl=${wgslEmoji}${wgslMsg}`)
   }
 
-  const compiledCount = results.filter(r => r.compiled).length
-  const rendersCount = results.filter(r => r.renders).length
+  const compiledCount = results.filter((r) => r.compiled).length
+  const rendersCount = results.filter((r) => r.renders).length
   const total = results.length
   console.log(`\ncompiled:${compiledCount}/${total}, renders:${rendersCount}/${total}`)
 
-  const failures = results.filter(r => !r.compiled || !r.renders || !r.wgslValid)
+  const failures = results.filter((r) => !r.compiled || !r.renders || !r.wgslValid)
   if (failures.length > 0) {
     console.error(`\nFAILED:${failures.length}/${total}`)
     process.exitCode = 1
   }
 }
 
-if (
-  import.meta.url === `file://${process.cwd()}/test/customFunctionRenderabilityTests.mjs`
-) {
+if (import.meta.url === `file://${process.cwd()}/test/customFunctionRenderabilityTests.mjs`) {
   main()
 } else {
   main()

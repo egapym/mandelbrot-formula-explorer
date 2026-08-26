@@ -395,7 +395,7 @@ async function runSampling(opts) {
       let x2, y2
       if (compiledIter) {
         try {
-          const res = compiledIter(zx, zy, cr, ci)
+          const res = compiledIter(zx, zy, cr, ci, iter)
           x2 = Number(res[0])
           y2 = Number(res[1])
         } catch (_e) {

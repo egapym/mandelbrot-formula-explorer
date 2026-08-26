@@ -17,8 +17,31 @@ const NUMERIC_CONFIG = {
   POOL_SIZE: 2, // Float64Array プール数
 }
 
+const NUMBER_LITERAL_PATTERN = /^-?(?:\d+\.\d*|\d*\.\d+|\d+)(?:[eE][+-]?\d+)?$/
+
 // 再コンパイルを避けるためのキャッシュ
 export const functionCache = new Map()
+
+function splitTopLevelArgs(s) {
+  const args = []
+  let depth = 0
+  let start = 0
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i]
+    if (ch === '(' || ch === '[') depth++
+    else if (ch === ')' || ch === ']') depth--
+    else if (ch === ',' && depth === 0) {
+      args.push(s.substring(start, i).trim())
+      start = i + 1
+    }
+  }
+  if (start < s.length) args.push(s.substring(start).trim())
+  return args.filter((arg) => arg.length > 0)
+}
+
+function buildScalarFunctionCall(functionName, converted) {
+  return `[${functionName}(${converted}), 0]`
+}
 
 // 高速判定用のパターン対応表
 const patternMap = new Map([
@@ -190,14 +213,55 @@ export function compileIterationFunction(functionStr) {
             const complexSin = (a) => [Math.sin(a[0]) * Math.cosh(a[1]), Math.cos(a[0]) * Math.sinh(a[1])];
             const complexCos = (a) => [Math.cos(a[0]) * Math.cosh(a[1]), -Math.sin(a[0]) * Math.sinh(a[1])];
             const complexTan = (a) => complexDivide(complexSin(a), complexCos(a));
-
+            const complexSinh = (a) => [Math.sinh(a[0]) * Math.cos(a[1]), Math.cosh(a[0]) * Math.sin(a[1])];
+            const complexCosh = (a) => [Math.cosh(a[0]) * Math.cos(a[1]), Math.sinh(a[0]) * Math.sin(a[1])];
+            const complexTanh = (a) => complexDivide(complexSinh(a), complexCosh(a));
+            const complexScalar = (a) => Array.isArray(a) || a instanceof Float64Array ? a[0] : a;
+            const complexArg = (a) => Math.atan2(a[1] ?? 0, a[0] ?? a);
+            const complexAbs2 = (a) => {
+              const x = Array.isArray(a) || a instanceof Float64Array ? a[0] : a;
+              const y = Array.isArray(a) || a instanceof Float64Array ? a[1] : 0;
+              return x * x + y * y;
+            };
+            const complexFloor = (a) => [Math.floor(a[0]), Math.floor(a[1])];
+            const complexFract = (a) => [a[0] - Math.floor(a[0]), a[1] - Math.floor(a[1])];
+            const safeMod = (x, y) => y === 0 ? 0 : x - y * Math.floor(x / y);
+            const complexMod = (a, b) => {
+              const bx = Array.isArray(b) || b instanceof Float64Array ? b[0] : b;
+              const by = Array.isArray(b) || b instanceof Float64Array ? b[1] : bx;
+              return [safeMod(a[0], bx), safeMod(a[1], by)];
+            };
+            const complexMin = (a, b) => {
+              const bx = Array.isArray(b) || b instanceof Float64Array ? b[0] : b;
+              const by = Array.isArray(b) || b instanceof Float64Array ? b[1] : bx;
+              return [Math.min(a[0], bx), Math.min(a[1], by)];
+            };
+            const complexMax = (a, b) => {
+              const bx = Array.isArray(b) || b instanceof Float64Array ? b[0] : b;
+              const by = Array.isArray(b) || b instanceof Float64Array ? b[1] : bx;
+              return [Math.max(a[0], bx), Math.max(a[1], by)];
+            };
+            const complexClamp = (a, lo, hi) => complexMin(complexMax(a, lo), hi);
+            const complexRotate = (a, angle) => {
+              const theta = complexScalar(angle);
+              const cs = Math.cos(theta);
+              const sn = Math.sin(theta);
+              return [a[0] * cs - a[1] * sn, a[0] * sn + a[1] * cs];
+            };
+            const complexFold = (a) => [Math.abs(a[0]), Math.abs(a[1])];
+            const complexBoxFold = (a, radius) => {
+              const r = Math.abs(complexScalar(radius));
+              const foldValue = (v) => v > r ? 2 * r - v : v < -r ? -2 * r - v : v;
+              return [foldValue(a[0]), foldValue(a[1])];
+            };
             const z = [zReal, zImag];
             const c = [cReal, cImag];
+            const iterIndex = Number.isFinite(n) ? n : 0;
 
             ${jsCode}
         `
 
-    const compiledFunc = new Function('zReal', 'zImag', 'cReal', 'cImag', functionBody)
+    const compiledFunc = new Function('zReal', 'zImag', 'cReal', 'cImag', 'n', functionBody)
 
     // 生成した関数が数値ペアを返すか簡単に確認する
     try {
@@ -382,14 +446,55 @@ function createOptimizedFunction(expr) {
             const complexSin = (a) => [Math.sin(a[0]) * Math.cosh(a[1]), Math.cos(a[0]) * Math.sinh(a[1])];
             const complexCos = (a) => [Math.cos(a[0]) * Math.cosh(a[1]), -Math.sin(a[0]) * Math.sinh(a[1])];
             const complexTan = (a) => complexDivide(complexSin(a), complexCos(a));
-
+            const complexSinh = (a) => [Math.sinh(a[0]) * Math.cos(a[1]), Math.cosh(a[0]) * Math.sin(a[1])];
+            const complexCosh = (a) => [Math.cosh(a[0]) * Math.cos(a[1]), Math.sinh(a[0]) * Math.sin(a[1])];
+            const complexTanh = (a) => complexDivide(complexSinh(a), complexCosh(a));
+            const complexScalar = (a) => Array.isArray(a) || a instanceof Float64Array ? a[0] : a;
+            const complexArg = (a) => Math.atan2(a[1] ?? 0, a[0] ?? a);
+            const complexAbs2 = (a) => {
+              const x = Array.isArray(a) || a instanceof Float64Array ? a[0] : a;
+              const y = Array.isArray(a) || a instanceof Float64Array ? a[1] : 0;
+              return x * x + y * y;
+            };
+            const complexFloor = (a) => [Math.floor(a[0]), Math.floor(a[1])];
+            const complexFract = (a) => [a[0] - Math.floor(a[0]), a[1] - Math.floor(a[1])];
+            const safeMod = (x, y) => y === 0 ? 0 : x - y * Math.floor(x / y);
+            const complexMod = (a, b) => {
+              const bx = Array.isArray(b) || b instanceof Float64Array ? b[0] : b;
+              const by = Array.isArray(b) || b instanceof Float64Array ? b[1] : bx;
+              return [safeMod(a[0], bx), safeMod(a[1], by)];
+            };
+            const complexMin = (a, b) => {
+              const bx = Array.isArray(b) || b instanceof Float64Array ? b[0] : b;
+              const by = Array.isArray(b) || b instanceof Float64Array ? b[1] : bx;
+              return [Math.min(a[0], bx), Math.min(a[1], by)];
+            };
+            const complexMax = (a, b) => {
+              const bx = Array.isArray(b) || b instanceof Float64Array ? b[0] : b;
+              const by = Array.isArray(b) || b instanceof Float64Array ? b[1] : bx;
+              return [Math.max(a[0], bx), Math.max(a[1], by)];
+            };
+            const complexClamp = (a, lo, hi) => complexMin(complexMax(a, lo), hi);
+            const complexRotate = (a, angle) => {
+              const theta = complexScalar(angle);
+              const cs = Math.cos(theta);
+              const sn = Math.sin(theta);
+              return [a[0] * cs - a[1] * sn, a[0] * sn + a[1] * cs];
+            };
+            const complexFold = (a) => [Math.abs(a[0]), Math.abs(a[1])];
+            const complexBoxFold = (a, radius) => {
+              const r = Math.abs(complexScalar(radius));
+              const foldValue = (v) => v > r ? 2 * r - v : v < -r ? -2 * r - v : v;
+              return [foldValue(a[0]), foldValue(a[1])];
+            };
             const z = [zReal, zImag];
             const c = [cReal, cImag];
+            const iterIndex = Number.isFinite(n) ? n : 0;
 
             ${optimizedCode}
         `
 
-    const compiledFunc = new Function('zReal', 'zImag', 'cReal', 'cImag', functionBody)
+    const compiledFunc = new Function('zReal', 'zImag', 'cReal', 'cImag', 'n', functionBody)
 
     // 関数をテストする
     const testResult = compiledFunc(0, 0, 0, 0)
@@ -417,7 +522,9 @@ function analyzeComplexity(expr) {
   let complexity = 0
 
   // Count function calls
-  const funcMatches = expr.match(/\b(sin|cos|tan|exp|log|ln|sqrt|conj|Re|Im|abs)\s*\(/g)
+  const funcMatches = expr.match(
+    /\b(sin|cos|tan|sinh|cosh|tanh|exp|log|ln|sqrt|conj|Re|Im|abs|arg|abs2|floor|fract|mod|min|max|clamp|rotate|fold|boxFold)\s*\(/g,
+  )
   if (funcMatches) complexity += funcMatches.length * 2
 
   // 演算子をカウント
@@ -463,6 +570,7 @@ function parseExpression(expr) {
   // 単独の i は複素数 [0,1] として扱う
   // これを早めに処理することで exp(i) などが complexExp([0,1]) になる
   code = code.replace(/\bi\b/g, '[0, 1]')
+  code = code.replace(/\bn\b/g, '[iterIndex, 0]')
 
   // power 処理は convertGenericExpression 側で行う
   code = code.replace(/\bc\b/g, '[cReal, cImag]')
@@ -506,8 +614,9 @@ function parseExpression(expr) {
         continue
       }
       const inner = str.substring(start, end).trim()
-      const converted = convertGenericExpression(inner)
-      const replacement = replacer(converted)
+      const args = splitTopLevelArgs(inner)
+      const convertedArgs = args.map((arg) => convertGenericExpression(arg))
+      const replacement = replacer(convertedArgs[0] ?? convertGenericExpression(inner), convertedArgs, args)
       str = str.substring(0, idx) + replacement + str.substring(end + 1)
       i = idx + replacement.length
     }
@@ -520,14 +629,47 @@ function parseExpression(expr) {
   // Re/Im は実数スカラーとして扱う。
   // 例: Re(z) + i*Im(z) が元の z と同じ向きになるようにする。
   const fnReplacers = [
-    ['Re', (converted) => `[complexRe(${converted}), 0]`],
-    ['Im', (converted) => `[complexIm(${converted}), 0]`],
+    ['Re', (converted) => buildScalarFunctionCall('complexRe', converted)],
+    ['Im', (converted) => buildScalarFunctionCall('complexIm', converted)],
+    ['arg', (converted) => buildScalarFunctionCall('complexArg', converted)],
+    ['abs2', (converted) => buildScalarFunctionCall('complexAbs2', converted)],
     ['conj', (converted) => `complexConj(${converted})`],
     ['exp', (converted) => `complexExp(${converted})`],
     ['sin', (converted) => `complexSin(${converted})`],
     ['tan', (converted) => `complexTan(${converted})`],
     ['cos', (converted) => `complexCos(${converted})`],
+    ['sinh', (converted) => `complexSinh(${converted})`],
+    ['cosh', (converted) => `complexCosh(${converted})`],
+    ['tanh', (converted) => `complexTanh(${converted})`],
     ['sqrt', (converted) => `complexSqrt(${converted})`],
+    ['floor', (converted) => `complexFloor(${converted})`],
+    ['fract', (converted) => `complexFract(${converted})`],
+    [
+      'mod',
+      (_converted, convertedArgs) => `complexMod(${convertedArgs[0] ?? '[0, 0]'}, ${convertedArgs[1] ?? '[1, 0]'})`,
+    ],
+    [
+      'min',
+      (_converted, convertedArgs) => `complexMin(${convertedArgs[0] ?? '[0, 0]'}, ${convertedArgs[1] ?? '[0, 0]'})`,
+    ],
+    [
+      'max',
+      (_converted, convertedArgs) => `complexMax(${convertedArgs[0] ?? '[0, 0]'}, ${convertedArgs[1] ?? '[0, 0]'})`,
+    ],
+    [
+      'clamp',
+      (_converted, convertedArgs) =>
+        `complexClamp(${convertedArgs[0] ?? '[0, 0]'}, ${convertedArgs[1] ?? '[0, 0]'}, ${convertedArgs[2] ?? '[1, 0]'})`,
+    ],
+    [
+      'rotate',
+      (_converted, convertedArgs) => `complexRotate(${convertedArgs[0] ?? '[0, 0]'}, ${convertedArgs[1] ?? '[0, 0]'})`,
+    ],
+    [
+      'boxFold',
+      (_converted, convertedArgs) => `complexBoxFold(${convertedArgs[0] ?? '[0, 0]'}, ${convertedArgs[1] ?? '[1, 0]'})`,
+    ],
+    ['fold', (converted) => `complexFold(${converted})`],
     ['log', (converted) => `complexLog10(${converted})`],
     ['ln', (converted) => `complexLog(${converted})`],
   ]
@@ -725,7 +867,7 @@ function convertGenericExpression(expr) {
           const convertedBase = convertGenericExpression(base)
           // 指数が単純な数値リテラルか確認
           let convertedExponent
-          if (/^-?\d+(\.\d+)?$/.test(exponentRaw)) {
+          if (NUMBER_LITERAL_PATTERN.test(exponentRaw)) {
             // 単純な数値ならそのまま渡して最適化
             convertedExponent = exponentRaw
           } else {
@@ -808,7 +950,7 @@ function convertGenericExpression(expr) {
   }
 
   // 数値リテラルを複素数 [n, 0] に変換
-  if (/^-?\d+(\.\d+)?$/.test(expr)) {
+  if (NUMBER_LITERAL_PATTERN.test(expr)) {
     return `[${expr}, 0]`
   }
 

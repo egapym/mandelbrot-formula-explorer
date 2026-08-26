@@ -413,10 +413,22 @@ function astToWGSL(node, tokensTable) {
     return { kind: 'vec2', expr, x: nx, y: ny }
   }
 
+  function scalarFromNode(n) {
+    return comp(n, 'x')
+  }
+
+  function safeModExpr(value, divisor) {
+    const hasDivisor = `abs(${divisor}) > ${SAFE_EPS}`
+    const d = `select(select(-${SAFE_EPS}, ${SAFE_EPS}, ${divisor} >= 0.0), ${divisor}, ${hasDivisor})`
+    const remainder = `(${value}) - (${d}) * floor((${value}) / (${d}))`
+    return `select(0.0, ${remainder}, ${hasDivisor})`
+  }
+
   if (node.type === 'number') return { expr: safeNumberLiteral(node.value), kind: 'scalar' }
   if (node.type === 'ident') {
     const n = node.name
     if (n === 'z' || n === 'c') return { expr: n, kind: 'vec2' }
+    if (n === 'n') return { expr: 'n', kind: 'scalar' }
     return { expr: n, kind: 'scalar' }
   }
   // AST レベルの CSE が導入した一時ノード
@@ -552,6 +564,126 @@ function astToWGSL(node, tokensTable) {
         const a = argNodes[0]
         const full = a.kind === 'vec2' ? a.expr : `vec2<f32>(${a.expr}, 0.0)`
         return { expr: `length(${full})`, kind: 'scalar' }
+      }
+      case 'complexArg': {
+        const a = argNodes[0]
+        return { expr: `atan2(${comp(a, 'y')}, ${comp(a, 'x')})`, kind: 'scalar' }
+      }
+      case 'complexAbs2': {
+        const a = argNodes[0]
+        const x = comp(a, 'x')
+        const y = comp(a, 'y')
+        return { expr: `((${x}) * (${x}) + (${y}) * (${y}))`, kind: 'scalar' }
+      }
+      case 'complexSinh': {
+        const a = argNodes[0]
+        return makeVec2FromChildren(
+          { expr: `sinh(${comp(a, 'x')}) * cos(${comp(a, 'y')})`, kind: 'scalar' },
+          { expr: `cosh(${comp(a, 'x')}) * sin(${comp(a, 'y')})`, kind: 'scalar' },
+        )
+      }
+      case 'complexCosh': {
+        const a = argNodes[0]
+        return makeVec2FromChildren(
+          { expr: `cosh(${comp(a, 'x')}) * cos(${comp(a, 'y')})`, kind: 'scalar' },
+          { expr: `sinh(${comp(a, 'x')}) * sin(${comp(a, 'y')})`, kind: 'scalar' },
+        )
+      }
+      case 'complexTanh': {
+        const a = argNodes[0]
+        const sx = `sinh(${comp(a, 'x')}) * cos(${comp(a, 'y')})`
+        const sy = `cosh(${comp(a, 'x')}) * sin(${comp(a, 'y')})`
+        const cx = `cosh(${comp(a, 'x')}) * cos(${comp(a, 'y')})`
+        const cy = `sinh(${comp(a, 'x')}) * sin(${comp(a, 'y')})`
+        const denom = `max((${cx}) * (${cx}) + (${cy}) * (${cy}), ${SAFE_EPS})`
+        return makeVec2FromChildren(
+          { expr: `((${sx}) * (${cx}) + (${sy}) * (${cy})) / ${denom}`, kind: 'scalar' },
+          { expr: `((${sy}) * (${cx}) - (${sx}) * (${cy})) / ${denom}`, kind: 'scalar' },
+        )
+      }
+      case 'complexFloor': {
+        const a = argNodes[0]
+        return makeVec2FromChildren(
+          { expr: `floor(${comp(a, 'x')})`, kind: 'scalar' },
+          { expr: `floor(${comp(a, 'y')})`, kind: 'scalar' },
+        )
+      }
+      case 'complexFract': {
+        const a = argNodes[0]
+        return makeVec2FromChildren(
+          { expr: `fract(${comp(a, 'x')})`, kind: 'scalar' },
+          { expr: `fract(${comp(a, 'y')})`, kind: 'scalar' },
+        )
+      }
+      case 'complexMod': {
+        const a = argNodes[0]
+        const b = argNodes[1]
+        const bx = scalarFromNode(b)
+        const by = b?.kind === 'vec2' ? comp(b, 'y') : bx
+        return makeVec2FromChildren(
+          { expr: safeModExpr(comp(a, 'x'), bx), kind: 'scalar' },
+          { expr: safeModExpr(comp(a, 'y'), by), kind: 'scalar' },
+        )
+      }
+      case 'complexMin': {
+        const a = argNodes[0]
+        const b = argNodes[1]
+        const bx = scalarFromNode(b)
+        const by = b?.kind === 'vec2' ? comp(b, 'y') : bx
+        return makeVec2FromChildren(
+          { expr: `min(${comp(a, 'x')}, ${bx})`, kind: 'scalar' },
+          { expr: `min(${comp(a, 'y')}, ${by})`, kind: 'scalar' },
+        )
+      }
+      case 'complexMax': {
+        const a = argNodes[0]
+        const b = argNodes[1]
+        const bx = scalarFromNode(b)
+        const by = b?.kind === 'vec2' ? comp(b, 'y') : bx
+        return makeVec2FromChildren(
+          { expr: `max(${comp(a, 'x')}, ${bx})`, kind: 'scalar' },
+          { expr: `max(${comp(a, 'y')}, ${by})`, kind: 'scalar' },
+        )
+      }
+      case 'complexClamp': {
+        const a = argNodes[0]
+        const lo = argNodes[1]
+        const hi = argNodes[2]
+        const lox = scalarFromNode(lo)
+        const loy = lo?.kind === 'vec2' ? comp(lo, 'y') : lox
+        const hix = scalarFromNode(hi)
+        const hiy = hi?.kind === 'vec2' ? comp(hi, 'y') : hix
+        return makeVec2FromChildren(
+          { expr: `clamp(${comp(a, 'x')}, ${lox}, ${hix})`, kind: 'scalar' },
+          { expr: `clamp(${comp(a, 'y')}, ${loy}, ${hiy})`, kind: 'scalar' },
+        )
+      }
+      case 'complexRotate': {
+        const a = argNodes[0]
+        const angle = scalarFromNode(argNodes[1])
+        const cs = `cos(${angle})`
+        const sn = `sin(${angle})`
+        return makeVec2FromChildren(
+          { expr: `(${comp(a, 'x')}) * (${cs}) - (${comp(a, 'y')}) * (${sn})`, kind: 'scalar' },
+          { expr: `(${comp(a, 'x')}) * (${sn}) + (${comp(a, 'y')}) * (${cs})`, kind: 'scalar' },
+        )
+      }
+      case 'complexFold': {
+        const a = argNodes[0]
+        return makeVec2FromChildren(
+          { expr: `abs(${comp(a, 'x')})`, kind: 'scalar' },
+          { expr: `abs(${comp(a, 'y')})`, kind: 'scalar' },
+        )
+      }
+      case 'complexBoxFold': {
+        const a = argNodes[0]
+        const radius = `abs(${scalarFromNode(argNodes[1])})`
+        const fold = (value) =>
+          `select(select(${value}, -2.0 * (${radius}) - (${value}), (${value}) < -(${radius})), 2.0 * (${radius}) - (${value}), (${value}) > (${radius}))`
+        return makeVec2FromChildren(
+          { expr: fold(comp(a, 'x')), kind: 'scalar' },
+          { expr: fold(comp(a, 'y')), kind: 'scalar' },
+        )
       }
       case 'complexCos': {
         const aNode = node.args?.[0]
@@ -1174,6 +1306,7 @@ export function jsExprToWGSL_ast(expr) {
   // parser 固有名を WGSL の成分参照へそろえる
   s = s.replace(/\bcReal\b/g, 'c.x').replace(/\bcImag\b/g, 'c.y')
   s = s.replace(/\bzReal\b/g, 'z.x').replace(/\bzImag\b/g, 'z.y')
+  s = s.replace(/\biterIndex\b/g, 'n')
 
   // 添字アクセスでない配列リテラル [a,b] を (a, b) へ変換する。
   // parseExprFromString はこれを tuple として扱い、後で vec2 化する。
@@ -1815,6 +1948,7 @@ function validateVariables(expr) {
     // 変数
     'z',
     'c',
+    'n',
     // プロパティ
     'x',
     'y',
@@ -1839,6 +1973,7 @@ function validateVariables(expr) {
     'max',
     'clamp',
     'floor',
+    'fract',
     'ceil',
     'round',
     'sign',
@@ -1859,11 +1994,22 @@ function validateVariables(expr) {
     'complexSin',
     'complexCos',
     'complexTan',
-    'complexRe',
-    'complexIm',
     'complexSinh',
     'complexCosh',
     'complexTanh',
+    'complexArg',
+    'complexAbs2',
+    'complexFloor',
+    'complexFract',
+    'complexMod',
+    'complexMin',
+    'complexMax',
+    'complexClamp',
+    'complexRotate',
+    'complexFold',
+    'complexBoxFold',
+    'complexRe',
+    'complexIm',
     'complexAbs',
     'complexConj',
     'complexSqrt',
@@ -1886,7 +2032,7 @@ function validateVariables(expr) {
   if (invalidVars.length > 0) {
     throw new Error(
       `Invalid variable(s) in expression: "${invalidVars.join('", "')}".\n` +
-        `Only "z" and "c" are valid variables. Did you mean to use a function or property?\n` +
+        `Only "z", "c", and "n" are valid variables. Did you mean to use a function or property?\n` +
         `Example: z^2 + c (not zz + c)`,
     )
   }

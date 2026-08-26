@@ -530,11 +530,17 @@ struct IterResult {
 // signValue: 0=in-set, 1=same sign at escape, 2=different sign at escape
 fn iterate(z_init: vec2<f32>, c: vec2<f32>) -> IterResult {
   var z = z_init;
-  var iter: u32 = 0u;
+  var iter: i32 = -1;
   var zq: f32 = z.x * z.x + z.y * z.y;
 
-  while (iter < spec.max_iter && zq <= spec.bailout) {
+  while (zq <= spec.bailout) {
+    iter = iter + 1;
+    if (iter == i32(spec.max_iter)) {
+      return IterResult(${SHADER_CONSTANTS.IN_SET_INDEX}u, 0u, 0u, 0.0, 0.0);
+    }
+
     // Custom iteration expression
+    let n = f32(iter);
     let z_next = ${iterationExpr};
 
     // Robust NaN/Inf validation (WGSL doesn't have isFinite, use self-equality for NaN check)
@@ -548,12 +554,6 @@ fn iterate(z_init: vec2<f32>, c: vec2<f32>) -> IterResult {
 
     z = z_next;
     zq = z.x * z.x + z.y * z.y;
-    iter = iter + 1u;
-  }
-
-  // If we hit max_iter, point is in the set
-  if (iter >= spec.max_iter) {
-    return IterResult(${SHADER_CONSTANTS.IN_SET_INDEX}u, 0u, 0u, 0.0, 0.0);
   }
 
   // Compute sign of z at escape point
@@ -565,18 +565,18 @@ fn iterate(z_init: vec2<f32>, c: vec2<f32>) -> IterResult {
       ? `
   // Smooth coloring - use normalized iteration count
   var smoothVal: u32 = 0u;
-  if (zq > 4.0) {
-    var nu = log2(log2(zq)) - 1.0;
-    var modf_result = modf(nu);
-    iter = iter - u32(modf_result.whole);
-    smoothVal = u32(${SHADER_CONSTANTS.SMOOTH_SCALE} * (1.0 - modf_result.fract));
+  if (iter >= 0 && zq > 4.0) {
+    let nu = log2(log2(zq)) - 1.0;
+    let nuFloor = floor(nu);
+    iter = i32(floor(f32(iter) + 1.0 - nu));
+    smoothVal = u32(floor(${SHADER_CONSTANTS.SMOOTH_SCALE} - ${SHADER_CONSTANTS.SMOOTH_SCALE} * (nu - nuFloor)));
   }
 
-  return IterResult(iter + ${SHADER_CONSTANTS.ESCAPE_OFFSET}u, smoothVal, signVal, z.x, z.y);
+  return IterResult(u32(iter + ${SHADER_CONSTANTS.ESCAPE_OFFSET}), smoothVal, signVal, z.x, z.y);
   `
       : `
   // No smooth coloring - return iteration count directly
-  return IterResult(iter + ${SHADER_CONSTANTS.ESCAPE_OFFSET}u, 0u, signVal, z.x, z.y);
+  return IterResult(u32(iter + ${SHADER_CONSTANTS.ESCAPE_OFFSET}), 0u, signVal, z.x, z.y);
   `
   }
 }

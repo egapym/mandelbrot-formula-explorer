@@ -144,11 +144,11 @@
                   type="text"
                   class="form-control form-control-sm py-0"
                   placeholder="e.g., z*z + c"
-                  value="z*z + c"
-                  style="font-family: monospace"
-                  title="Custom iteration function. Available: z, c, i, |x|, Re(x), Im(x), conj(x), exp(x), sin(x), cos(x), sqrt(x), log(x), pi, e, ^. Press Enter to apply."
-                />
-              </div>
+	                  value="z*z + c"
+	                  style="font-family: monospace"
+	                  title="Custom iteration function. Click the help button below for available symbols, meanings, and examples. Press Enter to apply."
+	                />
+	              </div>
               <div style="width: 170px; margin-left: 8px">
                 <label
                   class="col-form-label col col-sm-6 py-0"
@@ -178,16 +178,18 @@
               </div>
             </div>
           </div>
-          <div class="mb-2 row">
-            <div class="col col-sm-12">
-              <small class="form-text text-muted" style="font-size: 0.7rem">
-                How to use the iteration function:
-                <br />
-                z (current), c (constant), i (imaginary unit), |x| (absolute), Re(x), Im(x), conj(x), exp(x), sin(x),
-                cos(x), tan(x), sqrt(x), log(x), ln(x), pi, e, +, -, *, /, ^ (power), ()
-              </small>
-            </div>
-          </div>
+	          <div class="mb-2 row">
+	            <div class="col col-sm-12">
+	              <button
+	                type="button"
+	                class="btn btn-outline-secondary btn-sm py-0"
+	                data-bs-toggle="modal"
+	                data-bs-target="#iteration-function-help-modal"
+	              >
+	                How to use the iteration function
+	              </button>
+	            </div>
+	          </div>
           <div class="mb-2 row">
             <div class="col col-sm-6">
               <label for="max-iterations" class="col-form-label col col-sm-6 py-0">Max iterations</label>
@@ -226,12 +228,12 @@
     <div class="col-6">
       <label for="ot-mode" class="col-form-label py-0" style="font-size:0.8em">Mode</label>
       <select id="ot-mode" class="form-select form-select-sm py-0" title="データ収集モードを選択">
-        <option value="distance_closest">Distance Closest (最近接)</option>
-        <option value="distance_farthest">Distance Farthest (最遠)</option>
-        <option value="distance_average">Distance Average (平均)</option>
-        <option value="capture_first">Capture First (初回捕捉)</option>
-        <option value="tia">TIA (三角不等式平均)</option>
-        <option value="capture_step">N-th Step (N番目の反復)</option>
+        <option value="distance_closest">Distance Closest</option>
+        <option value="distance_farthest">Distance Farthest</option>
+        <option value="distance_average">Distance Average</option>
+        <option value="capture_first">Capture First</option>
+        <option value="tia">TIA</option>
+        <option value="capture_step">N-th Step</option>
       </select>
     </div>
     <div class="col-6" id="ot-shape-group">
@@ -924,10 +926,202 @@
         </div>
       </div>
 
-      <!-- popup element used to show hover details (positioned absolutely) -->
-      <div id="detail-popup" hidden></div>
-      <script type="module" src="./index.js"></script>
-      <script src="bootstrap.bundle.min.js"></script>
+	      <!-- popup element used to show hover details (positioned absolutely) -->
+	      <div id="detail-popup" hidden></div>
+
+	      <div
+	        class="modal fade"
+	        id="iteration-function-help-modal"
+	        tabindex="-1"
+	        aria-labelledby="iteration-function-help-title"
+	        aria-hidden="true"
+	      >
+	        <div class="modal-dialog modal-lg modal-dialog-scrollable">
+	          <div class="modal-content">
+	            <div class="modal-header">
+	              <h5 class="modal-title" id="iteration-function-help-title">How to use the iteration function</h5>
+	              <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+	            </div>
+	            <div class="modal-body">
+	              <p class="small text-muted mb-3">
+	                Enter the next value of z for each iteration. For example, the standard Mandelbrot set is
+	                <code>z*z + c</code>.
+	              </p>
+
+	              <div class="table-responsive">
+	                <table class="table table-sm align-middle">
+	                  <thead>
+	                    <tr>
+	                      <th scope="col">Expression</th>
+	                      <th scope="col">Meaning</th>
+	                      <th scope="col">Example</th>
+	                    </tr>
+	                  </thead>
+	                  <tbody>
+	                    <tr>
+	                      <td><code>z</code></td>
+	                      <td>Current complex value being iterated.</td>
+	                      <td><code>z*z + c</code></td>
+	                    </tr>
+	                    <tr>
+	                      <td><code>c</code></td>
+	                      <td>Constant complex value from the pixel position, or the Julia constant in Julia mode.</td>
+	                      <td><code>z*z + 0.5*c</code></td>
+	                    </tr>
+	                    <tr>
+	                      <td><code>n</code></td>
+	                      <td>Current iteration index as a real value.</td>
+	                      <td><code>z*z + c + 0.01*sin(n*z)</code></td>
+	                    </tr>
+	                    <tr>
+	                      <td><code>i</code></td>
+	                      <td>Imaginary unit.</td>
+	                      <td><code>z*z + i*c</code></td>
+	                    </tr>
+	                    <tr>
+	                      <td><code>pi</code>, <code>e</code></td>
+	                      <td>Mathematical constants.</td>
+	                      <td><code>rotate(z*z, pi/6) + c/e</code></td>
+	                    </tr>
+	                    <tr>
+	                      <td><code>+ - * / ^</code>, <code>()</code></td>
+	                      <td>Arithmetic operators, power, and grouping.</td>
+	                      <td><code>z^3 - 0.2*z + c</code></td>
+	                    </tr>
+	                    <tr>
+	                      <td><code>|x|</code></td>
+	                      <td>Complex magnitude returned as a real value.</td>
+	                      <td><code>z*z + c/(1+|z|)</code></td>
+	                    </tr>
+	                    <tr>
+	                      <td><code>Re(x)</code></td>
+	                      <td>Real part of a complex value.</td>
+	                      <td><code>Re(z)^2 + i*Im(z) + c</code></td>
+	                    </tr>
+	                    <tr>
+	                      <td><code>Im(x)</code></td>
+	                      <td>Imaginary part of a complex value.</td>
+	                      <td><code>Re(z) + i*Im(z)^2 + c</code></td>
+	                    </tr>
+	                    <tr>
+	                      <td><code>arg(x)</code></td>
+	                      <td>Angle of a complex value in radians.</td>
+	                      <td><code>z*z + c + 0.1*arg(z+c)</code></td>
+	                    </tr>
+	                    <tr>
+	                      <td><code>abs2(x)</code></td>
+	                      <td>Squared magnitude, useful for damping without a square root.</td>
+	                      <td><code>z*z + c/(1+abs2(z))</code></td>
+	                    </tr>
+	                    <tr>
+	                      <td><code>conj(x)</code></td>
+	                      <td>Complex conjugate.</td>
+	                      <td><code>conj(z)^2 + c</code></td>
+	                    </tr>
+	                    <tr>
+	                      <td><code>exp(x)</code></td>
+	                      <td>Complex exponential.</td>
+	                      <td><code>exp(0.45*z) + c</code></td>
+	                    </tr>
+	                    <tr>
+	                      <td><code>sin(x)</code></td>
+	                      <td>Complex sine.</td>
+	                      <td><code>sin(z) + c</code></td>
+	                    </tr>
+	                    <tr>
+	                      <td><code>cos(x)</code></td>
+	                      <td>Complex cosine.</td>
+	                      <td><code>cos(z) + c</code></td>
+	                    </tr>
+	                    <tr>
+	                      <td><code>tan(x)</code></td>
+	                      <td>Complex tangent.</td>
+	                      <td><code>tan(0.5*z) + c</code></td>
+	                    </tr>
+	                    <tr>
+	                      <td><code>sinh(x)</code></td>
+	                      <td>Complex hyperbolic sine.</td>
+	                      <td><code>sinh(0.4*z) + c</code></td>
+	                    </tr>
+	                    <tr>
+	                      <td><code>cosh(x)</code></td>
+	                      <td>Complex hyperbolic cosine.</td>
+	                      <td><code>cosh(0.25*z) + c</code></td>
+	                    </tr>
+	                    <tr>
+	                      <td><code>tanh(x)</code></td>
+	                      <td>Complex hyperbolic tangent.</td>
+	                      <td><code>tanh(z*z) + c</code></td>
+	                    </tr>
+	                    <tr>
+	                      <td><code>sqrt(x)</code></td>
+	                      <td>Principal complex square root.</td>
+	                      <td><code>sqrt(z*z + c) + c</code></td>
+	                    </tr>
+	                    <tr>
+	                      <td><code>log(x)</code></td>
+	                      <td>Base-10 complex logarithm.</td>
+	                      <td><code>z*z + 0.2*log(z+c)</code></td>
+	                    </tr>
+	                    <tr>
+	                      <td><code>ln(x)</code></td>
+	                      <td>Natural complex logarithm.</td>
+	                      <td><code>z*z + 0.1*ln(z+c)</code></td>
+	                    </tr>
+	                    <tr>
+	                      <td><code>floor(x)</code></td>
+	                      <td>Floor the real and imaginary parts separately.</td>
+	                      <td><code>0.25*floor(4*z) + c</code></td>
+	                    </tr>
+	                    <tr>
+	                      <td><code>fract(x)</code></td>
+	                      <td>Fractional part of the real and imaginary parts.</td>
+	                      <td><code>fract(z*z) + c</code></td>
+	                    </tr>
+	                    <tr>
+	                      <td><code>mod(x,y)</code></td>
+	                      <td>Component-wise modulo.</td>
+	                      <td><code>mod(z*z, 1) + c</code></td>
+	                    </tr>
+	                    <tr>
+	                      <td><code>min(x,y)</code></td>
+	                      <td>Component-wise minimum.</td>
+	                      <td><code>min(z*z, 1) + c</code></td>
+	                    </tr>
+	                    <tr>
+	                      <td><code>max(x,y)</code></td>
+	                      <td>Component-wise maximum.</td>
+	                      <td><code>max(z*z, -1) + c</code></td>
+	                    </tr>
+	                    <tr>
+	                      <td><code>clamp(x,a,b)</code></td>
+	                      <td>Clamp each component between lower bound a and upper bound b.</td>
+	                      <td><code>clamp(z, -1, 1)^2 + c</code></td>
+	                    </tr>
+	                    <tr>
+	                      <td><code>rotate(x,a)</code></td>
+	                      <td>Rotate a complex value by angle a radians.</td>
+	                      <td><code>rotate(z*z, 0.4) + c</code></td>
+	                    </tr>
+	                    <tr>
+	                      <td><code>fold(x)</code></td>
+	                      <td>Mirror into the first quadrant by taking absolute real and imaginary parts.</td>
+	                      <td><code>fold(z)^2 + c</code></td>
+	                    </tr>
+	                    <tr>
+	                      <td><code>boxFold(x,r)</code></td>
+	                      <td>Fold values outside the box radius r back toward the center.</td>
+	                      <td><code>boxFold(z, 1.2)^2 + c</code></td>
+	                    </tr>
+	                  </tbody>
+	                </table>
+	              </div>
+	            </div>
+	          </div>
+	        </div>
+	      </div>
+	      <script type="module" src="./index.js"></script>
+	      <script src="bootstrap.bundle.min.js"></script>
     </div>
   </body>
 </html>
