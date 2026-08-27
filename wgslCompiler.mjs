@@ -659,13 +659,6 @@ function astToWGSL(node, tokensTable) {
           { expr: `((${sy}) * (${cx}) - (${sx}) * (${cy})) / ${denom}`, kind: 'scalar' },
         )
       }
-      case 'complexFloor': {
-        const a = argNodes[0]
-        return makeVec2FromChildren(
-          { expr: `floor(${comp(a, 'x')})`, kind: 'scalar' },
-          { expr: `floor(${comp(a, 'y')})`, kind: 'scalar' },
-        )
-      }
       case 'complexFract': {
         const a = argNodes[0]
         return makeVec2FromChildren(
@@ -681,39 +674,6 @@ function astToWGSL(node, tokensTable) {
         return makeVec2FromChildren(
           { expr: safeModExpr(comp(a, 'x'), bx), kind: 'scalar' },
           { expr: safeModExpr(comp(a, 'y'), by), kind: 'scalar' },
-        )
-      }
-      case 'complexMin': {
-        const a = argNodes[0]
-        const b = argNodes[1]
-        const bx = scalarFromNode(b)
-        const by = b?.kind === 'vec2' ? comp(b, 'y') : bx
-        return makeVec2FromChildren(
-          { expr: `min(${comp(a, 'x')}, ${bx})`, kind: 'scalar' },
-          { expr: `min(${comp(a, 'y')}, ${by})`, kind: 'scalar' },
-        )
-      }
-      case 'complexMax': {
-        const a = argNodes[0]
-        const b = argNodes[1]
-        const bx = scalarFromNode(b)
-        const by = b?.kind === 'vec2' ? comp(b, 'y') : bx
-        return makeVec2FromChildren(
-          { expr: `max(${comp(a, 'x')}, ${bx})`, kind: 'scalar' },
-          { expr: `max(${comp(a, 'y')}, ${by})`, kind: 'scalar' },
-        )
-      }
-      case 'complexClamp': {
-        const a = argNodes[0]
-        const lo = argNodes[1]
-        const hi = argNodes[2]
-        const lox = scalarFromNode(lo)
-        const loy = lo?.kind === 'vec2' ? comp(lo, 'y') : lox
-        const hix = scalarFromNode(hi)
-        const hiy = hi?.kind === 'vec2' ? comp(hi, 'y') : hix
-        return makeVec2FromChildren(
-          { expr: `clamp(${comp(a, 'x')}, ${lox}, ${hix})`, kind: 'scalar' },
-          { expr: `clamp(${comp(a, 'y')}, ${loy}, ${hiy})`, kind: 'scalar' },
         )
       }
       case 'complexRotate': {
@@ -2063,12 +2023,8 @@ function validateVariables(expr) {
     'complexTanh',
     'complexArg',
     'complexAbs2',
-    'complexFloor',
     'complexFract',
     'complexMod',
-    'complexMin',
-    'complexMax',
-    'complexClamp',
     'complexRotate',
     'complexFold',
     'complexBoxFold',

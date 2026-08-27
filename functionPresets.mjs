@@ -51,8 +51,6 @@ export const functionPresets = [
   { expr: 'boxFold(z, 1.2)^2 + c', label: 'boxFold reflector', z0Real: 0, z0Imag: 0 },
   { expr: 'fract(z*z) + c', label: 'fract tiling', z0Real: 0, z0Imag: 0 },
   { expr: 'mod(z*z, 1) + c', label: 'mod unit lattice', z0Real: 0, z0Imag: 0 },
-  { expr: 'clamp(z, -1, 1)^2 + c', label: 'clamp bounds', z0Real: 0, z0Imag: 0 },
-  { expr: 'max(min(z, 1), -1)^2 + c', label: 'min max bounds', z0Real: 0, z0Imag: 0 },
   { expr: 'z*z + c + 0.01*sin(n*z)', label: 'iteration ripple n', z0Real: 0, z0Imag: 0 },
 
   {

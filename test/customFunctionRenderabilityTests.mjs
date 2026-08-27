@@ -148,8 +148,24 @@ function testRiemannZetaKnownValues() {
   assert.match(jsExprToWGSL_safe(getParsedExpression('zeta(z)')), /^complexZeta\(z\)$/)
 }
 
+function testRemovedFunctionsAreUnavailable() {
+  const removedExpressions = ['floor(z) + c', 'min(z, 1) + c', 'max(z, -1) + c', 'clamp(z, -1, 1)^2 + c']
+  const originalError = console.error
+  console.error = () => {}
+
+  try {
+    for (const expr of removedExpressions) {
+      assert.throws(() => compileIterationFunction(expr), /Unsupported function/)
+      assert.throws(() => jsExprToWGSL_safe(getParsedExpression(expr)), /Unsupported function/)
+    }
+  } finally {
+    console.error = originalError
+  }
+}
+
 async function main() {
   testRiemannZetaKnownValues()
+  testRemovedFunctionsAreUnavailable()
   const results = []
   // include a couple of expressions that previously triggered GPU bugs
   results.push(testRenderability('sin(Re(z)) + i*cos(Im(z)) + c'))

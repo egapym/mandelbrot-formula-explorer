@@ -1074,11 +1074,6 @@
 	                      <td><code>zeta(z) + c</code></td>
 	                    </tr>
 	                    <tr>
-	                      <td><code>floor(x)</code></td>
-	                      <td>Floor the real and imaginary parts separately.</td>
-	                      <td><code>0.25*floor(4*z) + c</code></td>
-	                    </tr>
-	                    <tr>
 	                      <td><code>fract(x)</code></td>
 	                      <td>Fractional part of the real and imaginary parts.</td>
 	                      <td><code>fract(z*z) + c</code></td>
@@ -1087,21 +1082,6 @@
 	                      <td><code>mod(x,y)</code></td>
 	                      <td>Component-wise modulo.</td>
 	                      <td><code>mod(z*z, 1) + c</code></td>
-	                    </tr>
-	                    <tr>
-	                      <td><code>min(x,y)</code></td>
-	                      <td>Component-wise minimum.</td>
-	                      <td><code>min(z*z, 1) + c</code></td>
-	                    </tr>
-	                    <tr>
-	                      <td><code>max(x,y)</code></td>
-	                      <td>Component-wise maximum.</td>
-	                      <td><code>max(z*z, -1) + c</code></td>
-	                    </tr>
-	                    <tr>
-	                      <td><code>clamp(x,a,b)</code></td>
-	                      <td>Clamp each component between lower bound a and upper bound b.</td>
-	                      <td><code>clamp(z, -1, 1)^2 + c</code></td>
 	                    </tr>
 	                    <tr>
 	                      <td><code>rotate(x,a)</code></td>

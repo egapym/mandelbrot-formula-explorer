@@ -272,7 +272,6 @@ export function compileIterationFunction(functionStr) {
               const y = Array.isArray(a) || a instanceof Float64Array ? a[1] : 0;
               return x * x + y * y;
             };
-            const complexFloor = (a) => [Math.floor(a[0]), Math.floor(a[1])];
             const complexFract = (a) => [a[0] - Math.floor(a[0]), a[1] - Math.floor(a[1])];
             const safeMod = (x, y) => y === 0 ? 0 : x - y * Math.floor(x / y);
             const complexMod = (a, b) => {
@@ -280,17 +279,6 @@ export function compileIterationFunction(functionStr) {
               const by = Array.isArray(b) || b instanceof Float64Array ? b[1] : bx;
               return [safeMod(a[0], bx), safeMod(a[1], by)];
             };
-            const complexMin = (a, b) => {
-              const bx = Array.isArray(b) || b instanceof Float64Array ? b[0] : b;
-              const by = Array.isArray(b) || b instanceof Float64Array ? b[1] : bx;
-              return [Math.min(a[0], bx), Math.min(a[1], by)];
-            };
-            const complexMax = (a, b) => {
-              const bx = Array.isArray(b) || b instanceof Float64Array ? b[0] : b;
-              const by = Array.isArray(b) || b instanceof Float64Array ? b[1] : bx;
-              return [Math.max(a[0], bx), Math.max(a[1], by)];
-            };
-            const complexClamp = (a, lo, hi) => complexMin(complexMax(a, lo), hi);
             const complexRotate = (a, angle) => {
               const theta = complexScalar(angle);
               const cs = Math.cos(theta);
@@ -506,7 +494,6 @@ function createOptimizedFunction(expr) {
               const y = Array.isArray(a) || a instanceof Float64Array ? a[1] : 0;
               return x * x + y * y;
             };
-            const complexFloor = (a) => [Math.floor(a[0]), Math.floor(a[1])];
             const complexFract = (a) => [a[0] - Math.floor(a[0]), a[1] - Math.floor(a[1])];
             const safeMod = (x, y) => y === 0 ? 0 : x - y * Math.floor(x / y);
             const complexMod = (a, b) => {
@@ -514,17 +501,6 @@ function createOptimizedFunction(expr) {
               const by = Array.isArray(b) || b instanceof Float64Array ? b[1] : bx;
               return [safeMod(a[0], bx), safeMod(a[1], by)];
             };
-            const complexMin = (a, b) => {
-              const bx = Array.isArray(b) || b instanceof Float64Array ? b[0] : b;
-              const by = Array.isArray(b) || b instanceof Float64Array ? b[1] : bx;
-              return [Math.min(a[0], bx), Math.min(a[1], by)];
-            };
-            const complexMax = (a, b) => {
-              const bx = Array.isArray(b) || b instanceof Float64Array ? b[0] : b;
-              const by = Array.isArray(b) || b instanceof Float64Array ? b[1] : bx;
-              return [Math.max(a[0], bx), Math.max(a[1], by)];
-            };
-            const complexClamp = (a, lo, hi) => complexMin(complexMax(a, lo), hi);
             const complexRotate = (a, angle) => {
               const theta = complexScalar(angle);
               const cs = Math.cos(theta);
@@ -574,7 +550,7 @@ function analyzeComplexity(expr) {
 
   // Count function calls
   const funcMatches = expr.match(
-    /\b(sin|cos|tan|sinh|cosh|tanh|exp|log|ln|sqrt|zeta|conj|Re|Im|abs|arg|abs2|floor|fract|mod|min|max|clamp|rotate|fold|boxFold)\s*\(/g,
+    /\b(sin|cos|tan|sinh|cosh|tanh|exp|log|ln|sqrt|zeta|conj|Re|Im|abs|arg|abs2|fract|mod|rotate|fold|boxFold)\s*\(/g,
   )
   if (funcMatches) complexity += funcMatches.length * 2
 
@@ -612,6 +588,12 @@ function optimizeExpression(expr) {
  * 式をパースして JavaScript コードに変換する
  */
 function parseExpression(expr) {
+  const removedFunctionMatch = expr.match(/\b(?:floor|min|max|clamp)\s*\(/i)
+  if (removedFunctionMatch) {
+    const functionName = removedFunctionMatch[0].replace(/\s*\($/, '')
+    throw new Error(`Unsupported function: ${functionName}`)
+  }
+
   // 数学関数と演算子を置換する
   let code = expr
   // 先に pi, e を処理して分割時の誤判定を避ける
@@ -694,24 +676,10 @@ function parseExpression(expr) {
     ['tanh', (converted) => `complexTanh(${converted})`],
     ['sqrt', (converted) => `complexSqrt(${converted})`],
     ['zeta', (converted) => `complexZeta(${converted})`],
-    ['floor', (converted) => `complexFloor(${converted})`],
     ['fract', (converted) => `complexFract(${converted})`],
     [
       'mod',
       (_converted, convertedArgs) => `complexMod(${convertedArgs[0] ?? '[0, 0]'}, ${convertedArgs[1] ?? '[1, 0]'})`,
-    ],
-    [
-      'min',
-      (_converted, convertedArgs) => `complexMin(${convertedArgs[0] ?? '[0, 0]'}, ${convertedArgs[1] ?? '[0, 0]'})`,
-    ],
-    [
-      'max',
-      (_converted, convertedArgs) => `complexMax(${convertedArgs[0] ?? '[0, 0]'}, ${convertedArgs[1] ?? '[0, 0]'})`,
-    ],
-    [
-      'clamp',
-      (_converted, convertedArgs) =>
-        `complexClamp(${convertedArgs[0] ?? '[0, 0]'}, ${convertedArgs[1] ?? '[0, 0]'}, ${convertedArgs[2] ?? '[1, 0]'})`,
     ],
     [
       'rotate',
