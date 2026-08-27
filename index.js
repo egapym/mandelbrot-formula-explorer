@@ -6117,7 +6117,7 @@ function _computeOrbitPoints(z0r, z0i, cr, ci, iterFn, _complexToScreen, maxIter
   for (let iter = 0; iter < maxIter; iter++) {
     let nzr, nzi
     try {
-      ;[nzr, nzi] = iterFn(zr, zi, cr, ci)
+      ;[nzr, nzi] = iterFn(zr, zi, cr, ci, iter)
     } catch (_e) {
       break
     }
@@ -8138,6 +8138,9 @@ function initListeners() {
     // Buddhabrot 表示中は、通常描画へ戻さずそのまま見せ続ける
     if (!buddhaActive) redraw(true) // supersampling 切替時はキャッシュも更新する
   })
+  // 不要な再描画を避けるため、最後に適用した反復式を覚えておく
+  let lastIterationFunctionValue = DOM.iterationFunctionInput ? DOM.iterationFunctionInput.value : ''
+
   DOM.fractalTypeSelect.addEventListener('change', (event) => {
     // プリセット選択なら、その値を先に反映する
     // （反復式、z0、fractalType、座標）
@@ -8210,6 +8213,7 @@ function initListeners() {
     fractal.restartWorkers()
     _clearPinnedOrbits()
     redraw(true) // フラクタル種別変更時はキャッシュも更新する
+    lastIterationFunctionValue = DOM.iterationFunctionInput ? DOM.iterationFunctionInput.value : ''
     // ユーザーが明示的に種別を変えたので、Buddha トグルをロックし、
     // ユーザーが再開するまで再有効化されないようにする。
     try {
@@ -8272,9 +8276,6 @@ function initListeners() {
   // 初期状態でも z0 は編集可能にしておく
   const _current = DOM.fractalTypeSelect ? DOM.fractalTypeSelect.value : 'mandelbrot'
   setZ0Enabled(true)
-
-  // 不要な再描画を避けるため、最後に適用した反復式を覚えておく
-  let lastIterationFunctionValue = DOM.iterationFunctionInput ? DOM.iterationFunctionInput.value : ''
 
   const applyIterationFunction = async (value) => {
     // 前後の空白を除いて同じ値なら何もしない

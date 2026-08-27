@@ -163,9 +163,39 @@ function testRemovedFunctionsAreUnavailable() {
   }
 }
 
+function testIterationIndexVariableAffectsModOrbit() {
+  const fn = compileIterationFunction('mod(z*z, n) + c')
+  const c = [-0.64, -0.015]
+  const withIterationIndex = []
+  const withoutIterationIndex = []
+  let zrWith = 0
+  let ziWith = 0
+  let zrWithout = 0
+  let ziWithout = 0
+
+  for (let i = 0; i < 4; i++) {
+    ;[zrWith, ziWith] = fn(zrWith, ziWith, c[0], c[1], i)
+    ;[zrWithout, ziWithout] = fn(zrWithout, ziWithout, c[0], c[1])
+    withIterationIndex.push([zrWith, ziWith])
+    withoutIterationIndex.push([zrWithout, ziWithout])
+  }
+
+  assert.notDeepEqual(
+    withIterationIndex,
+    withoutIterationIndex,
+    'orbit callers must pass the iteration index when an expression uses n',
+  )
+  assert.deepEqual(
+    withoutIterationIndex.slice(1),
+    withoutIterationIndex.slice(0, -1),
+    'without n, mod(z*z, n) collapses to z=c on every step',
+  )
+}
+
 async function main() {
   testRiemannZetaKnownValues()
   testRemovedFunctionsAreUnavailable()
+  testIterationIndexVariableAffectsModOrbit()
   const results = []
   // include a couple of expressions that previously triggered GPU bugs
   results.push(testRenderability('sin(Re(z)) + i*cos(Im(z)) + c'))
@@ -177,6 +207,7 @@ async function main() {
   results.push(testRenderability('sin(z+1) + c'))
   results.push(testRenderability('sqrt(z+1) + c'))
   results.push(testRenderability('mod(z*z, 1) + c'))
+  results.push(testRenderability('mod(z*z, n) + c'))
   results.push(testRenderability('zeta((0.35*z)) + c'))
 
   for (const preset of functionPresets) {
