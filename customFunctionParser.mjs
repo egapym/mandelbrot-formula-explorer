@@ -48,6 +48,8 @@ const patternMap = new Map([
   ['z^2+c', 'mendelbrot'],
   ['z*z+c', 'mendelbrot'],
   ['(|re(z)|+i*|im(z)|)^2+c', 'burning_ship'],
+  ['fold(z)^2+c', 'burning_ship'],
+  ['fold(z)*fold(z)+c', 'burning_ship'],
   ['sin(z)+c', 'sin'],
   ['cos(z)+c', 'cos'],
   ['exp(z)+c', 'exp'],
