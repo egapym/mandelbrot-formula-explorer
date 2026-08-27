@@ -13,7 +13,7 @@ import * as mcgpu from './mandelbrotCustomWebGPU.mjs'
 import * as mgpu from './mandelbrotWebGPU.mjs'
 import { OrbitTrapWebGPU } from './orbitTrapBitmapWebGPU.mjs'
 import * as palette from './palette.js'
-import { mandelbrot_high_precision } from './sharedCalculations.mjs'
+import { BAILOUT_SMOOTH, mandelbrot_high_precision } from './sharedCalculations.mjs'
 import { jsExprToWGSL_safe } from './wgslCompiler.mjs'
 import { WorkerContext } from './workerContext.mjs'
 import { createWorkerFrom } from './workerLoader.mjs'
@@ -6071,21 +6071,26 @@ function _fxpComplexToOrbitCss(reFxp, imFxp, ow, oh, view = null) {
   return [((dre_px + fw / 2) / fw) * ow, ((dim_px + fh / 2) / fh) * oh]
 }
 
+function _getOrbitBailout(renderer = fractal) {
+  if (renderer?.smooth) return BAILOUT_SMOOTH
+  const escapeRadius = renderer?.escapeRadius ?? fractal.escapeRadius ?? 4
+  return escapeRadius * escapeRadius
+}
+
 /**
  * 指定した高精度複素点での Mandelbrot 軌道を BigInt 演算で求める。
  * 深いズームで Float64 では区別できない近接ピクセルも正確に判定できる。
  * 標準 Mandelbrot（z0=0、iterFn=z*z+c）でのみ有効。
  * @param {FxP} cReFxp - c の実部
  * @param {FxP} cImFxp - c の虚部
+ * @param {number} bailout - 描画側と同じ脱出判定値
  * @returns {{ orbit: Array<[number,number]>, escaped: boolean }}
  */
-function _computeOrbitHighPrec(cReFxp, cImFxp) {
+function _computeOrbitHighPrec(cReFxp, cImFxp, bailout = _getOrbitBailout()) {
   const prec = fractal.precision
   const bigScale = BigInt(prec)
   const re = cReFxp.withScale(prec).bigInt
   const im = cImFxp.withScale(prec).bigInt
-  // 一貫性のため、_computeOrbitPoints と同じ脱出半径の二乗を使う
-  const bailout = (fractal.escapeRadius || 4) ** 2
   // mandelbrot_high_precision は z=0 から z=z^2+c を反復し、[itersMarker, zq, seq] を返す
   // seq は z1 以降の [[z_real, z_imag, zq], ...] で、z0=[0,0] は暗黙扱い
   // iterMarker=2 は max_iter 到達、そうでなければ脱出
@@ -6101,11 +6106,10 @@ function _computeOrbitHighPrec(cReFxp, cImFxp) {
  *   ① |z|² > bailout なら escaped = true
  *   ② iter === maxIter なら escaped = false（集合内・黒）
  * @param {number} maxIter - 最大反復回数（fractal.max_iter を渡す）
+ * @param {number} bailout - 描画側と同じ脱出判定値
  * @returns {{ orbit: Array<[number,number]>, escaped: boolean }}
  */
-function _computeOrbitPoints(z0r, z0i, cr, ci, iterFn, _complexToScreen, maxIter) {
-  // 描画時（smooth OFF）と同じ bailout 値を使う
-  const bailout = (fractal.escapeRadius || 4) ** 2
+function _computeOrbitPoints(z0r, z0i, cr, ci, iterFn, _complexToScreen, maxIter, bailout = _getOrbitBailout()) {
   const orbit = [[z0r, z0i]]
   let zr = z0r,
     zi = z0i,
@@ -6296,9 +6300,10 @@ function drawOrbitOnCanvasAtComplex(cReal, cImag, refPixX = null, refPixY = null
   // これにより、どのズームでも正しい反復回数と脱出判定を得られる。
   const [z0Real, z0Imag] = _getZ0Inputs()
   let orbit, escaped
+  const bailout = _getOrbitBailout(fractal)
   if (cReFxp !== null && cImFxp !== null && fractal.fractalType === 'mandelbrot' && z0Real === 0 && z0Imag === 0) {
     try {
-      ;({ orbit, escaped } = _computeOrbitHighPrec(cReFxp, cImFxp))
+      ;({ orbit, escaped } = _computeOrbitHighPrec(cReFxp, cImFxp, bailout))
     } catch (_) {
       // BigInt が使えない場合（例: 精度不足）は Float64 計算へ戻す
       const iterFn = _getIterFn()
@@ -6310,11 +6315,21 @@ function drawOrbitOnCanvasAtComplex(cReal, cImag, refPixX = null, refPixY = null
         iterFn,
         complexToOrbit,
         fractal.max_iter,
+        bailout,
       ))
     }
   } else {
     const iterFn = _getIterFn()
-    ;({ orbit, escaped } = _computeOrbitPoints(z0Real, z0Imag, cReal, cImag, iterFn, complexToOrbit, fractal.max_iter))
+    ;({ orbit, escaped } = _computeOrbitPoints(
+      z0Real,
+      z0Imag,
+      cReal,
+      cImag,
+      iterFn,
+      complexToOrbit,
+      fractal.max_iter,
+      bailout,
+    ))
   }
 
   // 軌道の反復回数表示 UI は廃止されたため更新しない
@@ -6383,7 +6398,17 @@ function drawOrbitOnJuliaCanvasAtComplex(z0Real, z0Imag, refPixX = null, refPixY
 
   const iterFn = _getIterFn()
   const maxIter = juliaState.renderer?.max_iter ?? fractal.max_iter
-  const { orbit, escaped } = _computeOrbitPoints(z0Real, z0Imag, cReal, cImag, iterFn, complexToOrbit, maxIter)
+  const bailout = _getOrbitBailout(renderer)
+  const { orbit, escaped } = _computeOrbitPoints(
+    z0Real,
+    z0Imag,
+    cReal,
+    cImag,
+    iterFn,
+    complexToOrbit,
+    maxIter,
+    bailout,
+  )
 
   // 軌道の反復回数表示 UI は廃止されたため更新しない
   _paintOrbitOnCtx(ctx, orbit, escaped, complexToOrbit, z0Real, z0Imag, baseCssX, baseCssY)
@@ -6727,7 +6752,8 @@ function computeMouseDetails(clientX, clientY, isJulia) {
     const cImag = juliaState.renderer.juliaCIm
     const iterFn = _getIterFn()
     const maxIter = juliaState.renderer.max_iter ?? fractal.max_iter
-    const { orbit } = _computeOrbitPoints(re, im, cReal, cImag, iterFn, () => [], maxIter)
+    const bailout = _getOrbitBailout(juliaState.renderer)
+    const { orbit } = _computeOrbitPoints(re, im, cReal, cImag, iterFn, () => [], maxIter, bailout)
     const iter = orbit.length - 1
     const zFinal = orbit[orbit.length - 1] || [re, im]
     return { re, im, reFxp, imFxp, iter, zFinal }
@@ -6741,16 +6767,35 @@ function computeMouseDetails(clientX, clientY, isJulia) {
     const cReal = re
     const cImag = im
     let orbit
+    const bailout = _getOrbitBailout(fractal)
     if (reFxp !== null && imFxp !== null && fractal.fractalType === 'mandelbrot' && z0Real === 0 && z0Imag === 0) {
       try {
-        ;({ orbit } = _computeOrbitHighPrec(reFxp, imFxp))
+        ;({ orbit } = _computeOrbitHighPrec(reFxp, imFxp, bailout))
       } catch (_) {
         const iterFn = _getIterFn()
-        ;({ orbit } = _computeOrbitPoints(z0Real, z0Imag, cReal, cImag, iterFn, () => [], fractal.max_iter))
+        ;({ orbit } = _computeOrbitPoints(
+          z0Real,
+          z0Imag,
+          cReal,
+          cImag,
+          iterFn,
+          () => [],
+          fractal.max_iter,
+          bailout,
+        ))
       }
     } else {
       const iterFn = _getIterFn()
-      ;({ orbit } = _computeOrbitPoints(z0Real, z0Imag, cReal, cImag, iterFn, () => [], fractal.max_iter))
+      ;({ orbit } = _computeOrbitPoints(
+        z0Real,
+        z0Imag,
+        cReal,
+        cImag,
+        iterFn,
+        () => [],
+        fractal.max_iter,
+        bailout,
+      ))
     }
     const iter = orbit.length - 1
     const zFinal = orbit[orbit.length - 1] || [z0Real, z0Imag]
@@ -8086,6 +8131,7 @@ function initListeners() {
     fractal.smooth = event.target.checked
     if (juliaState.renderer) juliaState.renderer.smooth = event.target.checked
     redraw()
+    _refreshPinnedOrbits()
   })
   DOM.supersamplingToggle.addEventListener('change', (event) => {
     fractal.supersampling = parseInt(event.target.value, 10)
