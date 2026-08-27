@@ -557,17 +557,13 @@ async function runSampling(opts) {
         }
       }
 
-      // renderDelay が有効な場合は、各点描画後にフラッシュして表示を更新する
-      // 小さな遅延ではフラッシュ頻度を下げる
+      // renderDelay が有効な場合は、遅延値にかかわらず各点の描画完了後に
+      // ただちにフラッシュしてから次の点へ進む。
       if (renderDelay > 0) {
-        const shouldFlush = renderDelay >= 10 || k % 5 === 0
-        if (shouldFlush && dirtyList.length > 0) {
-          // delay が 10ms 以上なら毎点、そうでなければ 5 点ごとにフラッシュ
-          flushSparse(jobCtx)
-          await new Promise((r) => setTimeout(r, renderDelay))
-          if (jobCtx.shouldStop()) break
-          jobCtx.sendProgress(s, samples)
-        }
+        flushSparse(jobCtx)
+        await new Promise((r) => setTimeout(r, renderDelay))
+        if (jobCtx.shouldStop()) break
+        jobCtx.sendProgress(s, samples)
       }
     }
 
