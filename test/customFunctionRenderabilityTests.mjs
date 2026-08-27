@@ -192,10 +192,25 @@ function testIterationIndexVariableAffectsModOrbit() {
   )
 }
 
+function testGpuModuloSelfIdentity() {
+  for (const operand of ['z', 'c', 'n']) {
+    const wgsl = jsExprToWGSL_safe(getParsedExpression(`z*z + mod(${operand},${operand}) + c`))
+    assert.match(wgsl, /^vec2<f32>\(/, `mod(${operand},${operand}) must still produce a complex WGSL expression`)
+    assert.doesNotMatch(
+      wgsl,
+      /floor\(/,
+      `mod(${operand},${operand}) must be folded to zero before f32 modulo arithmetic`,
+    )
+    assert.match(wgsl, /\+ c\.x/)
+    assert.match(wgsl, /\+ c\.y/)
+  }
+}
+
 async function main() {
   testRiemannZetaKnownValues()
   testRemovedFunctionsAreUnavailable()
   testIterationIndexVariableAffectsModOrbit()
+  testGpuModuloSelfIdentity()
   const results = []
   // include a couple of expressions that previously triggered GPU bugs
   results.push(testRenderability('sin(Re(z)) + i*cos(Im(z)) + c'))

@@ -669,6 +669,13 @@ function astToWGSL(node, tokensTable) {
       case 'complexMod': {
         const a = argNodes[0]
         const b = argNodes[1]
+        // CPU の safeMod と同じく mod(x, x) は 0 として扱う。
+        // 一般形の x - x * floor(x / x) を f32 で実行すると、反復境界で
+        // 微小な丸め誤差が増幅され、数学的には Mandelbrot と同値の
+        // mod(z, z) + z*z + c まで別の図形になってしまう。
+        if (a && b && a.kind === b.kind && a.expr === b.expr) {
+          return makeVec2FromChildren({ expr: '0.0', kind: 'scalar' }, { expr: '0.0', kind: 'scalar' })
+        }
         const bx = scalarFromNode(b)
         const by = b?.kind === 'vec2' ? comp(b, 'y') : bx
         return makeVec2FromChildren(
