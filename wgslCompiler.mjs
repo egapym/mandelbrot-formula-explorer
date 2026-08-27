@@ -11,6 +11,64 @@
 // 使い回す関数名一覧
 export const SAFE_FUNCS = ['exp', 'sin', 'cos', 'log', 'sqrt', 'abs', 'atan2']
 
+export const CUSTOM_FUNCTION_WGSL_HELPERS = `
+fn zetaComplexMul(a: vec2<f32>, b: vec2<f32>) -> vec2<f32> {
+  return vec2<f32>(a.x * b.x - a.y * b.y, a.x * b.y + a.y * b.x);
+}
+
+fn zetaComplexDiv(a: vec2<f32>, b: vec2<f32>) -> vec2<f32> {
+  let denominator = max(dot(b, b), 1e-12);
+  return vec2<f32>(
+    (a.x * b.x + a.y * b.y) / denominator,
+    (a.y * b.x - a.x * b.y) / denominator
+  );
+}
+
+fn zetaPowPositiveBase(base: f32, exponent: vec2<f32>) -> vec2<f32> {
+  let logBase = log(base);
+  let magnitude = exp(exponent.x * logBase);
+  let angle = exponent.y * logBase;
+  return vec2<f32>(magnitude * cos(angle), magnitude * sin(angle));
+}
+
+fn complexZeta(s: vec2<f32>) -> vec2<f32> {
+  if (length(s - vec2<f32>(1.0, 0.0)) < 1e-6) {
+    return vec2<f32>(1e20, 0.0);
+  }
+
+  let coefficients = array<f32, 6>(
+    0.08333333333333333,
+    -0.001388888888888889,
+    0.00003306878306878307,
+    -0.0000008267195767195767,
+    0.00000002087675698757735,
+    -0.0000000005291242424242424
+  );
+  var result = vec2<f32>(0.0, 0.0);
+  for (var k: u32 = 1u; k < 12u; k = k + 1u) {
+    result = result + zetaPowPositiveBase(f32(k), -s);
+  }
+
+  let terms = 12.0;
+  result = result + zetaComplexDiv(
+    zetaPowPositiveBase(terms, vec2<f32>(1.0 - s.x, -s.y)),
+    s - vec2<f32>(1.0, 0.0)
+  );
+  result = result + 0.5 * zetaPowPositiveBase(terms, -s);
+
+  var rising = s;
+  for (var r: u32 = 1u; r <= 6u; r = r + 1u) {
+    if (r > 1u) {
+      rising = zetaComplexMul(rising, s + vec2<f32>(2.0 * f32(r) - 3.0, 0.0));
+      rising = zetaComplexMul(rising, s + vec2<f32>(2.0 * f32(r) - 2.0, 0.0));
+    }
+    let power = zetaPowPositiveBase(terms, vec2<f32>(-s.x - 2.0 * f32(r) + 1.0, -s.y));
+    result = result + coefficients[r - 1u] * zetaComplexMul(rising, power);
+  }
+  return result;
+}
+`
+
 /**
  * WGSL 互換のため、数値リテラルに必要なら小数点を付ける
  * @param {string} n - 数値リテラル
@@ -877,6 +935,11 @@ function astToWGSL(node, tokensTable) {
           },
         )
       }
+      case 'complexZeta': {
+        const a = argNodes[0]
+        const full = a.kind === 'vec2' ? a.expr : `vec2<f32>(${a.expr}, 0.0)`
+        return { expr: `complexZeta(${full})`, kind: 'vec2' }
+      }
       case 'complexExp': {
         const a = argNodes[0]
         return makeVec2FromChildren(
@@ -1614,7 +1677,7 @@ export function jsExprToWGSL_ast(expr) {
       wgsl = `vec2<f32>(${wgslObj.x}, ${wgslObj.y})`
     } else {
       const expr = (wgslObj.expr || '').toString().trim()
-      if (/^vec2<f32>\s*\(/.test(expr) || /^select\s*\(/.test(expr)) {
+      if (/^vec2<f32>\s*\(/.test(expr) || /^select\s*\(/.test(expr) || /^complexZeta\s*\(/.test(expr)) {
         wgsl = expr
       } else {
         const x = expr || '0.0'
@@ -1991,6 +2054,7 @@ function validateVariables(expr) {
     'complexExp',
     'complexLog',
     'complexLog10',
+    'complexZeta',
     'complexSin',
     'complexCos',
     'complexTan',

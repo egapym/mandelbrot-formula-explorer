@@ -4,6 +4,8 @@
  * Licensed under GPL-3.0.
  */
 
+import { CUSTOM_FUNCTION_WGSL_HELPERS } from './wgslCompiler.mjs'
+
 export class BuddhabrotWebGPU {
   constructor(options = {}) {
     this.devicePromise = this.initGpu()
@@ -224,6 +226,8 @@ struct Uniforms {
 @group(0) @binding(3) var<storage, read_write> bAcc: array<atomic<u32>>;
 @group(0) @binding(4) var<uniform> bands: array<Band, MAX_BANDS>;
 @group(0) @binding(5) var<uniform> bandContribs: array<vec4<u32>, MAX_BANDS>;
+
+${CUSTOM_FUNCTION_WGSL_HELPERS}
 
 // 注入したカスタムカーネルだけで完結するよう、
 // rand() と coordToIndex() をローカル定義する。

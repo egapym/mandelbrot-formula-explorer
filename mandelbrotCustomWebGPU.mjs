@@ -6,7 +6,7 @@
 
 import { getParsedExpression } from './customFunctionParser.mjs'
 import { BAILOUT_MIN, BAILOUT_SMOOTH } from './sharedCalculations.mjs'
-import { jsExprToWGSL_safe } from './wgslCompiler.mjs'
+import { CUSTOM_FUNCTION_WGSL_HELPERS, jsExprToWGSL_safe } from './wgslCompiler.mjs'
 import { WorkerContext } from './workerContext.mjs'
 
 // ============================================================================
@@ -517,6 +517,8 @@ ${doSmooth ? '@group(0) @binding(2) var<storage, read_write> smoothValues: array
 @group(0) @binding(3) var<storage, read_write> signsBuffer: array<u32>;
 @group(0) @binding(4) var<storage, read_write> zrealBuffer: array<f32>;
 @group(0) @binding(5) var<storage, read_write> zimagBuffer: array<f32>;
+
+${CUSTOM_FUNCTION_WGSL_HELPERS}
 
 struct IterResult {
   iterVal: u32,

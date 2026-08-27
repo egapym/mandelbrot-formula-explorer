@@ -10,7 +10,7 @@ import { getParsedExpression } from './customFunctionParser.mjs'
 import { TRAP_MODE, TRAP_SHAPE } from './orbitTrap.mjs'
 import { COLOR_PATTERN } from './palette.js'
 import { BAILOUT_SMOOTH } from './sharedCalculations.mjs'
-import { jsExprToWGSL_safe } from './wgslCompiler.mjs'
+import { CUSTOM_FUNCTION_WGSL_HELPERS, jsExprToWGSL_safe } from './wgslCompiler.mjs'
 
 const WORKGROUP_SIZE_X = 16
 const WORKGROUP_SIZE_Y = 8
@@ -490,6 +490,8 @@ struct Spec {
 @group(0) @binding(0) var<uniform> spec: Spec;
 @group(0) @binding(1) var<storage, read_write> outPixels: array<u32>;
 @group(0) @binding(2) var<storage, read> bitmapPixels: array<u32>;
+
+${CUSTOM_FUNCTION_WGSL_HELPERS}
 
 fn packRgba(r: u32, g: u32, b: u32, a: u32) -> u32 {
   return (a << 24u) | (b << 16u) | (g << 8u) | r;

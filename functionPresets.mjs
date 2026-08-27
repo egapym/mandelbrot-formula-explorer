@@ -40,6 +40,7 @@ export const functionPresets = [
   { expr: 'cos(z) + c', z0Real: 0, z0Imag: 0 },
   { expr: 'tan(z) + c', z0Real: 0, z0Imag: 0 },
   { expr: 'exp(z) + c', z0Real: 0, z0Imag: 0 },
+  { expr: 'zeta(z) + c', label: 'Riemann zeta', z0Real: 0, z0Imag: 0, coordX: 0, coordY: 0 },
   { expr: 'sinh(0.4*z) + c', label: 'sinh field', z0Real: 0, z0Imag: 0 },
   { expr: 'cosh(0.25*z) + c', label: 'cosh field', z0Real: 0, z0Imag: 0 },
   { expr: 'tanh(z*z) + c', label: 'tanh field', z0Real: 0, z0Imag: 0 },

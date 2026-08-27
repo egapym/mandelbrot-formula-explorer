@@ -7,9 +7,10 @@
  *
  */
 
+import assert from 'node:assert/strict'
 import { compileIterationFunction, getParsedExpression } from '../customFunctionParser.mjs'
 import { functionPresets } from '../functionPresets.mjs'
-import { jsExprToWGSL_safe } from '../wgslCompiler.mjs'
+import { CUSTOM_FUNCTION_WGSL_HELPERS, jsExprToWGSL_safe } from '../wgslCompiler.mjs'
 
 function linspace(a, b, n) {
   const out = []
@@ -125,7 +126,30 @@ function testRenderability(expr, opts = {}) {
   }
 }
 
+function testRiemannZetaKnownValues() {
+  const zeta = compileIterationFunction('zeta(z)')
+  const cases = [
+    { s: [2, 0], expected: [Math.PI ** 2 / 6, 0], tolerance: 1e-12 },
+    { s: [0, 0], expected: [-0.5, 0], tolerance: 1e-12 },
+    { s: [-1, 0], expected: [-1 / 12, 0], tolerance: 1e-12 },
+    { s: [-2, 0], expected: [0, 0], tolerance: 1e-9 },
+    { s: [0.5, 14.1347251417347], expected: [0, 0], tolerance: 2e-9 },
+  ]
+
+  for (const { s, expected, tolerance } of cases) {
+    const actual = zeta(s[0], s[1], 0, 0, 0)
+    assert.ok(Math.abs(actual[0] - expected[0]) <= tolerance, `zeta(${s}) real part: ${actual[0]}`)
+    assert.ok(Math.abs(actual[1] - expected[1]) <= tolerance, `zeta(${s}) imaginary part: ${actual[1]}`)
+  }
+
+  const pole = zeta(1, 0, 0, 0, 0)
+  assert.ok(Math.abs(pole[0]) >= 1e19, 'zeta(1) should be treated as a pole')
+  assert.match(CUSTOM_FUNCTION_WGSL_HELPERS, /fn complexZeta\(s: vec2<f32>\)/)
+  assert.match(jsExprToWGSL_safe(getParsedExpression('zeta(z)')), /^complexZeta\(z\)$/)
+}
+
 async function main() {
+  testRiemannZetaKnownValues()
   const results = []
   // include a couple of expressions that previously triggered GPU bugs
   results.push(testRenderability('sin(Re(z)) + i*cos(Im(z)) + c'))
@@ -137,6 +161,7 @@ async function main() {
   results.push(testRenderability('sin(z+1) + c'))
   results.push(testRenderability('sqrt(z+1) + c'))
   results.push(testRenderability('mod(z*z, 1) + c'))
+  results.push(testRenderability('zeta((0.35*z)) + c'))
 
   for (const preset of functionPresets) {
     const expr = preset.expr || preset

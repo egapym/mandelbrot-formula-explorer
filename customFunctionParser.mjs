@@ -19,6 +19,53 @@ const NUMERIC_CONFIG = {
 
 const NUMBER_LITERAL_PATTERN = /^-?(?:\d+\.\d*|\d*\.\d+|\d+)(?:[eE][+-]?\d+)?$/
 
+const RIEMANN_ZETA_CPU_SOURCE = `
+            const complexZeta = (s) => {
+              // Euler-Maclaurin analytic continuation with six Bernoulli corrections.
+              if (Math.hypot(s[0] - 1, s[1]) < 1e-12) return [1e20, 0];
+              const terms = 12;
+              const coefficients = [
+                1 / 12,
+                -1 / 720,
+                1 / 30240,
+                -1 / 1209600,
+                1 / 47900160,
+                -691 / 1307674368000,
+              ];
+              const powPositiveBase = (base, exponent) => {
+                const logBase = Math.log(base);
+                const magnitude = Math.exp(exponent[0] * logBase);
+                const angle = exponent[1] * logBase;
+                return [magnitude * Math.cos(angle), magnitude * Math.sin(angle)];
+              };
+
+              let result = [0, 0];
+              for (let k = 1; k < terms; k++) {
+                const term = powPositiveBase(k, [-s[0], -s[1]]);
+                result[0] += term[0];
+                result[1] += term[1];
+              }
+
+              const tail = complexDivide(powPositiveBase(terms, [1 - s[0], -s[1]]), [s[0] - 1, s[1]]);
+              const halfTerm = powPositiveBase(terms, [-s[0], -s[1]]);
+              result[0] += tail[0] + 0.5 * halfTerm[0];
+              result[1] += tail[1] + 0.5 * halfTerm[1];
+
+              let rising = [s[0], s[1]];
+              for (let r = 1; r <= coefficients.length; r++) {
+                if (r > 1) {
+                  rising = complexMultiply(rising, [s[0] + 2 * r - 3, s[1]]);
+                  rising = complexMultiply(rising, [s[0] + 2 * r - 2, s[1]]);
+                }
+                const power = powPositiveBase(terms, [-s[0] - 2 * r + 1, -s[1]]);
+                const correction = complexMultiply(rising, power);
+                result[0] += coefficients[r - 1] * correction[0];
+                result[1] += coefficients[r - 1] * correction[1];
+              }
+              return result;
+            };
+`
+
 // 再コンパイルを避けるためのキャッシュ
 export const functionCache = new Map()
 
@@ -256,6 +303,7 @@ export function compileIterationFunction(functionStr) {
               const foldValue = (v) => v > r ? 2 * r - v : v < -r ? -2 * r - v : v;
               return [foldValue(a[0]), foldValue(a[1])];
             };
+            ${RIEMANN_ZETA_CPU_SOURCE}
             const z = [zReal, zImag];
             const c = [cReal, cImag];
             const iterIndex = Number.isFinite(n) ? n : 0;
@@ -489,6 +537,7 @@ function createOptimizedFunction(expr) {
               const foldValue = (v) => v > r ? 2 * r - v : v < -r ? -2 * r - v : v;
               return [foldValue(a[0]), foldValue(a[1])];
             };
+            ${RIEMANN_ZETA_CPU_SOURCE}
             const z = [zReal, zImag];
             const c = [cReal, cImag];
             const iterIndex = Number.isFinite(n) ? n : 0;
@@ -525,7 +574,7 @@ function analyzeComplexity(expr) {
 
   // Count function calls
   const funcMatches = expr.match(
-    /\b(sin|cos|tan|sinh|cosh|tanh|exp|log|ln|sqrt|conj|Re|Im|abs|arg|abs2|floor|fract|mod|min|max|clamp|rotate|fold|boxFold)\s*\(/g,
+    /\b(sin|cos|tan|sinh|cosh|tanh|exp|log|ln|sqrt|zeta|conj|Re|Im|abs|arg|abs2|floor|fract|mod|min|max|clamp|rotate|fold|boxFold)\s*\(/g,
   )
   if (funcMatches) complexity += funcMatches.length * 2
 
@@ -644,6 +693,7 @@ function parseExpression(expr) {
     ['cosh', (converted) => `complexCosh(${converted})`],
     ['tanh', (converted) => `complexTanh(${converted})`],
     ['sqrt', (converted) => `complexSqrt(${converted})`],
+    ['zeta', (converted) => `complexZeta(${converted})`],
     ['floor', (converted) => `complexFloor(${converted})`],
     ['fract', (converted) => `complexFract(${converted})`],
     [
