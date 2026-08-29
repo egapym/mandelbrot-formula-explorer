@@ -467,15 +467,28 @@ footer {
     white-space: nowrap;
 }
 
-#settings .settings-jump-control,
-#settings .settings-animation-control,
-#settings #buddha-scale,
-#settings #jump-to {
-    min-width: 0;
+#settings .settings-action-row+.settings-action-row {
+  margin-top: 0rem;
 }
 
-#settings .settings-jump-control {
-    flex: 1 1 auto;
+#settings .settings-coordinate-control-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(4.5rem, auto);
+  gap: 0.25rem;
+  align-items: center;
+}
+
+#settings .settings-coordinate-control-grid .btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 31px;
+  line-height: 1.15;
+  white-space: nowrap;
+}
+#settings .settings-animation-control,
+#settings #buddha-scale {
+    min-width: 0;
 }
 
 /* フルスクリーン時は入力欄を半透明背景でも読みやすくする */
@@ -574,7 +587,7 @@ footer {
     }
 
     #settings .settings-action-row + .settings-action-row {
-        margin-top: 0.25rem;
+        margin-top: 0.375rem;
     }
 
     #settings .settings-action-row > [class*="col"] {
@@ -591,30 +604,40 @@ footer {
 
     #settings .settings-action-row--buddha .action-col--render,
     #settings .settings-action-row--buddha .action-col--download,
-    #settings .settings-action-row--primary > *,
-    #settings .settings-action-row--secondary > * {
+                                                                                                                                                                                                                                                                #settings .settings-action-row--primary>* {
         grid-column: 1 / -1;
     }
 
-    #settings .settings-inline-controls {
-        display: grid !important;
-        grid-template-columns: repeat(4, minmax(0, 1fr));
-        align-items: center;
+                                                                                                                                                                                                                                                                #settings .settings-action-row--secondary {
+                                                                                                                                                                                                                                                                  grid-template-columns: 1fr;
     }
 
-    #settings .settings-jump-control {
-        grid-column: 1 / span 2;
+                                                                                                                                                                                                                                                                #settings .settings-coordinate-actions {
+                                                                                                                                                                                                                                                                  --bs-gutter-x: 0;
+                                                                                                                                                                                                                                                                  display: grid;
+                                                                                                                                                                                                                                                                  gap: 0.25rem;
+                                                                                                                                                                                                                                                                  grid-template-columns: repeat(2, minmax(0, 1fr));
+                                                                                                                                                                                                                                                                  margin-left: 0;
+                                                                                                                                                                                                                                                                  margin-right: 0;
+                                                                                                                                                                                                                                                                }
+                                                                                                                                
+                                                                                                                                                                                                                                                                #settings .settings-coordinate-actions>[class*="col"] {
+                                                                                                                                                                                                                                                                  width: auto;
         max-width: none;
+        flex: initial;
+          padding-left: 0;
+          padding-right: 0;
     }
 
-    #settings .settings-animation-control {
-        grid-column: 3;
-        min-width: 0;
+                                                                                                                                                                                                                                                                #settings .settings-coordinate-control-grid {
+                                                                                                                                                                                                                                                                  grid-template-columns: minmax(0, 1fr) auto minmax(3.75rem, auto);
+                                                                                                                                                                                                                                                                }
+                                                                                                                                
+                                                                                                                                                                                                                                                                #settings .settings-coordinate-control-grid #applyCoords {
+                                                                                                                                                                                                                                                                  font-size: 0.72rem;
     }
 
-    #settings .settings-inline-stop {
-        grid-column: 4;
-        width: 100%;
+                                                                                                                                                                                                                                                                #settings .settings-inline-stop {
         margin-left: 0;
     }
 }

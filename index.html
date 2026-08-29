@@ -776,42 +776,6 @@
                 Save Image
               </button>
             </div>
-            <div class="col col-sm-6 d-flex align-items-center gap-2 settings-inline-controls">
-              <div class="settings-jump-control">
-                <select
-                  id="jump-to"
-                  class="form-select form-select-sm w-100"
-                  aria-label="Jump To favorites"
-                  title="Jump to a saved favorite fractal location"
-                >
-                  <option value="" selected disabled>Jump To...</option>
-                  <!-- options populated by JS -->
-                </select>
-              </div>
-              <div class="settings-animation-control">
-                <label for="anim-enable" class="col-form-label py-0 d-block">Animation</label>
-                <div class="d-flex align-items-center py-1">
-                  <div class="form-check form-switch m-0">
-                    <input
-                      class="form-check-input"
-                      type="checkbox"
-                      role="switch"
-                      id="anim-enable"
-                      title="Enable automatic animation that cycles through saved favorite locations"
-                    />
-                  </div>
-                </div>
-              </div>
-              <button
-                id="anim-stop"
-                class="btn btn-outline-danger btn-sm settings-inline-stop"
-                title="Stop animation"
-                type="button"
-              >
-                Stop
-              </button>
-              <!-- Animation speed fixed to 0.15 (slider removed) -->
-            </div>
           </div>
           <hr />
           <div>
@@ -857,15 +821,40 @@
                 />
               </div>
             </div>
-            <div class="g-1 row">
+            <div class="g-1 row align-items-center settings-coordinate-actions">
               <div class="col col-sm-6">
-                <button
-                  id="applyCoords"
-                  class="btn btn-sm btn-primary w-100"
-                  title="Apply the entered X, Y coordinates and zoom level to navigate to that location"
-                >
-                  Apply Coordinates
-                </button>
+                <div class="settings-coordinate-control-grid">
+                  <button
+                    id="applyCoords"
+                    class="btn btn-sm btn-primary w-100"
+                    title="Apply the entered X, Y coordinates and zoom level to navigate to that location"
+                  >
+                    Apply Coordinates
+                  </button>
+                  <div class="settings-animation-control">
+                    <label for="anim-enable" class="col-form-label py-0 d-block">Animation</label>
+                    <div class="d-flex align-items-center py-1">
+                      <div class="form-check form-switch m-0">
+                        <input
+                          class="form-check-input"
+                          type="checkbox"
+                          role="switch"
+                          id="anim-enable"
+                          title="Enable automatic animation that cycles through saved favorite locations"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                  <button
+                    id="anim-stop"
+                    class="btn btn-outline-danger btn-sm settings-inline-stop"
+                    title="Stop animation"
+                    type="button"
+                  >
+                    Stop
+                  </button>
+                  <!-- Animation speed fixed to 0.15 (slider removed) -->
+                </div>
               </div>
               <div class="col col-sm-6">
                 <button
