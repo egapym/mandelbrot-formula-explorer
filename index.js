@@ -6140,7 +6140,7 @@ function _computeOrbitPoints(z0r, z0i, cr, ci, iterFn, _complexToScreen, maxIter
   return { orbit, escaped }
 }
 
-function _getOrbitGradientDotColor(iterationIndex, totalIterations) {
+function _getOrbitGradientColor(iterationIndex, totalIterations) {
   const ratio = Math.min(1, Math.max(0, iterationIndex / Math.max(1, totalIterations)))
   const hue = 58 - ratio * 54
   return `hsl(${hue}, 100%, 50%)`
@@ -6171,16 +6171,29 @@ function _paintOrbitOnCtx(
   const dotColor = escaped ? 'rgba(255, 90, 90, 1)' : 'rgba(100, 180, 255, 1)'
 
   if (orbitMode !== 'dots') {
-    ctx.beginPath()
-    ctx.strokeStyle = lineColor
     ctx.lineWidth = 1.5
-    const [x0, y0] = complexToScreen(orbit[0][0], orbit[0][1])
-    ctx.moveTo(x0, y0)
-    for (let k = 1; k < orbit.length; k++) {
-      const [xk, yk] = complexToScreen(orbit[k][0], orbit[k][1])
-      ctx.lineTo(xk, yk)
+    if (orbitGradientEnabled) {
+      const gradientTotalIterations = Math.max(1, orbit.length - 1)
+      for (let k = 1; k < orbit.length; k++) {
+        const [x0, y0] = complexToScreen(orbit[k - 1][0], orbit[k - 1][1])
+        const [x1, y1] = complexToScreen(orbit[k][0], orbit[k][1])
+        ctx.beginPath()
+        ctx.strokeStyle = _getOrbitGradientColor(k, gradientTotalIterations)
+        ctx.moveTo(x0, y0)
+        ctx.lineTo(x1, y1)
+        ctx.stroke()
+      }
+    } else {
+      ctx.beginPath()
+      ctx.strokeStyle = lineColor
+      const [x0, y0] = complexToScreen(orbit[0][0], orbit[0][1])
+      ctx.moveTo(x0, y0)
+      for (let k = 1; k < orbit.length; k++) {
+        const [xk, yk] = complexToScreen(orbit[k][0], orbit[k][1])
+        ctx.lineTo(xk, yk)
+      }
+      ctx.stroke()
     }
-    ctx.stroke()
   }
 
   if (orbitMode !== 'lines') {
@@ -6192,7 +6205,7 @@ function _paintOrbitOnCtx(
       ctx.beginPath()
       ctx.arc(xk, yk, isFirst ? 4 : isLast ? 3.5 : 2.5, 0, Math.PI * 2)
       ctx.fillStyle = orbitGradientEnabled
-        ? _getOrbitGradientDotColor(k, gradientTotalIterations)
+        ? _getOrbitGradientColor(k, gradientTotalIterations)
         : isFirst
           ? 'rgba(255, 240, 60, 1)'
           : isLast
@@ -6207,7 +6220,7 @@ function _paintOrbitOnCtx(
     ctx.beginPath()
     ctx.arc(xl, yl, 3.5, 0, Math.PI * 2)
     ctx.fillStyle = orbitGradientEnabled
-      ? _getOrbitGradientDotColor(orbit.length - 1, Math.max(1, orbit.length - 1))
+      ? _getOrbitGradientColor(orbit.length - 1, Math.max(1, orbit.length - 1))
       : 'rgba(255, 255, 255, 0.95)'
     ctx.fill()
   }
