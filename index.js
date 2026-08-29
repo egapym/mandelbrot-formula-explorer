@@ -4889,6 +4889,213 @@ function scheduleBuddhaRedraw() {
 
 let redrawTimeout = null
 
+const COORDINATE_GRID_MAJOR_TARGET_PX = 240
+const COORDINATE_GRID_MINOR_DIVISIONS = 10
+const COORDINATE_GRID_MAX_LINES = 600
+
+function _getCoordinateGridCanvas(isJulia = false) {
+  return document.getElementById(isJulia ? 'julia-coordinate-grid-canvas' : 'coordinate-grid-canvas')
+}
+
+function _clearCoordinateGridCanvas(isJulia = false) {
+  const overlayCanvas = _getCoordinateGridCanvas(isJulia)
+  const ownerCanvas = isJulia ? document.getElementById('julia-canvas') : canvasElement
+  const size = _syncOverlayCanvasToDisplay(overlayCanvas, ownerCanvas)
+  if (size) overlayCanvas.getContext('2d').clearRect(0, 0, size[0], size[1])
+}
+
+function _chooseCoordinateGridMajorStep(scalePxPerUnit) {
+  if (!Number.isFinite(scalePxPerUnit) || scalePxPerUnit <= 0) return 1
+  const rawStep = COORDINATE_GRID_MAJOR_TARGET_PX / scalePxPerUnit
+  const exponent = Math.floor(Math.log10(rawStep))
+  const base = 10 ** exponent
+  const normalized = rawStep / base
+  const nice = normalized <= 1.5 ? 1 : normalized <= 3 ? 2 : normalized <= 7 ? 5 : 10
+  return nice * base
+}
+
+function _formatCoordinateGridNumber(value, step, suffix = '') {
+  if (!Number.isFinite(value)) return ''
+  const threshold = Math.max(Math.abs(step) * 1e-8, 1e-12)
+  let v = Math.abs(value) < threshold ? 0 : value
+  if (Math.abs(v) >= 10000 || (Math.abs(v) > 0 && Math.abs(v) < 0.001)) {
+    return `${v.toExponential(1).replace('+', '')}${suffix}`
+  }
+  const decimals = step >= 1 ? 0 : Math.min(12, Math.ceil(-Math.log10(step)) + 1)
+  let text = v.toFixed(decimals)
+  text = text.replace(/(\.\d*?[1-9])0+$/, '$1').replace(/\.0+$/, '')
+  if (text === '-0') text = '0'
+  return `${text}${suffix}`
+}
+
+function _drawCoordinateGridLabel(ctx, text, x, y) {
+  if (!text) return
+  ctx.save()
+  ctx.lineWidth = 3
+  ctx.lineJoin = 'round'
+  ctx.strokeStyle = 'rgba(0, 0, 0, 0.85)'
+  ctx.strokeText(text, x, y)
+  ctx.fillStyle = 'rgba(235, 240, 255, 0.88)'
+  ctx.fillText(text, x, y)
+  ctx.restore()
+}
+
+function _forEachCoordinateGridLine(minValue, maxValue, step, callback) {
+  if (!Number.isFinite(minValue) || !Number.isFinite(maxValue) || !Number.isFinite(step) || step <= 0) return
+  const span = maxValue - minValue
+  if (!Number.isFinite(span) || span <= 0) return
+  let effectiveStep = step
+  while (span / effectiveStep > COORDINATE_GRID_MAX_LINES) {
+    effectiveStep *= 2
+  }
+  const first = Math.ceil((minValue - effectiveStep * 1e-8) / effectiveStep) * effectiveStep
+  for (let value = first, count = 0; value <= maxValue + effectiveStep * 1e-8 && count < COORDINATE_GRID_MAX_LINES; value += effectiveStep, count++) {
+    callback(Math.abs(value) < effectiveStep * 1e-8 ? 0 : value)
+  }
+}
+
+function _syncOverlayCanvasToDisplay(overlayCanvas, ownerCanvas) {
+  if (!overlayCanvas || !ownerCanvas) return null
+  const width = Math.max(1, Math.round(overlayCanvas.offsetWidth || ownerCanvas.offsetWidth || ownerCanvas.width || 1))
+  const height = Math.max(1, Math.round(overlayCanvas.offsetHeight || ownerCanvas.offsetHeight || ownerCanvas.height || 1))
+  if (overlayCanvas.width !== width) overlayCanvas.width = width
+  if (overlayCanvas.height !== height) overlayCanvas.height = height
+  return [width, height]
+}
+
+function _drawCoordinateGridForView(overlayCanvas, ownerCanvas, center, zoom) {
+  const size = _syncOverlayCanvasToDisplay(overlayCanvas, ownerCanvas)
+  if (!size) return
+  const [width, height] = size
+  const ctx = overlayCanvas.getContext('2d')
+  ctx.clearRect(0, 0, width, height)
+
+  const zoomValue = zoom?.toNumber ? zoom.toNumber() : Number(zoom)
+  if (!Number.isFinite(zoomValue) || zoomValue <= 0) return
+  const centerX = center?.[0]?.toNumber ? center[0].toNumber() : Number(center?.[0] ?? 0)
+  const centerY = center?.[1]?.toNumber ? center[1].toNumber() : Number(center?.[1] ?? 0)
+  if (!Number.isFinite(centerX) || !Number.isFinite(centerY)) return
+
+  const scale = (zoomValue * width) / 4
+  const minX = centerX - width / (2 * scale)
+  const maxX = centerX + width / (2 * scale)
+  const minY = centerY - height / (2 * scale)
+  const maxY = centerY + height / (2 * scale)
+  const majorStep = _chooseCoordinateGridMajorStep(scale)
+  const minorStep = majorStep / COORDINATE_GRID_MINOR_DIVISIONS
+  const axisEpsilon = minorStep * 1e-6
+  const toScreenX = (x) => width / 2 + (x - centerX) * scale
+  const toScreenY = (y) => height / 2 + (y - centerY) * scale
+
+  ctx.save()
+  ctx.lineCap = 'butt'
+
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.10)'
+  ctx.lineWidth = 1
+  ctx.beginPath()
+  _forEachCoordinateGridLine(minX, maxX, minorStep, (x) => {
+    if (Math.abs(x / majorStep - Math.round(x / majorStep)) < 1e-6) return
+    const sx = Math.round(toScreenX(x)) + 0.5
+    ctx.moveTo(sx, 0)
+    ctx.lineTo(sx, height)
+  })
+  _forEachCoordinateGridLine(minY, maxY, minorStep, (y) => {
+    if (Math.abs(y / majorStep - Math.round(y / majorStep)) < 1e-6) return
+    const sy = Math.round(toScreenY(y)) + 0.5
+    ctx.moveTo(0, sy)
+    ctx.lineTo(width, sy)
+  })
+  ctx.stroke()
+
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.24)'
+  ctx.lineWidth = 1
+  ctx.beginPath()
+  _forEachCoordinateGridLine(minX, maxX, majorStep, (x) => {
+    if (Math.abs(x) < axisEpsilon) return
+    const sx = Math.round(toScreenX(x)) + 0.5
+    ctx.moveTo(sx, 0)
+    ctx.lineTo(sx, height)
+  })
+  _forEachCoordinateGridLine(minY, maxY, majorStep, (y) => {
+    if (Math.abs(y) < axisEpsilon) return
+    const sy = Math.round(toScreenY(y)) + 0.5
+    ctx.moveTo(0, sy)
+    ctx.lineTo(width, sy)
+  })
+  ctx.stroke()
+
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.55)'
+  ctx.lineWidth = 1.5
+  ctx.beginPath()
+  const yAxisX = toScreenX(0)
+  const xAxisY = toScreenY(0)
+  if (yAxisX >= 0 && yAxisX <= width) {
+    const sx = Math.round(yAxisX) + 0.5
+    ctx.moveTo(sx, 0)
+    ctx.lineTo(sx, height)
+  }
+  if (xAxisY >= 0 && xAxisY <= height) {
+    const sy = Math.round(xAxisY) + 0.5
+    ctx.moveTo(0, sy)
+    ctx.lineTo(width, sy)
+  }
+  ctx.stroke()
+
+  ctx.font = '11px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace'
+  ctx.textBaseline = 'middle'
+  const labelY = Math.min(height - 12, Math.max(12, xAxisY + 12))
+  const labelX = Math.min(width - 44, Math.max(4, yAxisX + 6))
+
+  ctx.textAlign = 'center'
+  _forEachCoordinateGridLine(minX, maxX, majorStep, (x) => {
+    const sx = toScreenX(x)
+    if (sx < -20 || sx > width + 20) return
+    _drawCoordinateGridLabel(ctx, _formatCoordinateGridNumber(x, majorStep), sx, labelY)
+  })
+
+  ctx.textAlign = 'left'
+  _forEachCoordinateGridLine(minY, maxY, majorStep, (y) => {
+    if (Math.abs(y) < axisEpsilon) return
+    const sy = toScreenY(y)
+    if (sy < -12 || sy > height + 12) return
+    _drawCoordinateGridLabel(ctx, _formatCoordinateGridNumber(-y, majorStep, 'i'), labelX, sy)
+  })
+
+  ctx.restore()
+}
+
+function drawMainCoordinateGrid() {
+  if (!fractal) return
+  if (!coordinateGridEnabled) {
+    _clearCoordinateGridCanvas(false)
+    return
+  }
+  const overlayCanvas = _getCoordinateGridCanvas(false)
+  const view = typeof _getMainOrbitRenderView === 'function' ? _getMainOrbitRenderView() : { center: fractal.center, zoom: fractal.zoom }
+  _drawCoordinateGridForView(overlayCanvas, canvasElement, view.center, view.zoom)
+}
+
+function drawJuliaCoordinateGrid() {
+  const renderer = juliaState?.renderer
+  const ownerCanvas = renderer?.canvas || document.getElementById('julia-canvas')
+  const overlayCanvas = _getCoordinateGridCanvas(true)
+  if (!coordinateGridEnabled) {
+    _clearCoordinateGridCanvas(true)
+    return
+  }
+  if (!juliaState?.active || !renderer) {
+    const size = _syncOverlayCanvasToDisplay(overlayCanvas, ownerCanvas)
+    if (size) overlayCanvas.getContext('2d').clearRect(0, 0, size[0], size[1])
+    return
+  }
+  _drawCoordinateGridForView(overlayCanvas, ownerCanvas, renderer.center, renderer.zoom)
+}
+
+function refreshCoordinateGrid() {
+  drawMainCoordinateGrid()
+  drawJuliaCoordinateGrid()
+}
+
 /**
  * フラクタルを再描画する
  * @async
@@ -4932,6 +5139,7 @@ async function redraw(resetCaches, cooldown) {
 function showZoomFactor() {
   // 座標入力欄を現在値に更新する
   updateCoordinateInputs()
+  refreshCoordinateGrid()
 }
 
 /**
@@ -4957,6 +5165,7 @@ function redrawJulia() {
     }
   }
   // 以前はメイン表示とズームを同期していたが、現在は Julia 側で独立管理する
+  drawJuliaCoordinateGrid()
   renderer.render()
 }
 
@@ -5139,6 +5348,7 @@ let pendingInteractiveTransformTy = 0
 let orbitDrawEnabled = false // 軌道表示が有効か
 let orbitMode = 'lines+dots' // 'lines+dots' | 'lines' | 'dots'
 let orbitGradientEnabled = false
+let coordinateGridEnabled = false
 // 軌道の固定表示。キャンバスをクリックすると、その点に軌道を固定する。
 // 固定中は {clientX, clientY}、未固定なら null。
 let pinnedOrbit = null
@@ -5519,6 +5729,7 @@ function zoomWithFactor(factor, cooldown, options = {}) {
     scaleCanvas(zoomedView.appliedFactor, lastX, lastY)
     redraw(false, cooldown)
   }
+  refreshCoordinateGrid()
   _refreshPinnedOrbits()
   // 軌道表示が有効で未固定なら、現在のマウス位置で描き直す。
   // ズームで座標変換が変わっても、マウスを動かすまで mousemove は来ないため。
@@ -6690,6 +6901,7 @@ function onMouseMove(evt) {
       redraw()
     }
     _refreshPinnedOrbits()
+    refreshCoordinateGrid()
   }
 }
 
@@ -9011,6 +9223,14 @@ function initListeners() {
 
   // Orbit 表示の操作
   try {
+    const coordinateGridToggleEl = document.getElementById('coordinate-grid-toggle')
+    if (coordinateGridToggleEl) {
+      coordinateGridToggleEl.checked = false
+      coordinateGridToggleEl.addEventListener('change', (e) => {
+        coordinateGridEnabled = e.target.checked
+        refreshCoordinateGrid()
+      })
+    }
     const orbitToggleEl = document.getElementById('orbit-toggle')
     if (orbitToggleEl) {
       orbitToggleEl.addEventListener('change', (e) => {

@@ -176,6 +176,8 @@ html.embedded-mode #mandelbrot-canvas {
     z-index: 1;
 }
 
+#coordinate-grid-canvas,
+#julia-coordinate-grid-canvas,
 #orbit-canvas,
 #julia-orbit-canvas,
 #detail-crosshair-canvas,
@@ -189,9 +191,28 @@ html.embedded-mode #mandelbrot-canvas {
     z-index: 2;
 }
 
+#coordinate-grid-canvas,
+#julia-coordinate-grid-canvas {
+    z-index: 1;
+}
+
 #detail-crosshair-canvas,
 #julia-detail-crosshair-canvas {
     z-index: 3;
+}
+
+.settings-render-options-grid {
+    display: grid;
+    grid-template-columns: auto auto minmax(7rem, 1fr);
+    align-items: start;
+    column-gap: 1rem;
+}
+
+.settings-device-options-grid {
+    display: grid;
+    grid-template-columns: auto auto;
+    align-items: start;
+    column-gap: 1rem;
 }
 
 #menu-toggle {

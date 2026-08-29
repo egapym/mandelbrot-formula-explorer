@@ -47,6 +47,7 @@
           <textarea id="debug" readonly hidden></textarea>
           <label for="debug" hidden>Debug</label>
           <canvas id="palette-canvas" hidden></canvas>
+          <canvas id="coordinate-grid-canvas"></canvas>
           <!-- Orbit visualization overlay (pointer-events:none so mouse passes through) -->
           <canvas id="orbit-canvas"></canvas>
           <canvas id="detail-crosshair-canvas"></canvas>
@@ -61,6 +62,7 @@
           <div class="canvas-wrap julia-canvas-wrap">
             <canvas id="julia-canvas"></canvas>
             <canvas id="julia-progress-canvas" width="20" height="20"></canvas>
+            <canvas id="julia-coordinate-grid-canvas"></canvas>
             <!-- Orbit visualization overlay for Julia canvas -->
             <canvas id="julia-orbit-canvas"></canvas>
             <canvas id="julia-detail-crosshair-canvas"></canvas>
@@ -335,86 +337,63 @@
 <!-- /orbit-trap-panel -->
 
           <div class="mb-2 row">
-            <div class="col col-sm-6 d-flex align-items-start gap-3">
-              <div data-bs-toggle="tooltip" data-bs-placement="left" title="Use WebGPU for main fractal rendering">
-                <label for="gpu" class="col-form-label py-0 d-block">Fractal GPU</label>
-                <div class="d-flex align-items-center py-1">
-                  <div class="form-check form-switch m-0">
-                    <input
-                      id="gpu"
-                      class="form-check-input"
-                      type="checkbox"
-                      role="switch"
-                      checked
-                      title="Use WebGPU for accelerated fractal rendering (requires a compatible browser and GPU)"
-                    />
+            <div class="col col-sm-6">
+              <div class="settings-device-options-grid">
+                <div data-bs-toggle="tooltip" data-bs-placement="left" title="Use WebGPU for main fractal rendering">
+                  <label for="gpu" class="col-form-label py-0 d-block">Fractal GPU</label>
+                  <div class="d-flex align-items-center py-1">
+                    <div class="form-check form-switch m-0">
+                      <input id="gpu" class="form-check-input" type="checkbox" role="switch" checked
+                        title="Use WebGPU for accelerated fractal rendering (requires a compatible browser and GPU)" />
+                    </div>
                   </div>
                 </div>
-              </div>
-              <div>
-                <label
-                  for="fullres"
-                  class="col-form-label py-0 d-block"
-                  data-bs-toggle="tooltip"
-                  data-bs-placement="left"
-                  title="Use physical pixels if different from display-pixels"
-                  >Hi DPI</label
-                >
-                <div class="d-flex align-items-center py-1">
-                  <div class="form-check form-switch m-0">
-                    <input
-                      id="fullres"
-                      class="form-check-input"
-                      type="checkbox"
-                      role="switch"
-                      title="Use physical (Hi-DPI) pixels for sharper rendering on high-resolution displays"
-                    />
+                <div>
+                  <label for="fullres" class="col-form-label py-0 d-block" data-bs-toggle="tooltip" data-bs-placement="left"
+                    title="Use physical pixels if different from display-pixels">Hi DPI</label>
+                  <div class="d-flex align-items-center py-1">
+                    <div class="form-check form-switch m-0">
+                      <input id="fullres" class="form-check-input" type="checkbox" role="switch"
+                        title="Use physical (Hi-DPI) pixels for sharper rendering on high-resolution displays" />
+                    </div>
                   </div>
                 </div>
               </div>
             </div>
-            <div class="col col-sm-6 d-flex align-items-start gap-3">
-              <div>
-                <label
-                  for="smooth"
-                  class="col-form-label py-0 d-block"
-                  data-bs-toggle="tooltip"
-                  data-bs-placement="left"
-                  title="Smooth coloring"
-                  >Smooth</label
-                >
-                <div class="d-flex align-items-center py-1">
-                  <div class="form-check form-switch m-0">
-                    <input
-                      id="smooth"
-                      class="form-check-input"
-                      type="checkbox"
-                      role="switch"
-                      title="Enable smooth coloring using continuous iteration count for gradient transitions. Shortcut: s"
-                    />
+            <div class="col col-sm-6">
+              <div class="settings-render-options-grid">
+                <div>
+                  <label for="smooth" class="col-form-label py-0 d-block" data-bs-toggle="tooltip" data-bs-placement="left"
+                    title="Smooth coloring">Smooth</label>
+                  <div class="d-flex align-items-center py-1">
+                    <div class="form-check form-switch m-0">
+                      <input id="smooth" class="form-check-input" type="checkbox" role="switch"
+                        title="Enable smooth coloring using continuous iteration count for gradient transitions. Shortcut: s" />
+                    </div>
                   </div>
                 </div>
-              </div>
-              <div>
-                <label
-                  for="escape-radius"
-                  class="col-form-label py-0 d-block"
-                  data-bs-toggle="tooltip"
-                  data-bs-placement="left"
-                  title="Escape radius. Points where |z| exceeds this value are treated as diverged. Changing disables smooth coloring."
-                  >Escape R</label
-                >
-                <input
-                  id="escape-radius"
-                  type="number"
-                  class="form-control form-control-sm py-0"
-                  value="4"
-                  min="0"
-                  step="0.1"
-                  style="width: 70px"
-                  title="Escape radius (default: 4). For z²+c boundary is 2; larger values shift color bands. Useful with custom functions."
-                />
-              </div>
+                <div>
+                  <label for="escape-radius" class="col-form-label py-0 d-block" data-bs-toggle="tooltip" data-bs-placement="left"
+                    title="Escape radius. Points where |z| exceeds this value are treated as diverged. Changing disables smooth coloring.">Escape
+                    R</label>
+                  <input id="escape-radius" type="number" class="form-control form-control-sm py-0" value="4" min="0" step="0.1"
+                    style="width: 70px"
+                    title="Escape radius (default: 4). For z²+c boundary is 2; larger values shift color bands. Useful with custom functions." />
+                </div>
+                <div>
+                  <label for="supersampling" class="col-form-label py-0 d-block" data-bs-toggle="tooltip" data-bs-placement="left"
+                    title="Supersampling for smoother edges (slower)">Supersampling</label>
+                  <select id="supersampling" class="form-select form-select-sm py-0" style="width: 110px"
+                    title="Render multiple samples per pixel for smoother edges. Higher values significantly reduce performance.">
+                    <option value="0" selected>OFF</option>
+                    <option value="2">2x2</option>
+                    <option value="4">4x4</option>
+                    <option value="8">8x8</option>
+                    <option value="16">16x16</option>
+                    <option value="32">32x32</option>
+                  </select>
+                </div>
+                </div>
             </div>
           </div>
           <div class="mb-2 row">
@@ -473,46 +452,39 @@
                   </div>
                 </div>
               </div>
-              <!-- orbit iter count removed; details popup will handle iteration info -->
+            </div>
+            <div class="col col-sm-6 d-flex align-items-start gap-3 flex-wrap">
               <div>
-                <label for="detail-toggle" class="col-form-label py-0 d-block" data-bs-toggle="tooltip" data-bs-placement="left"
-                  title="Show detailed information: hover on desktop, tap to pin on touch devices">
-                  Details
-                </label>
+                <label for="coordinate-grid-toggle" class="col-form-label py-0 d-block" data-bs-toggle="tooltip"
+                  data-bs-placement="left" title="Show coordinate grid and axis labels">Grid</label>
                 <div class="d-flex align-items-center py-1">
                   <div class="form-check form-switch m-0">
                     <input
-                      id="detail-toggle"
+                      id="coordinate-grid-toggle"
                       class="form-check-input"
                       type="checkbox"
                       role="switch"
-                      title="Toggle detailed information: hover on desktop, tap to pin on touch devices"
+                      title="Show coordinate grid and axis labels"
                     />
                   </div>
                 </div>
               </div>
-            </div>
-            <div class="col col-sm-6">
-              <label
-                for="supersampling"
-                class="col-form-label col col-sm-6 py-0"
-                data-bs-toggle="tooltip"
-                data-bs-placement="left"
-                title="Supersampling for smoother edges (slower)"
-                >Supersampling</label
-              >
-              <select
-                id="supersampling"
-                class="form-select form-select-sm py-0"
-                title="Render multiple samples per pixel for smoother edges. Higher values significantly reduce performance."
-              >
-                <option value="0" selected>OFF</option>
-                <option value="2">2x2</option>
-                <option value="4">4x4</option>
-                <option value="8">8x8</option>
-                <option value="16">16x16</option>
-                <option value="32">32x32</option>
-              </select>
+              <div>
+                <label
+                  for="detail-toggle"
+                  class="col-form-label py-0 d-block"
+                  data-bs-toggle="tooltip"
+                  data-bs-placement="left"
+                  title="Show detailed information: hover on desktop, tap to pin on touch devices"
+                  >Details</label
+                >
+                <div class="d-flex align-items-center py-1">
+                  <div class="form-check form-switch m-0">
+                    <input id="detail-toggle" class="form-check-input" type="checkbox" role="switch"
+                      title="Toggle detailed information: hover on desktop, tap to pin on touch devices" />
+                  </div>
+                </div>
+                </div>
             </div>
           </div>
           <div class="mb-2 row">
