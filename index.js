@@ -4940,6 +4940,17 @@ function _drawCoordinateGridLabel(ctx, text, x, y) {
   ctx.restore()
 }
 
+function _strokeCoordinateGridPath(ctx, lineWidth, lineColor, outlineWidth = lineWidth + 0.75) {
+  ctx.save()
+  ctx.lineWidth = outlineWidth
+  ctx.strokeStyle = 'rgba(0, 0, 0, 0.12)'
+  ctx.stroke()
+  ctx.lineWidth = lineWidth
+  ctx.strokeStyle = lineColor
+  ctx.stroke()
+  ctx.restore()
+}
+
 function _forEachCoordinateGridLine(minValue, maxValue, step, callback) {
   if (!Number.isFinite(minValue) || !Number.isFinite(maxValue) || !Number.isFinite(step) || step <= 0) return
   const span = maxValue - minValue
@@ -4990,8 +5001,6 @@ function _drawCoordinateGridForView(overlayCanvas, ownerCanvas, center, zoom) {
   ctx.save()
   ctx.lineCap = 'butt'
 
-  ctx.strokeStyle = 'rgba(255, 255, 255, 0.10)'
-  ctx.lineWidth = 1
   ctx.beginPath()
   _forEachCoordinateGridLine(minX, maxX, minorStep, (x) => {
     if (Math.abs(x / majorStep - Math.round(x / majorStep)) < 1e-6) return
@@ -5005,10 +5014,8 @@ function _drawCoordinateGridForView(overlayCanvas, ownerCanvas, center, zoom) {
     ctx.moveTo(0, sy)
     ctx.lineTo(width, sy)
   })
-  ctx.stroke()
+  _strokeCoordinateGridPath(ctx, 1, 'rgba(255, 255, 255, 0.07)', 1.25)
 
-  ctx.strokeStyle = 'rgba(255, 255, 255, 0.24)'
-  ctx.lineWidth = 1
   ctx.beginPath()
   _forEachCoordinateGridLine(minX, maxX, majorStep, (x) => {
     if (Math.abs(x) < axisEpsilon) return
@@ -5022,10 +5029,8 @@ function _drawCoordinateGridForView(overlayCanvas, ownerCanvas, center, zoom) {
     ctx.moveTo(0, sy)
     ctx.lineTo(width, sy)
   })
-  ctx.stroke()
+  _strokeCoordinateGridPath(ctx, 0.9, 'rgba(255, 255, 255, 0.16)', 1.6)
 
-  ctx.strokeStyle = 'rgba(255, 255, 255, 0.55)'
-  ctx.lineWidth = 1.5
   ctx.beginPath()
   const yAxisX = toScreenX(0)
   const xAxisY = toScreenY(0)
@@ -5039,7 +5044,7 @@ function _drawCoordinateGridForView(overlayCanvas, ownerCanvas, center, zoom) {
     ctx.moveTo(0, sy)
     ctx.lineTo(width, sy)
   }
-  ctx.stroke()
+  _strokeCoordinateGridPath(ctx, 1.2, 'rgba(255, 255, 255, 0.42)', 2)
 
   ctx.font = '11px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace'
   ctx.textBaseline = 'middle'
