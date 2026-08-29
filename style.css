@@ -520,6 +520,8 @@ footer {
     font-family: var(--sans-font-family);
     font-weight: 600;
     font-size: 1.2rem;
+    line-height: 1.25;
+    overflow-wrap: anywhere;
     background: linear-gradient(180deg, rgba(2,20,12,0.85), rgba(0,10,6,0.75));
     color: #7CFC00;
     background-color: rgba(0, 0, 0, 0.35);

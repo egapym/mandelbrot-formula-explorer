@@ -1,6 +1,6 @@
 /**
  * Bert Baron 氏の bertbaron/mandelbrot をベースにしています。
- * このファイルは Mandelbrot Explorer プロジェクトの一部です。
+ * このファイルは Mandelbrot Formula Explorer プロジェクトの一部です。
  * GPL-3.0 ライセンスです。
  */
 

@@ -1,6 +1,6 @@
-# Mandelbrot Explorer
+# Mandelbrot Formula Explorer
 
-A browser-based Mandelbrot and fractal explorer focused on deep zoom rendering, interactive experimentation, and algorithm research.
+A browser-based Mandelbrot and custom fractal formula explorer focused on deep zoom rendering, interactive experimentation, and algorithm research.
 
 This project extends the original work by Bert Baron with advanced rendering modes, custom iteration formulas, Buddhabrot support, and optional WebGPU acceleration.
 

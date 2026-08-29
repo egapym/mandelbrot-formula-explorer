@@ -1,6 +1,6 @@
 /**
  * Based on bertbaron/mandelbrot by Bert Baron
- * This file is part of the Mandelbrot Explorer project.
+ * This file is part of the Mandelbrot Formula Explorer project.
  * Licensed under GPL-3.0.
  */
 
