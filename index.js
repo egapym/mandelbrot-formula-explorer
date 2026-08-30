@@ -306,6 +306,9 @@ function _applyOrbitTrapSpecToUI(spec, colorPatternId) {
 
 const SQUARE_SIZE = 16 // 偶数である必要がある。全画面タスク時は -1
 const DEFAULT_ITERATIONS = 1000
+const DEFAULT_FRACTAL_TYPE = 'mandelbrot'
+const DEFAULT_ITERATION_FUNCTION = 'z*z + c'
+const DEFAULT_FRACTAL_PRESET_VALUE = 'preset:0'
 const DEFAULT_WORKER_COUNT = navigator.hardwareConcurrency * 4 || 4
 
 const MIN_PIXEL_SIZE = 1
@@ -2386,6 +2389,61 @@ try {
   }
 } catch (e) {
   console.warn('Could not add functionPresets to fractalType select', e)
+}
+
+function hasFractalTypeOption(value) {
+  if (!DOM.fractalTypeSelect || value == null) return false
+  return Array.from(DOM.fractalTypeSelect.options).some((option) => option.value === value)
+}
+
+function getFractalPresetValueForType(fractalType) {
+  const idx = functionPresets.findIndex((preset) => (preset?.fractalType || 'custom') === fractalType)
+  return idx >= 0 ? `preset:${idx}` : null
+}
+
+function normalizeFractalTypeParams(params = {}) {
+  const fallback = {
+    fractalType: DEFAULT_FRACTAL_TYPE,
+    iterationFunction: DEFAULT_ITERATION_FUNCTION,
+    fractalDataPresetIndex: DEFAULT_FRACTAL_PRESET_VALUE,
+  }
+  const rawFractalType = typeof params.fractalType === 'string' ? params.fractalType : ''
+  const rawPresetValue = typeof params.fractalDataPresetIndex === 'string' ? params.fractalDataPresetIndex : ''
+  const presetMatch = rawPresetValue.match(/^preset:(-?\d+)$/)
+  const presetIndex = presetMatch ? Number.parseInt(presetMatch[1], 10) : NaN
+  const preset = presetIndex >= 0 ? functionPresets[presetIndex] : null
+  const hasKnownFractalType = rawFractalType === DEFAULT_FRACTAL_TYPE || rawFractalType === 'custom'
+
+  if (rawFractalType && !hasKnownFractalType) return fallback
+
+  if (preset && hasFractalTypeOption(rawPresetValue)) {
+    const fractalType = preset.fractalType || 'custom'
+    if (rawFractalType && rawFractalType !== fractalType) return fallback
+    return {
+      fractalType,
+      iterationFunction: preset.expr || params.iterationFunction || fallback.iterationFunction,
+      fractalDataPresetIndex: rawPresetValue,
+    }
+  }
+
+  if (rawFractalType === 'custom' && hasFractalTypeOption('preset:-1')) {
+    return {
+      fractalType: 'custom',
+      iterationFunction: params.iterationFunction || fallback.iterationFunction,
+      fractalDataPresetIndex: 'preset:-1',
+    }
+  }
+
+  if (rawFractalType === DEFAULT_FRACTAL_TYPE) {
+    const presetValue = getFractalPresetValueForType(DEFAULT_FRACTAL_TYPE) || fallback.fractalDataPresetIndex
+    return {
+      fractalType: DEFAULT_FRACTAL_TYPE,
+      iterationFunction: params.iterationFunction || fallback.iterationFunction,
+      fractalDataPresetIndex: presetValue,
+    }
+  }
+
+  return fallback
 }
 
 const canvasElement = document.getElementById('mandelbrot-canvas')
@@ -10007,17 +10065,18 @@ function initFromParams(params) {
     const p = JSON.parse(atob(decodeURIComponent(params)))
     fractal.setZoom(applyEmbeddedInitialZoomCorrection(fxp.fromJSON(p.zoom)))
     fractal.setCenter(p.center.map(fxp.fromJSON))
+    const normalizedFractalParams = normalizeFractalTypeParams(p)
     fractal.max_iter = p.max_iter
     fractal.smooth = p.smooth
-    fractal.fractalType = p.fractalType
-    fractal.iterationFunction = p.iterationFunction
-    fractal.dataPresetIndex = p.fractalDataPresetIndex
-    DOM.fractalTypeSelect.value = p.fractalDataPresetIndex
-    DOM.iterationFunctionInput.value = p.iterationFunction
+    fractal.fractalType = normalizedFractalParams.fractalType
+    fractal.iterationFunction = normalizedFractalParams.iterationFunction
+    fractal.dataPresetIndex = normalizedFractalParams.fractalDataPresetIndex
+    DOM.fractalTypeSelect.value = normalizedFractalParams.fractalDataPresetIndex
+    DOM.iterationFunctionInput.value = normalizedFractalParams.iterationFunction
 
-    updateGpuVisibility(p.fractalType)
+    updateGpuVisibility(normalizedFractalParams.fractalType)
     // パラメータ復元時もメイン GPU トグル状態を整える
-    enforceMainGpuState(p.fractalType)
+    enforceMainGpuState(normalizedFractalParams.fractalType)
 
     const zr = p.z0[0]
     const zi = p.z0[1]
@@ -10037,7 +10096,7 @@ function initFromParams(params) {
     }
     // custom 以外の params を復元したときは反復式エラー表示を消す
     try {
-      if (p.fractalType !== 'custom') setIterationFunctionLabelError(false)
+      if (normalizedFractalParams.fractalType !== 'custom') setIterationFunctionLabelError(false)
     } catch (e) {
       console.warn('Error clearing iteration function label during params init:', e)
     }
