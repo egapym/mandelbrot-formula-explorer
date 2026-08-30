@@ -1,0 +1,98 @@
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+
+      - name: Prepare static site
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          rm -rf dist
+          mkdir -p dist
+
+          rsync -a \
+            --exclude '.git' \
+            --exclude '.github' \
+            --exclude 'dist' \
+            --exclude 'node_modules' \
+            --exclude 'README.md' \
+            --exclude 'docs' \
+            --exclude 'test' \
+            --exclude 'server.js' \
+            --exclude 'biome.json' \
+            --exclude '.gitignore' \
+            ./ dist/
+
+          touch dist/.nojekyll
+
+          find dist -type f \( -name '*.js' -o -name '*.mjs' \) ! -name '*.min.js' -print0 | while IFS= read -r -d '' file; do
+            npx --yes terser@5 "$file" \
+              --module \
+              --compress passes=2 \
+              --mangle toplevel \
+              --comments false \
+              -o "$file"
+          done
+
+          find dist -type f -name '*.css' ! -name '*.min.css' -print0 | while IFS= read -r -d '' file; do
+            npx --yes clean-css-cli@5 -o "$file" "$file"
+          done
+
+          if [ -f dist/index.html ]; then
+            npx --yes html-minifier-terser@7 dist/index.html \
+              --collapse-whitespace \
+              --remove-comments \
+              --remove-redundant-attributes \
+              --remove-script-type-attributes \
+              --remove-style-link-type-attributes \
+              --minify-js true \
+              -o dist/index.html
+          fi
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: ./dist
+
+  deploy:
+    if: github.event_name != 'pull_request'
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
