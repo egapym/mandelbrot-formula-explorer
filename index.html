@@ -45,7 +45,18 @@
   </head>
 
   <body id="app">
-    <h1 class="site-title">Mandelbrot Formula Explorer</h1>
+    <header class="site-header">
+      <h1 class="site-title">Mandelbrot Formula Explorer</h1>
+      <button
+        type="button"
+        class="support-button"
+        data-bs-toggle="modal"
+        data-bs-target="#support-modal"
+        aria-label="Support Mandelbrot Formula Explorer"
+      >
+        SUPPORT
+      </button>
+    </header>
     <div id="main">
       <div id="descripion" hidden>
         Mobile-friendly online Mandelbrot formula explorer with WebGPU acceleration, deep zoom, custom fractal formulas,
@@ -900,6 +911,32 @@
 
 	      <!-- popup element used to show hover details (positioned absolutely) -->
 	      <div id="detail-popup" hidden></div>
+
+	      <div class="modal fade support-modal" id="support-modal" tabindex="-1" aria-labelledby="support-title" aria-hidden="true">
+	        <div class="modal-dialog modal-dialog-centered">
+	          <div class="modal-content">
+	            <div class="modal-body">
+	              <button type="button" class="btn-close support-close" data-bs-dismiss="modal" aria-label="Close"></button>
+	              <div class="support-copy">
+	                <p class="support-kicker">Support this project</p>
+	                <h2 id="support-title">Donate</h2>
+	                <p>
+	                  If you enjoy finding fractals here and want to see the explorer grow, your support helps keep
+	                  development, hosting, and new experiments moving forward.
+	                </p>
+	              </div>
+	              <a
+	                class="support-donate-link"
+	                href="https://donate.stripe.com/3cIeVdegP1wq9gYf9ef7i00"
+	                target="_blank"
+	                rel="noopener noreferrer"
+	              >
+	                Click Here To Support
+	              </a>
+	            </div>
+	          </div>
+	        </div>
+	      </div>
 
 	      <div
 	        class="modal fade"
