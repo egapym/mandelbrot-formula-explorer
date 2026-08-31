@@ -7720,14 +7720,35 @@ function resizeToCanvasSize() {
       let juliaCanvasChanged = false
       if (jCanvas && juliaState.renderer) {
         juliaCanvasChanged = setCanvasBufferSizeIfChanged(jCanvas, juliaBufferWidth, juliaBufferHeight)
-        if (jCanvasChanged) juliaState.renderer.resized()
+        if (juliaCanvasChanged) juliaState.renderer.resized()
       }
 
-      // MB キャンバスは設定パネル内のプレビューなので、CSS 上の表示サイズを使う
-      const mbW = Math.max(1, canvasElement.offsetWidth)
-      const mbH = Math.max(1, canvasElement.offsetHeight)
+      // MB キャンバスは設定パネル内のプレビューなので、プレビュー枠の表示サイズを使う。
+      // 移動直後の wrap は fullscreen 時の矩形を1フレーム返すことがあるため、
+      // 移動先 column から CSS の 50% / 4:3 を再計算する。
+      const mbWrap = document.getElementById('mandelbrot-canvas-wrap')
+      const previewCol = document.getElementById('julia-mb-preview-col')
+      const isMandelbrotPreview = mbWrap?.parentElement === previewCol
+      const previewRect = previewCol?.getBoundingClientRect?.()
+      const previewStyle = isMandelbrotPreview ? getComputedStyle(previewCol) : null
+      const previewContentWidth =
+        previewRect?.width > 0
+          ? previewRect.width -
+            (parseFloat(previewStyle?.paddingLeft) || 0) -
+            (parseFloat(previewStyle?.paddingRight) || 0)
+          : 0
+      const mbRect = mbWrap?.getBoundingClientRect?.()
+      const mbDisplayWidth =
+        isMandelbrotPreview && previewContentWidth > 0
+          ? previewContentWidth * 0.5
+          : mbRect?.width || canvasElement.offsetWidth || 1
+      const mbDisplayHeight =
+        isMandelbrotPreview && previewContentWidth > 0 ? mbDisplayWidth * 0.75 : mbRect?.height || canvasElement.offsetHeight || 1
+      const mbW = Math.max(1, Math.round(mbDisplayWidth))
+      const mbH = Math.max(1, Math.round(mbDisplayHeight))
       const mainCanvasChanged = setCanvasBufferSizeIfChanged(canvasElement, mbW, mbH)
-      if (mainCanvasChanged) {
+      const mainRendererSizeChanged = fractal.width !== canvasElement.width || fractal.height !== canvasElement.height
+      if (mainCanvasChanged || mainRendererSizeChanged) {
         resizeTmpCanvas()
         fractal.resized()
       }
@@ -7735,7 +7756,7 @@ function resizeToCanvasSize() {
       const sizeEl = document.getElementById('sizeValue')
       if (sizeEl) sizeEl.innerText = `${juliaBufferWidth}x${juliaBufferHeight}`
       showZoomFactor()
-      const canvasSizeChanged = mainCanvasChanged || juliaCanvasChanged
+      const canvasSizeChanged = mainCanvasChanged || mainRendererSizeChanged || juliaCanvasChanged
       if (canvasSizeChanged && !shouldSuppressResizeRedraw()) redraw()
       return canvasSizeChanged
     }
@@ -9978,6 +9999,11 @@ function enterJuliaFullscreen({ redraw = true } = {}) {
   const mbWrap = document.getElementById('mandelbrot-canvas-wrap')
   const previewCol = document.getElementById('julia-mb-preview-col')
   const previewWrap = document.getElementById('julia-mb-preview-wrap')
+  if (mbWrap) {
+    mbWrap.style.width = ''
+    mbWrap.style.height = ''
+    mbWrap.style.flex = ''
+  }
   if (mbWrap && previewCol && mbWrap.parentElement !== previewCol) {
     previewCol.appendChild(mbWrap)
   }
