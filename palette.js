@@ -34,7 +34,7 @@ function blendBitmapPixelOverBackground(bitmapData, idx, bgR, bgG, bgB) {
 export function getPalette(id) {
   const palette = PALETTES.find((p) => p.id === id)
   if (palette) return palette
-  return ORIGINAL
+  return BLUE_GOLD
 }
 
 export function initPallet(palette, density, rotate, _exp, max_iter) {
@@ -127,11 +127,11 @@ class NormalPalette {
   }
 }
 
-class OriginalPalette extends NormalPalette {
+class BlueGoldPalette extends NormalPalette {
   constructor() {
     super()
-    this.id = 'original'
-    this.name = 'Original'
+    this.id = 'blue_gold'
+    this.name = 'Blue & Gold'
     this.wavelengths = [80, 81, 85]
     this.mirrorPosition = 565
     this.inSetColor = [0, 0, 0] // Black for points in the set
@@ -211,7 +211,7 @@ class IndexedPalette extends NormalPalette {
   }
 }
 
-const ORIGINAL = new OriginalPalette()
+const BLUE_GOLD = new BlueGoldPalette()
 
 // Ultra Fractal 風の配色。こちらは色間隔を等間隔にしている。
 const MANDELBROT = new IndexedPalette(
@@ -772,7 +772,7 @@ export const CUSTOM_ORBIT_TRAP_PALETTE = new CustomOrbitTrapPalette()
 
 export const PALETTES = [
   MANDELBROT,
-  ORIGINAL,
+  BLUE_GOLD,
   LAVA,
   FALL,
   OCEAN,
