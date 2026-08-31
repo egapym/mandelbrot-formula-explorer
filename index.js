@@ -831,9 +831,6 @@ class Mandelbrot {
 
   gpuErrorCallback(message) {
     console.log(`GPU error: ${message}`)
-    // GPU トグルは強制的に切らず、利用不可であることだけツールチップで伝える
-    DOM.gpuToggle.parentElement.setAttribute('title', 'WebGPU not supported')
-    new bootstrap.Tooltip(DOM.gpuToggle.parentElement)
 
     // 必要なら CPU フォールバック表示へ切り替わるよう再描画する
     redraw()
@@ -7969,9 +7966,7 @@ function updateGpuVisibility(_selectedType) {
   const parent = DOM.gpuToggle?.parentElement
   if (!parent) return
   // 現在は 'mandelbrot' と 'custom' の両方で GPU を使える
-  parent.setAttribute('title', 'Enable WebGPU acceleration')
   parent.style.display = ''
-  new bootstrap.Tooltip(parent)
 }
 
 // 指定されたフラクタル種別に対して、メイン GPU トグルの状態を整える。
@@ -7982,7 +7977,6 @@ function enforceMainGpuState(_selectedType) {
   // WebGPU が使えるなら、すべてのフラクタル種別で GPU を有効にする
   if (typeof navigator !== 'undefined' && 'gpu' in navigator) {
     mainGpu.disabled = false
-    mainGpu.parentElement?.setAttribute('title', 'Enable WebGPU acceleration')
   }
 }
 
@@ -8585,7 +8579,6 @@ function initListeners() {
       const mainGpu = document.getElementById('gpu')
       if (mainGpu && typeof navigator !== 'undefined' && 'gpu' in navigator) {
         mainGpu.disabled = false
-        mainGpu.parentElement?.setAttribute('title', 'Enable WebGPU acceleration')
       }
     } catch (e) {
       console.warn('Error updating main GPU toggle on fractalType change:', e?.message ? e.message : e)
@@ -8702,10 +8695,7 @@ function initListeners() {
       setIterationFunctionLabelError(false)
     }
 
-    // 以前は custom 関数で GPU を強制オフにしていたが、現在は説明だけ出し、
-    // トグル状態は変更しない。
-    DOM.gpuToggle.parentElement.setAttribute('title', 'GPU disabled for non-Mandelbrot fractal types')
-    new bootstrap.Tooltip(DOM.gpuToggle.parentElement)
+    // 以前は custom 関数で GPU を強制オフにしていたが、現在はトグル状態を変更しない。
 
     fractal.restartWorkers()
     _clearPinnedOrbits()
@@ -9197,8 +9187,6 @@ function initListeners() {
         fractal.fractalType = 'custom'
         DOM.fractalTypeSelect.value = 'preset:-1'
         fractal.dataPresetIndex = 'preset:-1'
-        DOM.gpuToggle.parentElement.setAttribute('title', 'GPU disabled for non-Mandelbrot fractal types')
-        new bootstrap.Tooltip(DOM.gpuToggle.parentElement)
         fractal.restartWorkers()
         _clearPinnedOrbits()
       }
@@ -9970,7 +9958,6 @@ function initUI() {
       if (typeof navigator === 'undefined' || !('gpu' in navigator)) {
         DOM.gpuToggle.checked = false
         DOM.gpuToggle.disabled = true
-        DOM.gpuToggle.parentElement.setAttribute('title', 'WebGPU not supported')
       }
     }
     // Buddhabrot 専用 GPU トグルにも同じ自動判定を反映する
@@ -9992,7 +9979,6 @@ function initUI() {
     if (mainGpu && fractal?.fractalType && fractal.fractalType !== 'mandelbrot' && fractal.fractalType !== 'custom') {
       mainGpu.checked = false
       mainGpu.disabled = true
-      mainGpu.parentElement?.setAttribute('title', 'GPU only available for Mandelbrot and Custom fractal types')
     }
   } catch (e) {
     console.warn('Error initializing GPU state:', e?.message ? e.message : e)
@@ -10200,11 +10186,6 @@ function initFromParams(params) {
       if (normalizedFractalParams.fractalType !== 'custom') setIterationFunctionLabelError(false)
     } catch (e) {
       console.warn('Error clearing iteration function label during params init:', e)
-    }
-
-    if (DOM.gpuToggle) {
-      DOM.gpuToggle.parentElement.setAttribute('title', 'GPU disabled for non-Mandelbrot fractal types')
-      new bootstrap.Tooltip(DOM.gpuToggle.parentElement)
     }
 
     if (p.palette) {
