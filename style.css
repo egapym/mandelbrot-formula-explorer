@@ -4,23 +4,23 @@
  */
 
 :root {
-    --sans-font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", "Noto Sans", "Liberation Sans", Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
-    /*font-size: 120%;*/
+  --sans-font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", "Noto Sans", "Liberation Sans", Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+  /*font-size: 120%;*/
 }
 
 body {
-    margin: 0;
+  margin: 0;
 }
 
 html.embedded-mode,
 html.embedded-mode body {
-    width: 100%;
-    height: 100%;
-    overflow: hidden;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
 }
 
 html.embedded-mode body {
-    display: block !important;
+  display: block !important;
 }
 
 html.embedded-mode .site-title,
@@ -29,152 +29,166 @@ html.embedded-mode #settings,
 html.embedded-mode #menu-toggle,
 html.embedded-mode #progress-canvas,
 html.embedded-mode #julia-progress-canvas {
-    display: none !important;
+  display: none !important;
 }
 
 html.embedded-mode #main {
-    position: fixed;
-    inset: 0;
-    width: 100vw;
-    height: 100vh;
-    min-height: 100vh;
-    gap: 0;
-    flex-wrap: nowrap;
-    justify-content: stretch;
-    align-items: stretch;
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  min-height: 100vh;
+  gap: 0;
+  flex-wrap: nowrap;
+  justify-content: stretch;
+  align-items: stretch;
 }
 
 html.embedded-mode #mandelbrot {
-    flex: 1 1 auto !important;
-    width: 100% !important;
-    height: 100% !important;
-    max-width: none !important;
-    margin: 0 !important;
-    aspect-ratio: auto !important;
+  flex: 1 1 auto !important;
+  width: 100% !important;
+  height: 100% !important;
+  max-width: none !important;
+  margin: 0 !important;
+  aspect-ratio: auto !important;
 }
 
 html.embedded-mode #mandelbrot-canvas-wrap,
 html.embedded-mode #mandelbrot-canvas {
-    flex: 1 1 auto !important;
-    width: 100% !important;
-    height: 100% !important;
+  flex: 1 1 auto !important;
+  width: 100% !important;
+  height: 100% !important;
 }
 
 /* メディアクエリに頼りすぎない、シンプルな折り返しレイアウト。
     親は折り返し可能な flex で、横に並べる余裕があれば横並び、
     足りなければ縦に回り込む。 */
 #main {
-    display: flex;
-    flex-direction: row;
-    justify-content: center;
-    align-items: stretch;
-    gap: 0.5rem;
-    flex-wrap: wrap; /* 幅が足りないときは自動で折り返す */
-    box-sizing: border-box;
+  display: flex;
+  flex-direction: row;
+  justify-content: center;
+  align-items: stretch;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  /* 幅が足りないときは自動で折り返す */
+  box-sizing: border-box;
 }
 
 #mandelbrot {
-    position: relative;
-     /* 基本は 800px 幅だが、はみ出さないよう必要時は縮む。 */
-     flex: 0 1 800px; /* 拡大しない、縮小可、基準は 800px */
-    width: min(800px, 100%);
-    aspect-ratio: 4 / 3;
-    box-sizing: border-box;
-    /* 余白は #main の gap に任せ、狭い幅でぶれた左 margin は使わない */
-    margin: 0px 0.3rem;
+  position: relative;
+  /* 基本は 800px 幅だが、はみ出さないよう必要時は縮む。 */
+  flex: 0 1 800px;
+  /* 拡大しない、縮小可、基準は 800px */
+  width: min(800px, 100%);
+  aspect-ratio: 4 / 3;
+  box-sizing: border-box;
+  /* 余白は #main の gap に任せ、狭い幅でぶれた左 margin は使わない */
+  margin: 0px 0.3rem;
 }
 
 /* 必要なら内容幅よりも縮められるようにし、意図しないはみ出しを防ぐ */
 #mandelbrot,
 #settings,
 .canvas-wrap {
-    min-width: 0;
+  min-width: 0;
 }
 
 /* 十分に広い画面では 2 カラム固定にし、キャンバスを 800x600 で維持する */
 @media (min-width: 1412px) {
-    #mandelbrot {
-        flex: 0 0 800px; /* 2 カラム時は固定幅 */
-        width: 800px;
-        height: 600px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-    }
-    #mandelbrot-canvas {
-        width: 800px;
-        height: 600px;
-        display: block;
-    }
+  #mandelbrot {
+    flex: 0 0 800px;
+    /* 2 カラム時は固定幅 */
+    width: 800px;
+    height: 600px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  #mandelbrot-canvas {
+    width: 800px;
+    height: 600px;
+    display: block;
+  }
 }
 
 @media (min-width: 1412px) {
-    /* キャンバスのラッパーを全体に広げ、内部キャンバスを中央に置く */
-    .canvas-wrap {
-        width: 100%;
-        height: 100%;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        box-sizing: border-box;
-    }
-    .canvas-wrap canvas {
-        max-width: 100%;
-        max-height: 100%;
-    }
+
+  /* キャンバスのラッパーを全体に広げ、内部キャンバスを中央に置く */
+  .canvas-wrap {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-sizing: border-box;
+  }
+
+  .canvas-wrap canvas {
+    max-width: 100%;
+    max-height: 100%;
+  }
 }
 
 /* 広い画面では全体を縦方向に整え、余計なスクロールを出さない */
 @media (min-width: 1412px) {
-    html {
-        height: 100%;
-    }
-    body {
-        height: 100%;
-        /* タイトル行は自然高、残りを #main が使う */
-        display: grid;
-        grid-template-rows: auto 1fr;
-    }
-    /* タイトルの残り高さを #main が使う。設定欄が長いときは内部だけスクロールする */
-    #main {
-        min-height: 0;
-        align-items: center; /* 行を縦中央に寄せる */
-        padding-top: 0;
-        box-sizing: border-box;
-        padding-bottom: 0;
-    }
-    /* タイトル下の余白で高さが増えないようにする */
-    .site-title {
-        margin-bottom: 0;
-    }
-    /* Mandelbrot 側と設定欄が #main 内に収まるようにする */
-    #mandelbrot {
-        max-height: 100%;
-        box-sizing: border-box;
-    }
-    .canvas-wrap {
-        max-height: 100%;
-    }
-    #settings {
-        max-height: 100%;
-        overflow: auto;
-        align-self: flex-start; /* 縦中央ではなく常に上寄せ */
-    }
+  html {
+    height: 100%;
+  }
+
+  body {
+    height: 100%;
+    /* タイトル行は自然高、残りを #main が使う */
+    display: grid;
+    grid-template-rows: auto 1fr;
+  }
+
+  /* タイトルの残り高さを #main が使う。設定欄が長いときは内部だけスクロールする */
+  #main {
+    min-height: 0;
+    align-items: center;
+    /* 行を縦中央に寄せる */
+    padding-top: 0;
+    box-sizing: border-box;
+    padding-bottom: 0;
+  }
+
+  /* タイトル下の余白で高さが増えないようにする */
+  .site-title {
+    margin-bottom: 0;
+  }
+
+  /* Mandelbrot 側と設定欄が #main 内に収まるようにする */
+  #mandelbrot {
+    max-height: 100%;
+    box-sizing: border-box;
+  }
+
+  .canvas-wrap {
+    max-height: 100%;
+  }
+
+  #settings {
+    max-height: 100%;
+    overflow: auto;
+    align-self: flex-start;
+    /* 縦中央ではなく常に上寄せ */
+  }
 }
 
 #mandelbrot-canvas {
-    image-rendering: pixelated;
-    width: 100%;
-    height: 100%;
-    /* ブラウザ標準のタッチ処理を止め、独自ハンドラを優先する */
-    touch-action: none;
+  image-rendering: pixelated;
+  width: 100%;
+  height: 100%;
+  /* ブラウザ標準のタッチ処理を止め、独自ハンドラを優先する */
+  touch-action: none;
 }
 
 #progress-canvas {
-    position: absolute;
-    top: 5px;
-    left: 5px;
-    z-index: 1;
+  position: absolute;
+  top: 5px;
+  left: 5px;
+  z-index: 1;
 }
 
 #coordinate-grid-canvas,
@@ -183,289 +197,307 @@ html.embedded-mode #mandelbrot-canvas {
 #julia-orbit-canvas,
 #detail-crosshair-canvas,
 #julia-detail-crosshair-canvas {
-    position: absolute;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    pointer-events: none;
-    z-index: 2;
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 2;
 }
 
 #coordinate-grid-canvas,
 #julia-coordinate-grid-canvas {
-    z-index: 1;
+  z-index: 1;
 }
 
 #detail-crosshair-canvas,
 #julia-detail-crosshair-canvas {
-    z-index: 3;
+  z-index: 3;
 }
 
 .settings-render-options-grid {
-    display: grid;
-    grid-template-columns: auto auto minmax(7rem, 1fr);
-    align-items: start;
-    column-gap: 1rem;
+  display: grid;
+  grid-template-columns: auto auto minmax(7rem, 1fr);
+  align-items: start;
+  column-gap: 1rem;
 }
 
 .settings-device-options-grid {
-    display: grid;
-    grid-template-columns: auto auto;
-    align-items: start;
-    column-gap: 1rem;
+  display: grid;
+  grid-template-columns: auto auto;
+  align-items: start;
+  column-gap: 1rem;
 }
 
 #menu-toggle {
-    position: absolute;
-    top: 0;
-    left: 0;
-    width: 30px;
-    height: 30px;
-    z-index: 3;
-    /*border-radius: 5px;*/
-    border: none;
-    padding: 5px;
-    cursor: pointer;
-    background-color: rgba(0, 0, 0, 0.5);
-    display: none;
-    /* 閉じる操作だと分かる白いバツ印 */
-    background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="white"><path d="M18.3 5.71a1 1 0 0 0-1.41 0L12 10.59 7.11 5.7A1 1 0 0 0 5.7 7.11L10.59 12l-4.89 4.89a1 1 0 1 0 1.41 1.41L12 13.41l4.89 4.89a1 1 0 0 0 1.41-1.41L13.41 12l4.89-4.89a1 1 0 0 0 .01-1.4z"/></svg>');
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 30px;
+  height: 30px;
+  z-index: 3;
+  /*border-radius: 5px;*/
+  border: none;
+  padding: 5px;
+  cursor: pointer;
+  background-color: rgba(0, 0, 0, 0.5);
+  display: none;
+  /* 閉じる操作だと分かる白いバツ印 */
+  background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="white"><path d="M18.3 5.71a1 1 0 0 0-1.41 0L12 10.59 7.11 5.7A1 1 0 0 0 5.7 7.11L10.59 12l-4.89 4.89a1 1 0 1 0 1.41 1.41L12 13.41l4.89 4.89a1 1 0 0 0 1.41-1.41L13.41 12l4.89-4.89a1 1 0 0 0 .01-1.4z"/></svg>');
 }
 
 #palette-canvas {
-    position: absolute;
-    bottom: 0;
-    left: 0;
-    width: 100%;
-    height: 20px;
-    z-index: 1;
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  width: 100%;
+  height: 20px;
+  z-index: 1;
 }
 
 /* 詳細モード時に座標や反復回数を表示するポップアップ */
 #detail-popup {
-    position: absolute;
-    pointer-events: none;
-    background: rgba(0, 0, 0, 0.6);
-    color: #fff;
-    padding: 4px 8px;
-    border-radius: 4px;
-    font-size: 0.75rem;
-    z-index: 1000;
-    white-space: pre;
+  position: absolute;
+  pointer-events: none;
+  background: rgba(0, 0, 0, 0.6);
+  color: #fff;
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  z-index: 1000;
+  white-space: pre;
 }
 
 /* 設定欄全体を少しだけコンパクトに見せる */
 #settings {
-     /* 余った横幅を使うが、狭すぎる幅にはしない。足りないときは下へ回り込む。 */
-     flex: 1 1 600px; /* 拡大可、縮小可、基準は 600px */
-     /* 狭い画面でもあふれず全幅近くまで広がれる最小幅 */
-     min-width: clamp(300px, 50vw, 600px);
-     /* 極端に広い画面でも設定欄が広がりすぎないよう上限を設ける */
-    max-width: 800px;
-    padding: 0 0 0.5rem 0;
-    font-size: 0.8rem;
-    line-height: 1.0;
-    box-sizing: border-box;
+  /* 余った横幅を使うが、狭すぎる幅にはしない。足りないときは下へ回り込む。 */
+  flex: 1 1 600px;
+  /* 拡大可、縮小可、基準は 600px */
+  /* 狭い画面でもあふれず全幅近くまで広がれる最小幅 */
+  min-width: clamp(300px, 50vw, 600px);
+  /* 極端に広い画面でも設定欄が広がりすぎないよう上限を設ける */
+  max-width: 800px;
+  padding: 0 0 0.5rem 0;
+  font-size: 0.8rem;
+  line-height: 1.0;
+  box-sizing: border-box;
 }
 
 #settings .form-control-sm {
-    min-height: 0;
+  min-height: 0;
 }
 
 /* iOS Safari avoids focus zoom when form controls are at least 16px. */
 @media (hover: none) and (pointer: coarse) {
-    #settings input,
-    #settings select,
-    #settings textarea {
-        font-size: 16px !important;
-    }
+
+  #settings input,
+  #settings select,
+  #settings textarea {
+    font-size: 16px !important;
+  }
 }
 
 #settings .container.container-sm {
-    padding-left: 0;
-    padding-right: 0.3rem;
-    overflow-x: hidden; /* Bootstrap の負 margin による横スクロールを防ぐ */
-    overflow-y: hidden; /* Bootstrap の負 margin によるはみ出しを防ぐ */
+  padding-left: 0;
+  padding-right: 0.3rem;
+  overflow-x: hidden;
+  /* Bootstrap の負 margin による横スクロールを防ぐ */
+  overflow-y: hidden;
+  /* Bootstrap の負 margin によるはみ出しを防ぐ */
 }
 
 /* 設定欄内の行間を少し詰める */
 #settings .mb-2 {
-    margin-bottom: 0.25rem !important;
+  margin-bottom: 0.25rem !important;
 }
 
 /* 設定欄内の区切り線も詰める */
 #settings hr {
-    margin-top: 0.5rem;
-    margin-bottom: 0.5rem;
+  margin-top: 0.5rem;
+  margin-bottom: 0.5rem;
 }
 
 /* トグルとラベルを縦中央でそろえる */
 #settings .form-check.form-switch {
-    display: flex;
-    align-items: center;
-    min-height: 0;
-    padding-left: 0;
-    gap: 4px;
+  display: flex;
+  align-items: center;
+  min-height: 0;
+  padding-left: 0;
+  gap: 4px;
 }
 
 #settings .form-check.form-switch .form-check-input {
-    float: none;
-    margin-top: 0;
-    margin-left: 0;
-    flex-shrink: 0;
-    cursor: pointer;
+  float: none;
+  margin-top: 0;
+  margin-left: 0;
+  flex-shrink: 0;
+  cursor: pointer;
 }
 
 #settings .form-check-label {
-    margin-bottom: 0;
-    line-height: 1;
-    cursor: pointer;
+  margin-bottom: 0;
+  line-height: 1;
+  cursor: pointer;
 }
 
 .collapse-ruler button {
-    height: 1.5rem;
-    font-size: 75%;
-    color: #818a91;
-    padding: .25rem .5rem;
-    background-color: transparent;
-    border: 0;
-    border-radius: .25rem;
-    margin-top: 0.25rem;
+  height: 1.5rem;
+  font-size: 75%;
+  color: #818a91;
+  padding: .25rem .5rem;
+  background-color: transparent;
+  border: 0;
+  border-radius: .25rem;
+  margin-top: 0.25rem;
 }
 
 .collapse-ruler button:hover {
-    color: #fff;
-    background-color: #027de7;
+  color: #fff;
+  background-color: #027de7;
 }
 
 .collapse-ruler .col {
-    padding-right: 0;
+  padding-right: 0;
 }
 
 kbd {
-    display: inline-block;
-    padding: 2px 5px;
-    border: 1px solid #999;
-    border-radius: 3px;
-    background-color: #f7f7f7;
-    font-family: monospace;
+  display: inline-block;
+  padding: 2px 5px;
+  border: 1px solid #999;
+  border-radius: 3px;
+  background-color: #f7f7f7;
+  font-family: monospace;
 }
 
 footer {
-    font-family: var(--sans-font-family);
-    font-size: 80%;
-    text-align: center;
-    padding-top: 10px;
+  font-family: var(--sans-font-family);
+  font-size: 80%;
+  text-align: center;
+  padding-top: 10px;
 }
 
 #debug {
-    font-size: inherit;
-    position: absolute;
-    top: 30px;
-    left: 5px;
-    z-index: 1;
+  font-size: inherit;
+  position: absolute;
+  top: 30px;
+  left: 5px;
+  z-index: 1;
 }
 
 /* 現在のレイアウトは折り返し flex と min-width を使うため、細かな分岐は少なくてよい */
 
 /* フルスクリーン時はキャンバスと進捗表示を中心に見せる */
 #main:fullscreen {
-    position: relative;
-    display: block;
-    padding: 0;
+  position: relative;
+  display: block;
+  padding: 0;
 }
 
 #mandelbrot.fullscreen {
-    width: 100vw;
-    height: 100vh;
-    position: fixed;
-    top: 0;
-    left: 0;
+  width: 100vw;
+  height: 100vh;
+  position: fixed;
+  top: 0;
+  left: 0;
 }
 
 /* フルスクリーン時は枠線を消し、画面いっぱいに見せる */
 #mandelbrot.fullscreen .canvas-wrap {
-    border: none !important;
-    border-radius: 0 !important;
+  border: none !important;
+  border-radius: 0 !important;
 }
 
 #settings.fullscreen {
-    position: absolute;
-    top: 30px;
-    left: 5px;
-    z-index: 2;
-    border-radius: 5px;
-    /* フルスクリーン時は少し細めにする */
-    max-width: 40vw;
-    /* 画面下にはみ出さないようにし、内部だけスクロール可にする */
-    max-height: calc(100vh - 30px);
-    overflow-y: auto;
-    background-color: rgba(0, 0, 0, 0.5);
-    visibility: visible;
-    opacity: 1;
-    transition: visibility 0.5s, opacity 0.5s linear;
+  position: absolute;
+  top: 30px;
+  left: 5px;
+  z-index: 2;
+  border-radius: 5px;
+  /* フルスクリーン時は少し細めにする */
+  max-width: 40vw;
+  /* 画面下にはみ出さないようにし、内部だけスクロール可にする */
+  max-height: calc(100vh - 30px);
+  overflow-y: auto;
+  background-color: rgba(0, 0, 0, 0.5);
+  visibility: visible;
+  opacity: 1;
+  transition: visibility 0.5s, opacity 0.5s linear;
 }
+
 #settings.hidden.fullscreen {
-    visibility: hidden;
-    opacity: 0;
+  visibility: hidden;
+  opacity: 0;
 }
+
 #menu-toggle.fullscreen {
-    display: block;
+  display: block;
 }
+
 #menu-toggle.hidden.fullscreen {
-    background: transparent;
-    border: none !important;
-    font-size:0;
+  background: transparent;
+  border: none !important;
+  font-size: 0;
 }
+
 #footer.fullscreen {
-    display: none;
+  display: none;
 }
 
 .slider-reset {
-    padding-top: 0px !important;
-    padding-bottom: 0px !important;
-    padding-left: 4px !important;
-    padding-right: 4px !important;
+  padding-top: 0px !important;
+  padding-bottom: 0px !important;
+  padding-left: 4px !important;
+  padding-right: 4px !important;
 }
 
 /* 塗りつぶしボタンも Stop ボタンに寄せた見た目へそろえる */
 .btn.btn-success {
-    background-color: transparent !important;
-    color: #198754 !important; /* Bootstrap success */
-    border: 1px solid #198754 !important;
+  background-color: transparent !important;
+  color: #198754 !important;
+  /* Bootstrap success */
+  border: 1px solid #198754 !important;
 }
-.btn.btn-success:hover, .btn.btn-success:focus {
-    background-color: rgba(25, 135, 84, 0.08) !important;
+
+.btn.btn-success:hover,
+.btn.btn-success:focus {
+  background-color: rgba(25, 135, 84, 0.08) !important;
 }
 
 .btn.btn-primary {
-    background-color: transparent !important;
-    color: #0d6efd !important; /* Bootstrap primary */
-    border: 1px solid #0d6efd !important;
+  background-color: transparent !important;
+  color: #0d6efd !important;
+  /* Bootstrap primary */
+  border: 1px solid #0d6efd !important;
 }
-.btn.btn-primary:hover, .btn.btn-primary:focus {
-    background-color: rgba(13, 110, 253, 0.08) !important;
+
+.btn.btn-primary:hover,
+.btn.btn-primary:focus {
+  background-color: rgba(13, 110, 253, 0.08) !important;
 }
 
 /* 危険系のアウトラインボタンはホバー時も文字色を維持する */
 .btn.btn-outline-danger {
-    color: #dc3545 !important; /* Bootstrap danger */
-    border-color: #dc3545 !important;
-    background-color: transparent !important;
+  color: #dc3545 !important;
+  /* Bootstrap danger */
+  border-color: #dc3545 !important;
+  background-color: transparent !important;
 }
-.btn.btn-outline-danger:hover, .btn.btn-outline-danger:focus {
-    color: #dc3545 !important; /* ホバー時も文字色を維持 */
-    background-color: rgba(220, 53, 69, 0.08) !important;
+
+.btn.btn-outline-danger:hover,
+.btn.btn-outline-danger:focus {
+  color: #dc3545 !important;
+  /* ホバー時も文字色を維持 */
+  background-color: rgba(220, 53, 69, 0.08) !important;
 }
 
 /* 小さなボタンの余白と角丸をそろえる */
 .btn.btn-sm {
-    border-radius: 0.25rem;
+  border-radius: 0.25rem;
 }
 
 #settings .btn {
-    white-space: nowrap;
+  white-space: nowrap;
 }
 
 #settings .settings-action-row+.settings-action-row {
@@ -487,9 +519,10 @@ footer {
   line-height: 1.15;
   white-space: nowrap;
 }
+
 #settings .settings-animation-control,
 #settings #buddha-scale {
-    min-width: 0;
+  min-width: 0;
 }
 
 /* フルスクリーン時は入力欄を半透明背景でも読みやすくする */
@@ -501,320 +534,321 @@ footer {
 #settings.fullscreen .form-select,
 #settings.fullscreen .form-control-sm,
 #settings.fullscreen .form-select-sm {
-    background-color: transparent !important;
-    color: #fff !important;
-    border-color: rgba(255, 255, 255, 0.2) !important;
+  background-color: transparent !important;
+  color: #fff !important;
+  border-color: rgba(255, 255, 255, 0.2) !important;
 }
 
 #settings.fullscreen input:focus,
 #settings.fullscreen textarea:focus,
 #settings.fullscreen select:focus {
-    outline: none !important;
-    box-shadow: 0 0 0 0.15rem rgba(255,255,255,0.06) !important;
-    border-color: rgba(255,255,255,0.45) !important;
+  outline: none !important;
+  box-shadow: 0 0 0 0.15rem rgba(255, 255, 255, 0.06) !important;
+  border-color: rgba(255, 255, 255, 0.45) !important;
 }
 
 #settings.fullscreen ::placeholder {
-    color: rgba(255,255,255,0.7) !important;
+  color: rgba(255, 255, 255, 0.7) !important;
 }
 
 /* ネイティブのドロップダウンを開いたときも読める色を保つ */
 #settings.fullscreen select option {
-    background-color: rgba(0,0,0,0.6) !important;
-    color: #fff !important;
+  background-color: rgba(0, 0, 0, 0.6) !important;
+  color: #fff !important;
 }
 
 .site-header {
-    margin: 0;
-    position: relative;
-    width: 100vw;
-    max-width: 100vw;
-    display: grid;
-    grid-template-columns: 1fr;
-    align-items: center;
-    gap: 0.75rem;
-    box-sizing: border-box;
-    padding: 6px 12px;
-    font-family: var(--sans-font-family);
-    background: linear-gradient(180deg, rgba(2,20,12,0.85), rgba(0,10,6,0.75));
-    background-color: rgba(0, 0, 0, 0.35);
+  margin: 0;
+  position: relative;
+  width: 100vw;
+  max-width: 100vw;
+  display: grid;
+  grid-template-columns: 1fr;
+  align-items: center;
+  gap: 0.75rem;
+  box-sizing: border-box;
+  padding: 6px 12px;
+  font-family: var(--sans-font-family);
+  background: linear-gradient(180deg, rgba(2, 20, 12, 0.85), rgba(0, 10, 6, 0.75));
+  background-color: rgba(0, 0, 0, 0.35);
 }
 
 /* 左側ブロック内のサイトタイトル。狭い画面では中央寄せにする */
 .site-title {
-    grid-column: 1;
-    margin: 0;
-    min-width: 0;
-    display: block;
-    box-sizing: border-box;
-    padding: 0 6rem;
-    font-weight: 600;
-    font-size: 1.2rem;
-    line-height: 1.25;
-    overflow-wrap: anywhere;
-    color: #7CFC00;
-    text-align: center;
+  grid-column: 1;
+  margin: 0;
+  min-width: 0;
+  display: block;
+  box-sizing: border-box;
+  padding: 0 6rem;
+  font-weight: 600;
+  font-size: 1.2rem;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+  color: #7CFC00;
+  text-align: center;
 }
 
 .support-button {
-    position: absolute;
-    top: 50%;
-    right: 12px;
-    transform: translateY(-50%);
-    min-height: 30px;
-    border: 1px solid rgba(124, 252, 0, 0.42);
-    border-radius: 999px;
-    padding: 0.18rem 0.72rem;
-    background: rgba(124, 252, 0, 0.06);
-    color: rgba(220, 255, 205, 0.92);
-    font-family: var(--sans-font-family);
-    font-size: 0.72rem;
-    font-weight: 700;
-    letter-spacing: 0;
-    line-height: 1;
-    cursor: pointer;
-    transition:
-        background-color 160ms ease,
-        border-color 160ms ease,
-        color 160ms ease,
-        transform 160ms ease;
+  position: absolute;
+  top: 50%;
+  right: 12px;
+  transform: translateY(-50%);
+  min-height: 30px;
+  border: 1px solid rgba(124, 252, 0, 0.42);
+  border-radius: 999px;
+  padding: 0.18rem 0.72rem;
+  background: rgba(124, 252, 0, 0.06);
+  color: rgba(220, 255, 205, 0.92);
+  font-family: var(--sans-font-family);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0;
+  line-height: 1;
+  cursor: pointer;
+  transition:
+    background-color 160ms ease,
+    border-color 160ms ease,
+    color 160ms ease,
+    transform 160ms ease;
 }
 
 .support-button:hover,
 .support-button:focus-visible {
-    background: rgba(124, 252, 0, 0.14);
-    border-color: rgba(124, 252, 0, 0.72);
-    color: #fff;
-    transform: translateY(calc(-50% - 1px));
+  background: rgba(124, 252, 0, 0.14);
+  border-color: rgba(124, 252, 0, 0.72);
+  color: #fff;
+  transform: translateY(calc(-50% - 1px));
 }
 
 .support-button:focus-visible {
-    outline: 2px solid rgba(124, 252, 0, 0.55);
-    outline-offset: 2px;
+  outline: 2px solid rgba(124, 252, 0, 0.55);
+  outline-offset: 2px;
 }
 
 .support-modal .modal-dialog {
-    width: min(calc(100vw - 2rem), 460px);
-    max-width: none;
-    margin-right: auto;
-    margin-left: auto;
+  width: min(calc(100vw - 2rem), 460px);
+  max-width: none;
+  margin-right: auto;
+  margin-left: auto;
 }
 
 .support-modal .modal-content {
-    overflow: hidden;
-    border: 1px solid rgba(124, 252, 0, 0.22);
-    border-radius: 8px;
-    background:
-        radial-gradient(circle at 12% 0%, rgba(124, 252, 0, 0.12), transparent 34%),
-        linear-gradient(145deg, rgba(9, 23, 20, 0.98), rgba(3, 8, 10, 0.98));
-    color: #f4fff0;
-    box-shadow: 0 22px 70px rgba(0, 0, 0, 0.35);
+  overflow: hidden;
+  border: 1px solid rgba(124, 252, 0, 0.22);
+  border-radius: 8px;
+  background:
+    radial-gradient(circle at 12% 0%, rgba(124, 252, 0, 0.12), transparent 34%),
+    linear-gradient(145deg, rgba(9, 23, 20, 0.98), rgba(3, 8, 10, 0.98));
+  color: #f4fff0;
+  box-shadow: 0 22px 70px rgba(0, 0, 0, 0.35);
 }
 
 .support-modal .modal-body {
-    position: relative;
-    padding: 1.45rem;
+  position: relative;
+  padding: 1.45rem;
 }
 
 .support-close {
-    position: absolute;
-    top: 0.7rem;
-    right: 0.7rem;
-    filter: invert(1) grayscale(1);
-    opacity: 0.72;
+  position: absolute;
+  top: 0.7rem;
+  right: 0.7rem;
+  filter: invert(1) grayscale(1);
+  opacity: 0.72;
 }
 
 .support-copy {
-    padding-right: 1.5rem;
+  padding-right: 1.5rem;
 }
 
 .support-kicker {
-    margin: 0 0 0.35rem;
-    color: rgba(124, 252, 0, 0.76);
-    font-family: var(--sans-font-family);
-    font-size: 0.76rem;
-    font-weight: 700;
-    line-height: 1.2;
+  margin: 0 0 0.35rem;
+  color: rgba(124, 252, 0, 0.76);
+  font-family: var(--sans-font-family);
+  font-size: 0.76rem;
+  font-weight: 700;
+  line-height: 1.2;
 }
 
 .support-copy h2 {
-    margin: 0 0 0.35rem;
-    font-family: var(--sans-font-family);
-    font-size: clamp(1.7rem, 4vw, 2.2rem);
-    font-weight: 750;
-    letter-spacing: 0;
-    line-height: 1;
+  margin: 0 0 0.35rem;
+  font-family: var(--sans-font-family);
+  font-size: clamp(1.7rem, 4vw, 2.2rem);
+  font-weight: 750;
+  letter-spacing: 0;
+  line-height: 1;
 }
 
 .support-copy p:last-child {
-    margin: 0 0 1.1rem;
-    color: rgba(244, 255, 240, 0.86);
-    font-family: var(--sans-font-family);
-    font-size: 0.95rem;
-    line-height: 1.45;
+  margin: 0 0 1.1rem;
+  color: rgba(244, 255, 240, 0.86);
+  font-family: var(--sans-font-family);
+  font-size: 0.95rem;
+  line-height: 1.45;
 }
 
 .support-donate-link {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 100%;
-    min-height: 46px;
-    border: 1px solid rgba(92, 227, 205, 0.7);
-    border-radius: 6px;
-    background: linear-gradient(135deg, #36b7a7, #238f8e);
-    color: #fff;
-    font-family: var(--sans-font-family);
-    font-size: 0.96rem;
-    font-weight: 750;
-    line-height: 1.2;
-    text-align: center;
-    text-decoration: none;
-    transition:
-        filter 160ms ease,
-        transform 160ms ease,
-        box-shadow 160ms ease;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  min-height: 46px;
+  border: 1px solid rgba(92, 227, 205, 0.7);
+  border-radius: 6px;
+  background: linear-gradient(135deg, #36b7a7, #238f8e);
+  color: #fff;
+  font-family: var(--sans-font-family);
+  font-size: 0.96rem;
+  font-weight: 750;
+  line-height: 1.2;
+  text-align: center;
+  text-decoration: none;
+  transition:
+    filter 160ms ease,
+    transform 160ms ease,
+    box-shadow 160ms ease;
 }
 
 .support-donate-link:hover,
 .support-donate-link:focus-visible {
-    color: #fff;
-    filter: brightness(1.08);
-    transform: translateY(-1px);
-    box-shadow: 0 10px 24px rgba(36, 151, 144, 0.25);
+  color: #fff;
+  filter: brightness(1.08);
+  transform: translateY(-1px);
+  box-shadow: 0 10px 24px rgba(36, 151, 144, 0.25);
 }
 
 #mandelbrot {
-    display: flex;
-    align-items: stretch;
-    overflow: hidden;
+  display: flex;
+  align-items: stretch;
+  overflow: hidden;
 }
 
 .canvas-wrap {
-    position: relative;
-    flex: 1 1 auto;
-    min-height: 0;
-    box-sizing: border-box;
-    overflow: hidden;
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  box-sizing: border-box;
+  overflow: hidden;
 }
 
 #mandelbrot:not(.julia-mode) #mandelbrot-canvas-wrap {
-    width: 100%;
-    height: 100%;
-    flex: 1 1 auto;
-    align-self: stretch;
+  width: 100%;
+  height: 100%;
+  flex: 1 1 auto;
+  align-self: stretch;
 }
 
 @media all and (max-width: 1200px) {
-    /* 既存のレスポンシブ配置を維持する */
-    .site-title {
-        width: 100%;
-    }
+
+  /* 既存のレスポンシブ配置を維持する */
+  .site-title {
+    width: 100%;
+  }
 }
 
 @media (max-width: 560px) {
-    #settings .container.container-sm {
-        padding-left: 0.3rem;
-        padding-right: 0.3rem;
-    }
+  #settings .container.container-sm {
+    padding-left: 0.3rem;
+    padding-right: 0.3rem;
+  }
 
-    #orbit-mode {
-        width: 8.25rem;
-        max-width: 100%;
-    }
+  #orbit-mode {
+    width: 8.25rem;
+    max-width: 100%;
+  }
 
-    .site-header {
-        gap: 0.5rem;
-        padding: 6px 8px;
-    }
+  .site-header {
+    gap: 0.5rem;
+    padding: 6px 8px;
+  }
 
-    .site-title {
-        grid-column: 1;
-        width: auto;
-        padding: 0 5rem 0 0;
-        font-size: 1rem;
-        text-align: left;
-    }
+  .site-title {
+    grid-column: 1;
+    width: auto;
+    padding: 0 5rem 0 0;
+    font-size: 1rem;
+    text-align: left;
+  }
 
-    .support-button {
-        right: 8px;
-        min-height: 28px;
-        padding-inline: 0.58rem;
-        font-size: 0.68rem;
-    }
+  .support-button {
+    right: 8px;
+    min-height: 28px;
+    padding-inline: 0.58rem;
+    font-size: 0.68rem;
+  }
 }
 
 @media (max-width: 1411px) {
-    #mandelbrot {
-        margin-left: 0;
-        margin-right: 0;
-    }
+  #mandelbrot {
+    margin-left: 0;
+    margin-right: 0;
+  }
 }
 
 @media (max-width: 520px) {
-    #settings .settings-action-row {
-        --bs-gutter-x: 0;
-        display: grid;
-        gap: 0.25rem;
-        margin-left: 0;
-        margin-right: 0;
-    }
+  #settings .settings-action-row {
+    --bs-gutter-x: 0;
+    display: grid;
+    gap: 0.25rem;
+    margin-left: 0;
+    margin-right: 0;
+  }
 
-    #settings .settings-action-row + .settings-action-row {
-        margin-top: 0.375rem;
-    }
+  #settings .settings-action-row+.settings-action-row {
+    margin-top: 0.375rem;
+  }
 
-    #settings .settings-action-row > [class*="col"] {
-        width: auto;
-        max-width: none;
-        flex: initial;
-        padding-left: 0;
-        padding-right: 0;
-    }
+  #settings .settings-action-row>[class*="col"] {
+    width: auto;
+    max-width: none;
+    flex: initial;
+    padding-left: 0;
+    padding-right: 0;
+  }
 
-    #settings .settings-action-row--buddha {
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-    }
+  #settings .settings-action-row--buddha {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 
-    #settings .settings-action-row--buddha .action-col--render,
-    #settings .settings-action-row--buddha .action-col--download,
-                                                                                                                                                                                                                                                                #settings .settings-action-row--primary>* {
-        grid-column: 1 / -1;
-    }
+  #settings .settings-action-row--buddha .action-col--render,
+  #settings .settings-action-row--buddha .action-col--download,
+  #settings .settings-action-row--primary>* {
+    grid-column: 1 / -1;
+  }
 
-                                                                                                                                                                                                                                                                #settings .settings-action-row--secondary {
-                                                                                                                                                                                                                                                                  grid-template-columns: 1fr;
-    }
+  #settings .settings-action-row--secondary {
+    grid-template-columns: 1fr;
+  }
 
-                                                                                                                                                                                                                                                                #settings .settings-coordinate-actions {
-                                                                                                                                                                                                                                                                  --bs-gutter-x: 0;
-                                                                                                                                                                                                                                                                  display: grid;
-                                                                                                                                                                                                                                                                  gap: 0.25rem;
-                                                                                                                                                                                                                                                                  grid-template-columns: 1fr;
-                                                                                                                                                                                                                                                                  margin-left: 0;
-                                                                                                                                                                                                                                                                  margin-right: 0;
-                                                                                                                                                                                                                                                                }
-                                                                                                                                
-                                                                                                                                                                                                                                                                #settings .settings-coordinate-actions>[class*="col"] {
-                                                                                                                                                                                                                                                                  width: auto;
-        max-width: none;
-        flex: initial;
-        grid-column: 1 / -1;
-          padding-left: 0;
-          padding-right: 0;
-    }
+  #settings .settings-coordinate-actions {
+    --bs-gutter-x: 0;
+    display: grid;
+    gap: 0.25rem;
+    grid-template-columns: 1fr;
+    margin-left: 0;
+    margin-right: 0;
+  }
 
-                                                                                                                                                                                                                                                                #settings .settings-coordinate-control-grid {
-                                                                                                                                                                                                                                                                  grid-template-columns: minmax(0, 1fr) auto minmax(3.75rem, auto);
-                                                                                                                                                                                                                                                                }
-                                                                                                                                
-                                                                                                                                                                                                                                                                #settings .settings-coordinate-control-grid #applyCoords {
-                                                                                                                                                                                                                                                                  font-size: 0.72rem;
-    }
+  #settings .settings-coordinate-actions>[class*="col"] {
+    width: auto;
+    max-width: none;
+    flex: initial;
+    grid-column: 1 / -1;
+    padding-left: 0;
+    padding-right: 0;
+  }
 
-                                                                                                                                                                                                                                                                #settings .settings-inline-stop {
-        margin-left: 0;
-    }
+  #settings .settings-coordinate-control-grid {
+    grid-template-columns: minmax(0, 1fr) auto minmax(3.75rem, auto);
+  }
+
+  #settings .settings-coordinate-control-grid #applyCoords {
+    font-size: 0.72rem;
+  }
+
+  #settings .settings-inline-stop {
+    margin-left: 0;
+  }
 }
 
 /* ============================================================
@@ -826,6 +860,7 @@ footer {
   display: none;
   width: 100%;
 }
+
 #julia-section.visible {
   display: flex;
   justify-content: center;
@@ -833,15 +868,15 @@ footer {
 
 /* Julia モードでは、Julia キャンバスを設定欄寄りに配置しやすくする */
 #mandelbrot.julia-mode #julia-section.visible {
-    justify-content: center !important;
+  justify-content: center !important;
 }
 
 /* Julia モードでは通常の縦横比を外し、縦並びレイアウトにする */
 #mandelbrot.julia-mode {
-    flex-direction: column !important;
-    /* 狭い画面では中央寄せ、広い画面では後で右寄せに上書きする */
-    align-items: center !important;
-    justify-content: center !important;
+  flex-direction: column !important;
+  /* 狭い画面では中央寄せ、広い画面では後で右寄せに上書きする */
+  align-items: center !important;
+  justify-content: center !important;
   aspect-ratio: auto !important;
   height: auto !important;
   flex: 0 0 auto !important;
@@ -850,9 +885,10 @@ footer {
 }
 
 /* Julia モードでは設定欄は縦中央ではなく上に寄せる */
-#mandelbrot.julia-mode ~ #settings {
+#mandelbrot.julia-mode~#settings {
   align-self: flex-start;
 }
+
 /* Julia モード時は広幅レイアウトの固定寸法を上書きする */
 @media (min-width: 1412px) {
   #mandelbrot.julia-mode {
@@ -864,14 +900,17 @@ footer {
     /* 横並び時はキャンバスを設定欄側へ寄せる */
     align-items: flex-end !important;
   }
+
   #mandelbrot.julia-mode #julia-section.visible {
     justify-content: flex-end !important;
   }
+
   #mandelbrot.julia-mode #mandelbrot-canvas-wrap {
     /* 幅高さは JS 側で決め、flex に上書きさせない */
     flex: 0 0 auto !important;
   }
-    /* フラクタルキャンバスだけ 800x600 固定を外す */
+
+  /* フラクタルキャンバスだけ 800x600 固定を外す */
   #mandelbrot.julia-mode #mandelbrot-canvas {
     width: 100% !important;
     height: 100% !important;
@@ -889,6 +928,7 @@ footer {
   pointer-events: none;
   z-index: 2;
 }
+
 .julia-crosshair::before {
   content: '';
   position: absolute;
@@ -901,6 +941,7 @@ footer {
   background: rgba(255, 255, 255, 0.9);
   box-shadow: 0 0 3px rgba(0, 0, 0, 0.9), 0 0 6px rgba(0, 0, 0, 0.5);
 }
+
 .julia-crosshair::after {
   display: none;
 }
@@ -911,6 +952,7 @@ footer {
   box-sizing: border-box;
   overflow: hidden;
 }
+
 #julia-canvas {
   display: block;
   image-rendering: pixelated;
@@ -962,11 +1004,13 @@ footer {
   border: none !important;
   border-radius: 0 !important;
 }
+
 /* #mandelbrot-canvas-wrap を設定欄のプレビューへ移したときの見た目 */
 #julia-mb-preview-wrap #mandelbrot-canvas-wrap {
   /* 縦3:横4 = landscape: width:height = 4:3 */
   width: 50% !important;
-    height: auto !important;     /* 高さ 100% 指定で縦横比が崩れないようにする */
+  height: auto !important;
+  /* 高さ 100% 指定で縦横比が崩れないようにする */
   aspect-ratio: 4 / 3 !important;
   flex: 0 0 auto !important;
   overflow: hidden;

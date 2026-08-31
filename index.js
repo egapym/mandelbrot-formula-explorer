@@ -5036,12 +5036,22 @@ function _syncOverlayCanvasToDisplay(overlayCanvas, ownerCanvas) {
   return [width, height]
 }
 
+function _canDrawCoordinateGridReliably(zoom) {
+  if (!_isOrbitZoomWithinLimit(zoom, ORBIT_MAX_RELIABLE_ZOOM)) return false
+  if (_isIOSLikeBrowser()) {
+    return _isOrbitZoomWithinLimit(zoom, IOS_ORBIT_LINE_PATH_MAX_RELIABLE_ZOOM)
+  }
+  return true
+}
+
 function _drawCoordinateGridForView(overlayCanvas, ownerCanvas, center, zoom) {
   const size = _syncOverlayCanvasToDisplay(overlayCanvas, ownerCanvas)
   if (!size) return
   const [width, height] = size
   const ctx = overlayCanvas.getContext('2d')
   ctx.clearRect(0, 0, width, height)
+
+  if (!_canDrawCoordinateGridReliably(zoom)) return
 
   const zoomValue = zoom?.toNumber ? zoom.toNumber() : Number(zoom)
   if (!Number.isFinite(zoomValue) || zoomValue <= 0) return
@@ -5076,7 +5086,7 @@ function _drawCoordinateGridForView(overlayCanvas, ownerCanvas, center, zoom) {
     ctx.moveTo(0, sy)
     ctx.lineTo(width, sy)
   })
-  _strokeCoordinateGridPath(ctx, 1, 'rgba(255, 255, 255, 0.07)', 1.25)
+  _strokeCoordinateGridPath(ctx, 1, 'rgba(255, 255, 255, 0.10)', 1.25)
 
   ctx.beginPath()
   _forEachCoordinateGridLine(minX, maxX, majorStep, (x) => {
@@ -5091,7 +5101,7 @@ function _drawCoordinateGridForView(overlayCanvas, ownerCanvas, center, zoom) {
     ctx.moveTo(0, sy)
     ctx.lineTo(width, sy)
   })
-  _strokeCoordinateGridPath(ctx, 0.9, 'rgba(255, 255, 255, 0.16)', 1.6)
+  _strokeCoordinateGridPath(ctx, 0.9, 'rgba(255, 255, 255, 0.24)', 1.6)
 
   ctx.beginPath()
   const yAxisX = toScreenX(0)
@@ -5111,7 +5121,7 @@ function _drawCoordinateGridForView(overlayCanvas, ownerCanvas, center, zoom) {
   ctx.font = '11px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace'
   ctx.textBaseline = 'middle'
   const labelY = Math.min(height - 12, Math.max(12, xAxisY + 12))
-  const labelX = Math.min(width - 44, Math.max(4, yAxisX + 6))
+  const preferredLabelX = Math.max(4, yAxisX + 6)
 
   ctx.textAlign = 'center'
   _forEachCoordinateGridLine(minX, maxX, majorStep, (x) => {
@@ -5125,7 +5135,10 @@ function _drawCoordinateGridForView(overlayCanvas, ownerCanvas, center, zoom) {
     if (Math.abs(y) < axisEpsilon) return
     const sy = toScreenY(y)
     if (sy < -12 || sy > height + 12) return
-    _drawCoordinateGridLabel(ctx, _formatCoordinateGridNumber(-y, majorStep, 'i'), labelX, sy)
+    const text = _formatCoordinateGridNumber(-y, majorStep, 'i')
+    const textWidth = ctx.measureText(text).width
+    const labelX = clampNumber(preferredLabelX, 4, Math.max(4, width - textWidth - 5))
+    _drawCoordinateGridLabel(ctx, text, labelX, sy)
   })
 
   ctx.restore()
