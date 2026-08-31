@@ -594,7 +594,10 @@ footer {
 }
 
 .support-modal .modal-dialog {
-    max-width: min(92vw, 460px);
+    width: min(calc(100vw - 2rem), 460px);
+    max-width: none;
+    margin-right: auto;
+    margin-left: auto;
 }
 
 .support-modal .modal-content {
@@ -710,6 +713,16 @@ footer {
 }
 
 @media (max-width: 560px) {
+    #settings .container.container-sm {
+        padding-left: 0.3rem;
+        padding-right: 0.3rem;
+    }
+
+    #orbit-mode {
+        width: 8.25rem;
+        max-width: 100%;
+    }
+
     .site-header {
         gap: 0.5rem;
         padding: 6px 8px;
@@ -777,7 +790,7 @@ footer {
                                                                                                                                                                                                                                                                   --bs-gutter-x: 0;
                                                                                                                                                                                                                                                                   display: grid;
                                                                                                                                                                                                                                                                   gap: 0.25rem;
-                                                                                                                                                                                                                                                                  grid-template-columns: repeat(2, minmax(0, 1fr));
+                                                                                                                                                                                                                                                                  grid-template-columns: 1fr;
                                                                                                                                                                                                                                                                   margin-left: 0;
                                                                                                                                                                                                                                                                   margin-right: 0;
                                                                                                                                                                                                                                                                 }
@@ -786,6 +799,7 @@ footer {
                                                                                                                                                                                                                                                                   width: auto;
         max-width: none;
         flex: initial;
+        grid-column: 1 / -1;
           padding-left: 0;
           padding-right: 0;
     }

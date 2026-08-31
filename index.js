@@ -320,6 +320,8 @@ const NON_MANDELBROT_GPU_MAX_ZOOM = fxp.fromNumber(1.0e5)
 // Beyond this point Mandelbrot needs the perturbation renderer to retain detail.
 const MANDELBROT_DIRECT_GPU_MAX_ZOOM = NON_MANDELBROT_GPU_MAX_ZOOM
 const ORBIT_TRAP_CPU_MAX_ZOOM = fxp.fromNumber(2.2e13)
+const ORBIT_MAX_RELIABLE_ZOOM = fxp.fromNumber(1.0e14)
+const IOS_ORBIT_LINE_PATH_MAX_RELIABLE_ZOOM = fxp.fromNumber(1.0e7)
 
 // アニメーションと時間まわりの定数
 const ANIMATION_CONSTANTS = {
@@ -4637,6 +4639,7 @@ function startAnimation(targetCenter, targetZoom, durationMs) {
         }
 
         redraw()
+        _refreshActiveOrbitOverlays()
       } catch (e) {
         console.warn('Animation step error:', e)
         stopAnimation()
@@ -4673,8 +4676,8 @@ function startAnimation(targetCenter, targetZoom, durationMs) {
         animationState.running = false
         animationState.reqId = null
         redraw()
+        _refreshActiveOrbitOverlays()
         updatePermalink()
-        _refreshPinnedOrbits()
       }
     }
 
@@ -4693,6 +4696,7 @@ function startAnimation(targetCenter, targetZoom, durationMs) {
         fractal.setCenter([nx, ny])
         fractal.setZoom(nz)
         redraw()
+        _refreshActiveOrbitOverlays()
       } catch (_err) {
         stopAnimation()
         return
@@ -4702,8 +4706,8 @@ function startAnimation(targetCenter, targetZoom, durationMs) {
         animationState.running = false
         animationState.reqId = null
         redraw()
+        _refreshActiveOrbitOverlays()
         updatePermalink()
-        _refreshPinnedOrbits()
       }
     }
     animationState.reqId = requestAnimationFrame(step)
@@ -5793,17 +5797,7 @@ function zoomWithFactor(factor, cooldown, options = {}) {
     redraw(false, cooldown)
   }
   refreshCoordinateGrid()
-  _refreshPinnedOrbits()
-  // 軌道表示が有効で未固定なら、現在のマウス位置で描き直す。
-  // ズームで座標変換が変わっても、マウスを動かすまで mousemove は来ないため。
-  if (orbitDrawEnabled && !pinnedOrbit) {
-    try {
-      const [cReFxp, cImFxp] = fractal.canvas2complex(lastX, lastY)
-      const cReal = cReFxp.toNumber ? cReFxp.toNumber() : 0
-      const cImag = cImFxp.toNumber ? cImFxp.toNumber() : 0
-      drawOrbitOnCanvasAtComplex(cReal, cImag, lastX, lastY, cReFxp, cImFxp)
-    } catch (_e) {}
-  }
+  _refreshActiveOrbitOverlays()
 }
 
 function handleScroll(evt) {
@@ -6151,6 +6145,7 @@ function applyCoordinates() {
       fractal.setCenter(targetCenter)
       savedFractalImageData = null
       redraw()
+      _refreshActiveOrbitOverlays()
       updatePermalink()
     }
 
@@ -6329,6 +6324,41 @@ function _getMainOrbitRenderView() {
   }
 
   return { center, zoom }
+}
+
+function _isIOSLikeBrowser() {
+  const platform = navigator.platform || ''
+  const ua = navigator.userAgent || ''
+  return /iPad|iPhone|iPod/.test(ua) || (platform === 'MacIntel' && navigator.maxTouchPoints > 1)
+}
+
+function _isOrbitZoomWithinLimit(zoom, limit) {
+  if (!zoom || !limit) return false
+  try {
+    return zoom.withScale(limit.scale).leq(limit)
+  } catch (_) {
+    const zoomNumber = zoom.toNumber ? zoom.toNumber() : Number(zoom)
+    const limitNumber = limit.toNumber ? limit.toNumber() : Number(limit)
+    return Number.isFinite(zoomNumber) && Number.isFinite(limitNumber) && zoomNumber <= limitNumber
+  }
+}
+
+function _canDrawOrbitReliably(renderer = fractal) {
+  if (!_isOrbitZoomWithinLimit(renderer?.zoom, ORBIT_MAX_RELIABLE_ZOOM)) return false
+
+  // iOS Safari/WebKit can drop a single large canvas path much earlier than
+  // desktop browsers. Gradient mode draws each line segment separately, so keep
+  // this stricter limit only for non-gradient line rendering on iOS-like devices.
+  const drawsSingleLinePath = orbitMode !== 'dots' && !orbitGradientEnabled
+  if (_isIOSLikeBrowser() && drawsSingleLinePath) {
+    return _isOrbitZoomWithinLimit(renderer?.zoom, IOS_ORBIT_LINE_PATH_MAX_RELIABLE_ZOOM)
+  }
+
+  return true
+}
+
+function _canDrawOrbitReliablyForZoom(zoom) {
+  return _canDrawOrbitReliably({ zoom })
 }
 
 function _fxpComplexToOrbitCss(reFxp, imFxp, ow, oh, view = null) {
@@ -6549,6 +6579,8 @@ function drawOrbitOnCanvasAtComplex(cReal, cImag, refPixX = null, refPixY = null
   ctx.clearRect(0, 0, ow, oh)
 
   const orbitView = _getMainOrbitRenderView()
+  if (!_canDrawOrbitReliablyForZoom(orbitView.zoom)) return
+
   const zoomVal = orbitView.zoom.toNumber ? orbitView.zoom.toNumber() : 1
   const fw = fractal.width,
     fh = fractal.height
@@ -6633,6 +6665,33 @@ function drawOrbitOnCanvas(clientX, clientY) {
   drawOrbitOnCanvasAtComplex(cReal, cImag, px, py, cReFxp, cImFxp)
 }
 
+function _refreshMainOrbitOverlayAtLastPoint() {
+  if (!orbitDrawEnabled) return
+  try {
+    const orbitView = _getMainOrbitRenderView()
+    const [cReFxp, cImFxp] = _canvas2complexForView(lastX, lastY, orbitView.center, orbitView.zoom, fractal.precision)
+    const cReal = cReFxp.toNumber ? cReFxp.toNumber() : 0
+    const cImag = cImFxp.toNumber ? cImFxp.toNumber() : 0
+    drawOrbitOnCanvasAtComplex(cReal, cImag, lastX, lastY, cReFxp, cImFxp)
+  } catch (_) {
+    clearOrbitCanvas()
+  }
+}
+
+function _refreshActiveOrbitOverlays() {
+  if (!orbitDrawEnabled) return
+  if (pinnedOrbit) {
+    _refreshPinnedOrbits()
+    return
+  }
+  _refreshMainOrbitOverlayAtLastPoint()
+  if (orbitDrawEnabled && juliaPinnedOrbit && juliaState?.active) {
+    try {
+      drawOrbitOnJuliaCanvasAtComplex(juliaPinnedOrbit.re, juliaPinnedOrbit.im)
+    } catch (_) {}
+  }
+}
+
 // ── Julia Orbit Visualization ─────────────────────────────────────────────
 function clearJuliaOrbitCanvas() {
   const jOrbitCanvas = document.getElementById('julia-orbit-canvas')
@@ -6666,6 +6725,8 @@ function drawOrbitOnJuliaCanvasAtComplex(z0Real, z0Imag, refPixX = null, refPixY
   ctx.clearRect(0, 0, ow, oh)
 
   const renderer = juliaState.renderer
+  if (!_canDrawOrbitReliably(renderer)) return
+
   const jZoom = renderer.zoom.toNumber ? renderer.zoom.toNumber() : 1
   const jW = renderer.canvas.width,
     jH = renderer.canvas.height
@@ -8138,7 +8199,7 @@ function initListeners() {
           juliaDragStart = [x, y]
           _juliaPinDragged = true
           redrawJulia()
-          _refreshPinnedOrbits()
+          _refreshActiveOrbitOverlays()
           return
         }
 
@@ -8201,7 +8262,7 @@ function initListeners() {
           renderer.setZoom(newZoom)
 
           redrawJulia()
-          _refreshPinnedOrbits()
+          _refreshActiveOrbitOverlays()
           juliaLastTouchDistance = newTouchDistance
           juliaLastTouchCenter = newTouchCenter
         }
@@ -8329,7 +8390,7 @@ function initListeners() {
           trackPendingInteractiveScaleTransform(zoomedPendingView.appliedFactor, lastX, lastY)
           scaleCanvas(zoomedPendingView.appliedFactor, lastX, lastY)
           scheduleGpuInteractiveRedraw()
-          _refreshPinnedOrbits()
+          _refreshActiveOrbitOverlays()
         } else {
           applyPixelDeltaToCenter(dx, dy)
           panCanvas(dx, dy)
@@ -9303,6 +9364,8 @@ function initListeners() {
           juliaPinnedOrbit = null
           clearOrbitCanvas()
           clearJuliaOrbitCanvas()
+        } else {
+          _refreshActiveOrbitOverlays()
         }
       })
     }
@@ -9310,15 +9373,14 @@ function initListeners() {
     if (orbitModeEl) {
       orbitModeEl.addEventListener('change', (e) => {
         orbitMode = e.target.value
-        // モード変更後に固定済み軌道を描き直す
-        _refreshPinnedOrbits()
+        _refreshActiveOrbitOverlays()
       })
     }
     const orbitGradientToggleEl = document.getElementById('orbit-gradient-toggle')
     if (orbitGradientToggleEl) {
       orbitGradientToggleEl.addEventListener('change', (e) => {
         orbitGradientEnabled = e.target.checked
-        _refreshPinnedOrbits()
+        _refreshActiveOrbitOverlays()
       })
     }
   } catch (e) {
@@ -9703,7 +9765,7 @@ function reset() {
 
   // すべての設定が反映されるよう resetCaches=true で再描画する
   redraw(true)
-  _refreshPinnedOrbits()
+  _refreshActiveOrbitOverlays()
 }
 
 /**
@@ -9759,7 +9821,7 @@ function resetPosition() {
 
   // 描き直す
   redraw(true)
-  _refreshPinnedOrbits()
+  _refreshActiveOrbitOverlays()
 }
 
 const PERMALINK_UPDATE_MIN_INTERVAL_MS = 250
