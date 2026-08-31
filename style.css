@@ -679,12 +679,16 @@ footer {
   line-height: 1;
 }
 
-.support-copy p:last-child {
-  margin: 0 0 1.1rem;
+.support-copy p {
+  margin: 0 0 0.7rem;
   color: rgba(244, 255, 240, 0.86);
   font-family: var(--sans-font-family);
   font-size: 0.95rem;
   line-height: 1.45;
+}
+
+.support-copy p:last-child {
+  margin-bottom: 1.1rem;
 }
 
 .support-donate-link {
