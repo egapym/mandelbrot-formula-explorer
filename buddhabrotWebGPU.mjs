@@ -636,15 +636,18 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
       device.queue.submit([zeroEncoder.finish()])
     }
 
-    // サンプル数が多い場合に備え、compute workgroup はバッチ単位で流す
-    const workgroupsTotal = Math.ceil(invocations / 64)
     // 次元ごとの最大 compute workgroup 数を取得する
     const maxPerDim = device.limits?.maxComputeWorkgroupsPerDimension || 65535
     const maxPerDimSafe = Math.max(1, maxPerDim)
 
-    // 極端に長い GPU ループを避けるための安全上限
-    const MAX_SAMPLES_PER_THREAD = 1000000 // per-invocation sample upper bound
-    const MAX_SAMPLES_PER_BATCH = 50000000 // total samples per host batch
+    // iOS の WebGPU 実装では、1 invocation で複数 sample を連続処理すると
+    // maxIter が大きい場合に GPU の実行時間上限を超え、結果が全 0 のまま
+    // 完了扱いになることがある。各 invocation は常に 1 sample に限定し、
+    // sample 数が多いときはホスト側で複数 batch に分ける。
+    // 各 batch の総 sample 数を invocation 数以下にして、GPU 実行時間を
+    // 抑える。最後の batch も余分な sample を実行しない。
+    const MAX_SAMPLES_PER_THREAD = 1
+    const MAX_SAMPLES_PER_BATCH = Math.max(1, invocations)
 
     let samplesRemaining = totalSamples
     try {
@@ -652,13 +655,15 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
       while (samplesRemaining > 0) {
         // このバッチで処理するサンプル数を決める
         const samplesThisBatch = Math.min(samplesRemaining, invocations * MAX_SAMPLES_PER_THREAD, MAX_SAMPLES_PER_BATCH)
-        const samplesPerThreadThis = Math.max(1, Math.ceil(samplesThisBatch / invocations))
+        const invocationsThisBatch = Math.min(invocations, samplesThisBatch)
+        const samplesPerThreadThis = Math.max(1, Math.ceil(samplesThisBatch / invocationsThisBatch))
         console.info(
           `buddhabrotWebGPU: batch[${batchIndex}] will request samplesThisBatch=${samplesThisBatch} (MAX_SAMPLES_PER_BATCH=${MAX_SAMPLES_PER_BATCH})`,
         )
 
         // このバッチ用の samplesPerThread と seed を設定する
         u32view[3] = samplesPerThreadThis
+        u32view[6] = invocationsThisBatch
         // 新しい seed
         let batchSeed = 0
         try {
@@ -676,7 +681,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         )
 
         // workgroup が上限を超える場合は分割して dispatch する
-        let remaining = workgroupsTotal
+        let remaining = Math.ceil(invocationsThisBatch / 64)
         let invocationOffset = 0
         while (remaining > 0) {
           const thisChunk = Math.min(remaining, maxPerDimSafe)
@@ -750,7 +755,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         }
 
         // このバッチで実際に処理したサンプル数を反映する
-        const processed = Math.min(samplesRemaining, invocations * samplesPerThreadThis)
+        const processed = samplesThisBatch
         samplesRemaining -= processed
         this.onProgress({ delta: processed, total: totalSamples })
         console.info(
