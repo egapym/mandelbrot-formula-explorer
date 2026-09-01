@@ -8754,6 +8754,10 @@ function initListeners() {
     fractal.useGpu = event.target.checked
     clearPendingInteractiveRedrawState()
     fractal.applyZoomLimitForConfiguredMode()
+    // GPU 描画中は CPU Worker が長時間アイドルになる。iOS ではその間に
+    // module Worker が失効することがあるため、CPU へ戻す直前に作り直す。
+    // これにより GPU の直前フレームや進捗表示が残り続けるのを防ぐ。
+    if (!fractal.useGpu) fractal.restartWorkers()
     redraw()
   })
   DOM.fullScreenButton.addEventListener('click', (_event) => {

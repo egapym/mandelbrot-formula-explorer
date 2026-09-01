@@ -138,8 +138,12 @@ export async function getWorkerBlobUrl(scriptPath) {
  * @returns {Promise<Worker>}
  */
 export async function createWorkerFrom(scriptPath, options = { type: 'module' }) {
-  const url = await getWorkerBlobUrl(scriptPath)
-  return new Worker(url, options)
+  // iOS Safari can create a module Worker from a Blob URL, but fail when that
+  // Blob imports other Blob URLs.  The failure is reported asynchronously by
+  // the Worker, leaving callers with a worker that never returns a result.
+  // A same-origin module URL keeps the import base intact and works in both
+  // Safari and the other supported browsers.
+  return new Worker(_resolveAbsolute(scriptPath), options)
 }
 
 /**
