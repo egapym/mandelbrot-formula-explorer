@@ -3385,10 +3385,11 @@ async function startBuddhaRender() {
     return true
   }
 
-  // 新しい Buddhabrot が完成するまでは、古い View 表示を切り替えられないようにする
+  // 新しい Buddhabrot が完成するまでは View 表示を切り替えられないようにする。
+  // 既に同じ対象で表示中なら、OFF に戻さず表示状態のまま固定する。
   const viewToggle = DOM.buddha.toggle || document.getElementById('buddha-toggle')
   if (viewToggle) {
-    viewToggle.checked = false
+    viewToggle.checked = targetWasShowingBuddha
     viewToggle.disabled = true
   }
 
@@ -3413,9 +3414,24 @@ async function startBuddhaRender() {
     console.warn('Error attempting to stop normal fractal render before Buddhabrot start:', e?.message ? e.message : e)
   }
 
-  // すでに Buddhabrot 実行中なら一度止めてからやり直す
+  // すでに Buddhabrot 実行中なら一度止めてからやり直す。
+  // View ON で再レンダーする場合は、既存表示を消さずに新しい結果へ差し替える。
   try {
-    if (buddhaActive) stopAndClearBuddha(true)
+    if (buddhaActive) {
+      if (targetWasShowingBuddha) {
+        buddhaRunnerGeneration++
+        buddhaRedrawScheduled = false
+        if (buddhaRunner?.running) {
+          buddhaRunner.stop()
+        }
+        buddhaRunner?.terminate?.()
+        buddhaRunner = null
+        buddhaPreservedDisplay = false
+        BuddhabrotState.targetKind = target.kind
+      } else {
+        stopAndClearBuddha(true)
+      }
+    }
   } catch (e) {
     console.warn('Error stopping existing Buddhabrot before starting new one:', e?.message ? e.message : e)
   }
@@ -3521,10 +3537,12 @@ async function startBuddhaRender() {
   }
   if (abortIfBuddhaRenderCanceled()) return
 
-  ctx.save()
-  ctx.fillStyle = 'black'
-  ctx.fillRect(0, 0, targetCanvas.width, targetCanvas.height)
-  ctx.restore()
+  if (!targetWasShowingBuddha) {
+    ctx.save()
+    ctx.fillStyle = 'black'
+    ctx.fillRect(0, 0, targetCanvas.width, targetCanvas.height)
+    ctx.restore()
+  }
 
   // 必要なら runner を作る。
   // ただし GPU runner が残っていて GPU トグルが OFF なら停止し、CPU runner を作り直す。
