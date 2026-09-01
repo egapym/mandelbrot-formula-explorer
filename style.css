@@ -493,6 +493,42 @@ footer {
 
 /* タッチ端末では設定を画面下半分に置き、キャンバス上部を常に見せる。 */
 @media (max-width: 600px), (hover: none) and (pointer: coarse) {
+  /* 通常表示でも canvas は従来の 4:3 のまま上部に置き、設定をその直下の
+     半画面ドロワーにする。fullscreen と同じ操作性を保ちつつ重なりは作らない。 */
+  #main:not(:fullscreen):not(.fullscreen-fallback) {
+    flex-direction: column;
+    flex-wrap: nowrap;
+    align-items: stretch;
+    gap: 0;
+  }
+
+  #main:not(:fullscreen):not(.fullscreen-fallback) #mandelbrot {
+    flex: 0 0 auto;
+    width: 100%;
+    margin: 0;
+  }
+
+  #main:not(:fullscreen):not(.fullscreen-fallback) #settings {
+    flex: 0 0 auto;
+    align-self: stretch;
+    width: 100%;
+    min-width: 0;
+    max-width: none;
+    height: 50vh;
+    height: 50dvh;
+    max-height: 50vh;
+    max-height: 50dvh;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+
+  #main:not(:fullscreen):not(.fullscreen-fallback) #mandelbrot.julia-mode {
+    width: 100% !important;
+    align-self: stretch;
+  }
+
   #settings.fullscreen {
     top: auto;
     right: 0;

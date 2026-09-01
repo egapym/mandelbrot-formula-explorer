@@ -7733,10 +7733,11 @@ function refreshDevicePixelBoxSize() {
 function resizeToCanvasSize() {
   // ── Julia Mode ──────────────────────────────────────────────────────────
   if (juliaState?.active) {
-    // ── フルスクリーン + Julia: Julia は全画面、MB はプレビューサイズ ──
-    if (isFullscreenActive()) {
+    // ── Julia プレビュー表示: Julia はメイン表示、MB は設定内のプレビューサイズ ──
+    if (usesJuliaPreviewLayout()) {
       const vw = window.innerWidth
-      const vh = window.innerHeight
+      // モバイル通常時は従来の 4:3 canvas サイズを保つ。
+      const vh = isFullscreenActive() ? window.innerHeight : Math.round((vw * 3) / 4)
 
       // Julia キャンバスはビューポート全体を埋める
       const juliaWrap = document.querySelector('.julia-canvas-wrap')
@@ -7800,12 +7801,13 @@ function resizeToCanvasSize() {
     // 1412px 以上では #mandelbrot.julia-mode は CSS で高さ管理されるため、
     // offsetHeight が使える。未満では高さが内容依存なので、viewport 基準で計算する。
     const isWideLayout = !EMBEDDED_MODE && window.innerWidth >= 1412
+    const mobileSettingsDrawerHeight = usesMobileSettingsDrawerLayout() ? Math.round(window.innerHeight * 0.5) : 0
     const availViewH =
       EMBEDDED_MODE
         ? window.innerHeight
         : isWideLayout && mandelbrotDiv && mandelbrotDiv.offsetHeight > 150
         ? mandelbrotDiv.offsetHeight
-        : window.innerHeight - titleH - 40 // 28 = gaps + padding
+        : window.innerHeight - titleH - 40 - mobileSettingsDrawerHeight
 
     // 幅も同様に、広いレイアウトでは offsetWidth、それ以外は viewport 幅を使う。
     const availW =
@@ -7980,6 +7982,15 @@ function isFullscreenActive() {
   return document.fullscreenElement != null || appFullscreenFallbackActive
 }
 
+function usesMobileSettingsDrawerLayout() {
+  if (isFullscreenActive()) return false
+  return window.matchMedia?.('(max-width: 600px), (hover: none) and (pointer: coarse)').matches ?? window.innerWidth <= 600
+}
+
+function usesJuliaPreviewLayout() {
+  return isFullscreenActive() || usesMobileSettingsDrawerLayout()
+}
+
 function applyFullscreenState() {
   const active = isFullscreenActive()
   const main = document.getElementById('main')
@@ -7992,7 +8003,8 @@ function applyFullscreenState() {
   if (active) {
     if (juliaState?.active) enterJuliaFullscreen()
   } else if (juliaState?.active) {
-    exitJuliaFullscreen()
+    // モバイル通常時は fullscreen を抜けても設定内プレビューを維持する。
+    if (!usesMobileSettingsDrawerLayout()) exitJuliaFullscreen()
     requestAnimationFrame(() => {
       resizeToCanvasSize()
       redrawJulia()
@@ -9353,7 +9365,7 @@ function initListeners() {
               if (jtCrosshair) jtCrosshair.setAttribute('hidden', '')
               const jtResetBtn = document.getElementById('julia-reset')
               if (jtResetBtn) jtResetBtn.setAttribute('hidden', '')
-              if (isFullscreenActive()) {
+              if (usesJuliaPreviewLayout()) {
                 exitJuliaFullscreen()
               }
               const jtMbWrap = document.getElementById('mandelbrot-canvas-wrap')
@@ -9516,7 +9528,7 @@ function initListeners() {
           // ↺ ボタンが高さを作るので、toggle wrapper の py-1 は外す
           juliaToggleEl.closest('.d-flex.align-items-center')?.classList.remove('py-1')
 
-          if (isFullscreenActive()) {
+          if (usesJuliaPreviewLayout()) {
             enterJuliaFullscreen({ redraw: !stoppedBuddhabrotRendering })
             if (stoppedBuddhabrotRendering) {
               requestAnimationFrame(() => {
@@ -9551,7 +9563,7 @@ function initListeners() {
           // ↺ ボタンがないので、toggle wrapper の py-1 を戻す
           juliaToggleEl.closest('.d-flex.align-items-center')?.classList.add('py-1')
 
-          if (isFullscreenActive()) {
+          if (usesJuliaPreviewLayout()) {
             exitJuliaFullscreen()
           }
           // 明示的な inline size を消し、CSS 管理へ戻す
