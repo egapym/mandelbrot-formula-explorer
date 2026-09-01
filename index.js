@@ -2361,8 +2361,11 @@ function initMenu() {
   const menuToggle = document.getElementById('menu-toggle')
   menuToggle.addEventListener('click', (_e) => {
     const menu = document.getElementById('settings')
-    menu.classList.toggle('hidden')
-    menuToggle.classList.toggle('hidden')
+    const hidden = menu.classList.toggle('hidden')
+    menuToggle.classList.toggle('hidden', hidden)
+    menuToggle.setAttribute('aria-expanded', String(!hidden))
+    menuToggle.setAttribute('aria-label', hidden ? 'Show settings' : 'Hide settings')
+    menuToggle.setAttribute('title', hidden ? 'Show settings' : 'Hide settings')
   })
 }
 
@@ -5475,7 +5478,7 @@ function getMainGpuRenderScreenForState(renderer) {
   if (
     !renderer?.currentInteractionGpuRedraw ||
     renderer.fractalType !== 'mandelbrot' ||
-    (!fullResUsesPhysicalPixels() && !document.fullscreenElement)
+    (!fullResUsesPhysicalPixels() && !isFullscreenActive())
   ) {
     return finalScreen
   }
@@ -7544,7 +7547,7 @@ function didViewportScrollRecently() {
 }
 
 function shouldIgnoreScrollOnlyResize(entries) {
-  if (document.fullscreenElement) return false
+  if (isFullscreenActive()) return false
   const currentWidth = window.innerWidth
   const currentHeight = window.innerHeight
   const currentDevicePixelRatio = getWindowDevicePixelRatio()
@@ -7731,7 +7734,7 @@ function resizeToCanvasSize() {
   // ── Julia Mode ──────────────────────────────────────────────────────────
   if (juliaState?.active) {
     // ── フルスクリーン + Julia: Julia は全画面、MB はプレビューサイズ ──
-    if (document.fullscreenElement) {
+    if (isFullscreenActive()) {
       const vw = window.innerWidth
       const vh = window.innerHeight
 
@@ -7891,7 +7894,13 @@ function resizeToCanvasSize() {
   const mbWrap = document.getElementById('mandelbrot-canvas-wrap')
   const isWideLayout = window.innerWidth >= 1412
   if (mandelbrotDiv) {
-    if (isWideLayout) {
+    if (isFullscreenActive()) {
+      // アプリ内全画面では CSS の aspect-ratio に任せると 4:3 のままになるため、
+      // 実際のビューポート寸法を明示し、canvas の描画バッファも同じ大きさへ広げる。
+      setStyleIfChanged(mandelbrotDiv, 'height', `${window.innerHeight}px`)
+      setStyleIfChanged(mandelbrotDiv, 'width', `${window.innerWidth}px`)
+      setStyleIfChanged(mandelbrotDiv, 'flex', '0 0 auto')
+    } else if (isWideLayout) {
       setStyleIfChanged(mandelbrotDiv, 'height', '')
       setStyleIfChanged(mandelbrotDiv, 'width', '')
       setStyleIfChanged(mandelbrotDiv, 'flex', '')
@@ -7922,7 +7931,7 @@ function resizeToCanvasSize() {
   const sizeEl = document.getElementById('sizeValue')
   if (sizeEl) sizeEl.innerText = `${width}x${height}`
 
-  const sizeKey = `${width}x${height}|julia:${juliaState?.active ? 1 : 0}|fs:${document.fullscreenElement ? 1 : 0}|hidpi:${fullResUsesPhysicalPixels() ? 1 : 0}`
+  const sizeKey = `${width}x${height}|julia:${juliaState?.active ? 1 : 0}|fs:${isFullscreenActive() ? 1 : 0}|hidpi:${fullResUsesPhysicalPixels() ? 1 : 0}`
   if (lastAppliedCanvasSizeKey === sizeKey && canvasElement.width === width && canvasElement.height === height) {
     showZoomFactor()
     return false
@@ -7964,19 +7973,129 @@ function resizeToCanvasSize() {
   return mainCanvasChanged
 }
 
-function toggleFullScreen() {
-  if (document.fullscreenElement) {
-    document.exitFullscreen()
-  } else {
-    document.getElementById('main').requestFullscreen()
+const ELEMENTS_WITH_FS_CLASS = ['mandelbrot', 'palette-canvas', 'settings', 'footer', 'menu-toggle']
+let appFullscreenFallbackActive = false
+
+function isFullscreenActive() {
+  return document.fullscreenElement != null || appFullscreenFallbackActive
+}
+
+function applyFullscreenState() {
+  const active = isFullscreenActive()
+  const main = document.getElementById('main')
+  main?.classList.toggle('fullscreen-fallback', appFullscreenFallbackActive)
+  for (const element of ELEMENTS_WITH_FS_CLASS) {
+    document.getElementById(element)?.classList.toggle('fullscreen', active)
+  }
+  document.documentElement.setAttribute('data-bs-theme', active ? 'dark' : 'light')
+
+  if (active) {
+    if (juliaState?.active) enterJuliaFullscreen()
+  } else if (juliaState?.active) {
+    exitJuliaFullscreen()
+    requestAnimationFrame(() => {
+      resizeToCanvasSize()
+      redrawJulia()
+    })
+  }
+
+  // Fullscreen API の切替ではブラウザが resize を発火するが、アプリ内全画面では
+  // 必ずしも発火しないため、共通で次フレームにキャンバスを同期する。
+  requestAnimationFrame(() => scheduleResize())
+
+  // 全画面の出入り時は Buddhabrot を停止するが、フラクタル設定自体は保つ。
+  try {
+    if (buddhaRunner) {
+      buddhaRunner.running = false
+      buddhaRunner.terminate?.()
+      buddhaRunner = null
+    }
+
+    buddhaActive = false
+    finishBuddhabrotProgress(BuddhabrotState.targetKind)
+    hideInactiveBuddhabrotProgress(BuddhabrotState.targetKind)
+    savedFractalImageData = null
+    redraw(true)
+
+    buddhaLockedByFractalChange = true
+    const t = document.getElementById('buddha-toggle')
+    if (t) {
+      t.checked = false
+      t.disabled = true
+    }
+  } catch (e) {
+    console.warn('Error handling fullscreen state cleanup:', e?.message ? e.message : e)
   }
 }
 
-const ELEMENTS_WITH_FS_CLASS = ['mandelbrot', 'palette-canvas', 'settings', 'footer', 'menu-toggle']
+function enterAppFullscreenFallback() {
+  if (appFullscreenFallbackActive) return
+  appFullscreenFallbackActive = true
+  applyFullscreenState()
+}
+
+function exitAppFullscreenFallback() {
+  if (!appFullscreenFallbackActive) return
+  appFullscreenFallbackActive = false
+  applyFullscreenState()
+}
+
+function toggleFullScreen() {
+  if (appFullscreenFallbackActive) {
+    exitAppFullscreenFallback()
+    return
+  }
+  if (document.fullscreenElement) {
+    try {
+      const exit = document.exitFullscreen()
+      exit?.catch((e) => console.warn('Error exiting fullscreen:', e?.message ? e.message : e))
+    } catch (e) {
+      console.warn('Error exiting fullscreen:', e?.message ? e.message : e)
+    }
+    return
+  }
+
+  const main = document.getElementById('main')
+  if (!main?.requestFullscreen) {
+    enterAppFullscreenFallback()
+    return
+  }
+  try {
+    const request = main.requestFullscreen()
+    if (request?.catch) {
+      request.catch((e) => {
+        console.warn('Native fullscreen unavailable; using in-app fullscreen:', e?.message ? e.message : e)
+        enterAppFullscreenFallback()
+      })
+    }
+  } catch (e) {
+    console.warn('Native fullscreen unavailable; using in-app fullscreen:', e?.message ? e.message : e)
+    enterAppFullscreenFallback()
+  }
+}
 
 function resizeTmpCanvas() {
   tempCanvas.width = canvasElement.width
   tempCanvas.height = canvasElement.height
+}
+
+// Bootstrap は backdrop を body 直下へ追加する。#main が fullscreen の最上位
+// レイヤーになると、body 側 backdrop がモーダルより前面に残り、iOS では暗く
+// 操作不能になるため、fullscreen 中は backdrop も #main の同一レイヤーへ置く。
+function keepModalBackdropInFullscreenLayer() {
+  const main = document.getElementById('main')
+  const backdrop = document.querySelector('.modal-backdrop')
+  if (!isFullscreenActive() || !main || !backdrop || backdrop.parentElement === main) return
+  main.appendChild(backdrop)
+}
+
+function initFullscreenModalBackdrops() {
+  for (const modal of document.querySelectorAll('.modal')) {
+    modal.addEventListener('show.bs.modal', () => {
+      requestAnimationFrame(keepModalBackdropInFullscreenLayer)
+    })
+    modal.addEventListener('shown.bs.modal', keepModalBackdropInFullscreenLayer)
+  }
 }
 
 // 選択中のフラクタル種別に応じて GPU オプション表示を調整する
@@ -8002,72 +8121,9 @@ let lastTouchDistance = null
 let lastTouchCenter = null
 
 function initListeners() {
+  initFullscreenModalBackdrops()
   addEventListener('fullscreenchange', (_event) => {
-    if (document.fullscreenElement) {
-      for (const element of ELEMENTS_WITH_FS_CLASS) {
-        const el = document.getElementById(element)
-        if (el) {
-          el.classList.add('fullscreen')
-        }
-      }
-      document.documentElement.setAttribute('data-bs-theme', 'dark')
-      // 全画面ではメニューを自動で隠さない。
-      // 非表示トグルに気づけない可能性があるため。
-      // document.getElementById('menu-toggle').classList.add('hidden')
-      // document.getElementById('settings').classList.add('hidden')
-
-      // Julia モードで全画面へ入るときは、MB キャンバスをプレビューへ移し、
-      // Julia キャンバスを全画面に広げる。
-      if (juliaState?.active) {
-        enterJuliaFullscreen()
-      }
-    } else {
-      for (const element of ELEMENTS_WITH_FS_CLASS) {
-        const el = document.getElementById(element)
-        if (el) {
-          el.classList.remove('fullscreen')
-        }
-      }
-      document.documentElement.setAttribute('data-bs-theme', 'light')
-      // Julia モードで全画面を抜けるときは、MB キャンバスを戻し、
-      // 縦積みレイアウトへ復帰する。
-      if (juliaState?.active) {
-        exitJuliaFullscreen()
-        requestAnimationFrame(() => {
-          resizeToCanvasSize()
-          redrawJulia()
-        })
-      }
-    }
-    // 全画面の出入り時は Buddhabrot を停止するが、フラクタル設定自体は保つ。
-    // runner を止めて、不要な重い処理だけを止める。
-    try {
-      if (buddhaRunner) {
-        buddhaRunner.running = false
-        // terminate を持たない実装でも落ちないよう守る
-        buddhaRunner.terminate?.()
-        buddhaRunner = null
-      }
-
-      buddhaActive = false
-      finishBuddhabrotProgress(BuddhabrotState.targetKind)
-      hideInactiveBuddhabrotProgress(BuddhabrotState.targetKind)
-
-      // 全画面切替でキャンバスサイズや scale が変わるため、保存画像を無効化する
-      savedFractalImageData = null
-
-      redraw(true)
-
-      // 表示が変わったので、Buddha トグルをロックして無効化する
-      buddhaLockedByFractalChange = true
-      const t = document.getElementById('buddha-toggle')
-      if (t) {
-        t.checked = false
-        t.disabled = true
-      }
-    } catch (e) {
-      console.warn('Error handling fullscreenchange cleanup:', e?.message ? e.message : e)
-    }
+    applyFullscreenState()
   })
 
   // Julia モードではメインキャンバスサイズを JS で明示設定するため、
@@ -8083,7 +8139,7 @@ function initListeners() {
       const heightChanged = currentHeight !== lastKnownViewportHeight
       const devicePixelRatioChanged = currentDevicePixelRatio !== lastKnownDevicePixelRatio
       if (
-        !document.fullscreenElement &&
+        !isFullscreenActive() &&
         !widthChanged &&
         !devicePixelRatioChanged &&
         heightChanged &&
@@ -8095,7 +8151,7 @@ function initListeners() {
       lastKnownViewportWidth = currentWidth
       lastKnownViewportHeight = currentHeight
       lastKnownDevicePixelRatio = currentDevicePixelRatio
-      if (!widthChanged && !devicePixelRatioChanged && !juliaState?.active && !document.fullscreenElement) return
+      if (!widthChanged && !devicePixelRatioChanged && !juliaState?.active && !isFullscreenActive()) return
       scheduleResize()
     }, 60)
   })
@@ -8103,8 +8159,8 @@ function initListeners() {
     scheduleResize()
   })
   window.visualViewport?.addEventListener('resize', () => {
-    if (!juliaState?.active && !document.fullscreenElement) return
-    if (!document.fullscreenElement && didViewportScrollRecently()) return
+    if (!juliaState?.active && !isFullscreenActive()) return
+    if (!isFullscreenActive() && didViewportScrollRecently()) return
     scheduleResize()
   })
   window.addEventListener('scroll', noteViewportScroll, { passive: true })
@@ -9297,7 +9353,7 @@ function initListeners() {
               if (jtCrosshair) jtCrosshair.setAttribute('hidden', '')
               const jtResetBtn = document.getElementById('julia-reset')
               if (jtResetBtn) jtResetBtn.setAttribute('hidden', '')
-              if (document.fullscreenElement) {
+              if (isFullscreenActive()) {
                 exitJuliaFullscreen()
               }
               const jtMbWrap = document.getElementById('mandelbrot-canvas-wrap')
@@ -9460,7 +9516,7 @@ function initListeners() {
           // ↺ ボタンが高さを作るので、toggle wrapper の py-1 は外す
           juliaToggleEl.closest('.d-flex.align-items-center')?.classList.remove('py-1')
 
-          if (document.fullscreenElement) {
+          if (isFullscreenActive()) {
             enterJuliaFullscreen({ redraw: !stoppedBuddhabrotRendering })
             if (stoppedBuddhabrotRendering) {
               requestAnimationFrame(() => {
@@ -9495,7 +9551,7 @@ function initListeners() {
           // ↺ ボタンがないので、toggle wrapper の py-1 を戻す
           juliaToggleEl.closest('.d-flex.align-items-center')?.classList.add('py-1')
 
-          if (document.fullscreenElement) {
+          if (isFullscreenActive()) {
             exitJuliaFullscreen()
           }
           // 明示的な inline size を消し、CSS 管理へ戻す

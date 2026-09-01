@@ -388,24 +388,42 @@ footer {
 /* 現在のレイアウトは折り返し flex と min-width を使うため、細かな分岐は少なくてよい */
 
 /* フルスクリーン時はキャンバスと進捗表示を中心に見せる */
-#main:fullscreen {
+#main:fullscreen,
+#main.fullscreen-fallback {
   position: relative;
   display: block;
   padding: 0;
+  overflow: hidden;
+}
+
+/* iOS Safari など Element Fullscreen API を使えない端末用の全画面状態。 */
+#main.fullscreen-fallback {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  width: 100dvw;
+  height: 100vh;
+  height: 100dvh;
+  z-index: 1000;
 }
 
 #mandelbrot.fullscreen {
   width: 100vw;
   height: 100vh;
+  height: 100dvh;
   position: fixed;
   top: 0;
   left: 0;
+  /* GPU の高速パンで canvas に一時的な未描画領域ができても、
+     通常表示時と同じ白を見せ、背後の設定 UI を透過させない。 */
+  background-color: #fff;
 }
 
 /* フルスクリーン時は枠線を消し、画面いっぱいに見せる */
 #mandelbrot.fullscreen .canvas-wrap {
   border: none !important;
   border-radius: 0 !important;
+  background-color: #fff;
 }
 
 #settings.fullscreen {
@@ -417,12 +435,15 @@ footer {
   /* フルスクリーン時は少し細めにする */
   max-width: 40vw;
   /* 画面下にはみ出さないようにし、内部だけスクロール可にする */
-  max-height: calc(100vh - 30px);
+  max-height: calc(100vh - 35px);
+  max-height: calc(100dvh - 35px);
   overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
   background-color: rgba(0, 0, 0, 0.5);
   visibility: visible;
   opacity: 1;
-  transition: visibility 0.5s, opacity 0.5s linear;
+  transition: visibility 0.1s, opacity 0.1s linear;
 }
 
 #settings.hidden.fullscreen {
@@ -430,18 +451,97 @@ footer {
   opacity: 0;
 }
 
+/* fullscreen の #main 内へ移した Bootstrap モーダルと backdrop を同じ
+   スタッキングコンテキストに置き、iOS でも前面表示・操作を可能にする。 */
+#main:fullscreen .modal,
+#main.fullscreen-fallback .modal {
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+#main:fullscreen .modal-backdrop,
+#main.fullscreen-fallback .modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1050;
+}
+
+#main:fullscreen .modal-dialog-scrollable .modal-content,
+#main.fullscreen-fallback .modal-dialog-scrollable .modal-content {
+  max-height: calc(100vh - 1rem);
+  max-height: calc(100dvh - 1rem);
+}
+
 #menu-toggle.fullscreen {
   display: block;
+  border-radius: 0 0 5px 0;
 }
 
 #menu-toggle.hidden.fullscreen {
-  background: transparent;
-  border: none !important;
-  font-size: 0;
+  background-color: rgba(0, 0, 0, 0.7);
+  border: 1px solid rgba(255, 255, 255, 0.7) !important;
+  border-radius: 0 0 5px 0;
+  background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="white"><path d="M4 6h16v2H4zm0 5h16v2H4zm0 5h16v2H4z"/></svg>');
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: 20px 20px;
 }
 
 #footer.fullscreen {
   display: none;
+}
+
+/* タッチ端末では設定を画面下半分に置き、キャンバス上部を常に見せる。 */
+@media (max-width: 600px), (hover: none) and (pointer: coarse) {
+  #settings.fullscreen {
+    top: auto;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    width: 100vw;
+    width: 100dvw;
+    min-width: 0;
+    max-width: none;
+    height: 50vh;
+    height: 50dvh;
+    max-height: 50vh;
+    max-height: 50dvh;
+    border-radius: 5px 5px 0 0;
+    padding-bottom: env(safe-area-inset-bottom);
+    touch-action: pan-y;
+  }
+
+  /* 設定表示中の閉じるボタンは、下部設定パネルのすぐ左上に置く。 */
+  #menu-toggle.fullscreen:not(.hidden) {
+    top: calc(50vh - 30px);
+    top: calc(50dvh - 30px);
+    left: 0;
+    z-index: 4;
+  }
+
+  /* 設定を閉じた後も、画面下中央から明示的に再表示できる。 */
+  #menu-toggle.hidden.fullscreen {
+    top: auto;
+    right: auto;
+    bottom: max(8px, env(safe-area-inset-bottom));
+    left: 50%;
+    width: auto;
+    min-width: 5.5rem;
+    height: 2rem;
+    padding: 0 0.75rem;
+    transform: translateX(-50%);
+    border-radius: 1rem;
+    background-image: none;
+    color: #fff;
+    font-size: 0.8rem;
+    line-height: 1;
+    z-index: 4;
+  }
+
+  #menu-toggle.hidden.fullscreen::after {
+    content: 'Settings';
+  }
+
 }
 
 .slider-reset {
