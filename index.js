@@ -8477,6 +8477,20 @@ function initListeners() {
         const dx = lastX - newX
         const dy = lastY - newY
 
+        // ピンチは GPU の対話描画経路では zoomWithFactor() を通らない。
+        // View を OFF にした後でも、表示位置や倍率を変えた時点で復元対象を
+        // 無効にしておかないと、Buddhabrot View が再び有効のまま残ってしまう。
+        if (dx !== 0 || dy !== 0 || factor !== 1) {
+          buddhaLockedByFractalChange = true
+          buddhaPreservedDisplay = false
+          const toggle = document.getElementById('buddha-toggle')
+          if (toggle) {
+            toggle.checked = false
+            toggle.disabled = true
+          }
+          savedFractalImageData = null
+        }
+
         const deferPinchRedraw = isMainRenderGpuPath()
         if (deferPinchRedraw) {
           if (detailPinnedState) clearPinnedDetailPopup()
