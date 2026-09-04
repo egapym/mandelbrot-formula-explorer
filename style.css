@@ -414,9 +414,6 @@ footer {
   position: fixed;
   top: 0;
   left: 0;
-  /* GPU の高速パンで canvas に一時的な未描画領域ができても、
-     通常表示時と同じ白を見せ、背後の設定 UI を透過させない。 */
-  background-color: #fff;
 }
 
 /* フルスクリーン時は枠線を消し、画面いっぱいに見せる */
