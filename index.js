@@ -5606,6 +5606,65 @@ function resetPendingInteractiveTransform() {
   pendingInteractiveTransformTy = 0
 }
 
+function shouldUseClampedGpuPreview() {
+  // 深い Mandelbrot ズームは摂動計算の完了まで前フレームを変形して見せる。
+  // その既存挙動は保ち、通常の GPU 操作中だけ露出領域を端色で埋める。
+  return isMainRenderGpuPath() && shouldRedrawMainGpuDuringInteraction()
+}
+
+function copyCanvasToTempCanvas(sourceCanvas = canvasElement) {
+  if (tempCanvas.width !== sourceCanvas.width) tempCanvas.width = sourceCanvas.width
+  if (tempCanvas.height !== sourceCanvas.height) tempCanvas.height = sourceCanvas.height
+  const tempCtx = tempCanvas.getContext('2d')
+  tempCtx.setTransform(1, 0, 0, 1, 0, 0)
+  tempCtx.clearRect(0, 0, tempCanvas.width, tempCanvas.height)
+  tempCtx.drawImage(sourceCanvas, 0, 0)
+}
+
+function drawClampedCanvasTransform(scale, tx, ty, sourceCanvas = tempCanvas, destinationCanvas = canvasElement) {
+  const width = destinationCanvas.width
+  const height = destinationCanvas.height
+  const ctx = destinationCanvas.getContext('2d')
+  const clamp = (value, min, max) => Math.max(min, Math.min(max, value))
+  const transformedRight = tx + scale * width
+  const transformedBottom = ty + scale * height
+  const xBands = [
+    [0, clamp(tx, 0, width), 0, 1],
+    [clamp(tx, 0, width), clamp(transformedRight, 0, width), null, null],
+    [clamp(transformedRight, 0, width), width, width - 1, 1],
+  ]
+  const yBands = [
+    [0, clamp(ty, 0, height), 0, 1],
+    [clamp(ty, 0, height), clamp(transformedBottom, 0, height), null, null],
+    [clamp(transformedBottom, 0, height), height, height - 1, 1],
+  ]
+
+  ctx.save()
+  ctx.setTransform(1, 0, 0, 1, 0, 0)
+  ctx.clearRect(0, 0, width, height)
+  ctx.setTransform(scale, 0, 0, scale, tx, ty)
+  ctx.drawImage(sourceCanvas, 0, 0)
+  ctx.restore()
+
+  // 変形後の画像の外側だけを、直前フレームの対応する端色で引き延ばす。
+  for (let row = 0; row < yBands.length; row++) {
+    for (let column = 0; column < xBands.length; column++) {
+      if (row === 1 && column === 1) continue
+      const [top, bottom, sourceY, sourceHeight] = yBands[row]
+      const [left, right, sourceX, sourceWidth] = xBands[column]
+      const destinationWidth = right - left
+      const destinationHeight = bottom - top
+      if (destinationWidth <= 0 || destinationHeight <= 0) continue
+
+      const sx = sourceX == null ? (left - tx) / scale : sourceX
+      const sy = sourceY == null ? (top - ty) / scale : sourceY
+      const sw = sourceWidth == null ? destinationWidth / scale : sourceWidth
+      const sh = sourceHeight == null ? destinationHeight / scale : sourceHeight
+      ctx.drawImage(sourceCanvas, sx, sy, sw, sh, left, top, destinationWidth, destinationHeight)
+    }
+  }
+}
+
 function clearPendingInteractiveRedrawState() {
   if (gpuInteractiveRedrawTimer != null) {
     clearTimeout(gpuInteractiveRedrawTimer)
@@ -5625,6 +5684,15 @@ function clearPendingInteractiveRedrawState() {
 
 function reapplyPendingInteractiveTransform() {
   if (!hasPendingInteractiveTransform()) return
+  if (shouldUseClampedGpuPreview()) {
+    copyCanvasToTempCanvas()
+    drawClampedCanvasTransform(
+      pendingInteractiveTransformScale,
+      pendingInteractiveTransformTx,
+      pendingInteractiveTransformTy,
+    )
+    return
+  }
   if (tempCanvas.width !== canvasElement.width) tempCanvas.width = canvasElement.width
   if (tempCanvas.height !== canvasElement.height) tempCanvas.height = canvasElement.height
 
@@ -7063,6 +7131,11 @@ function onMouseMove(evt) {
 // 現在のキャンバス画像を指定点まわりで拡大縮小する
 // 背景で再描画している間も、ユーザーにはすぐ見た目の変化を返せる
 function scaleCanvas(factor, x, y) {
+  if (shouldUseClampedGpuPreview()) {
+    copyCanvasToTempCanvas()
+    drawClampedCanvasTransform(factor, (1 - factor) * x, (1 - factor) * y)
+    return
+  }
   // console.log(`Scaling canvas by ${factor} around (${x}, ${y})`)
   const tempCtx = tempCanvas.getContext('2d')
   tempCtx.drawImage(canvasElement, 0, 0)
@@ -7077,6 +7150,11 @@ function scaleCanvas(factor, x, y) {
 }
 
 function panCanvas(dx, dy) {
+  if (shouldUseClampedGpuPreview()) {
+    copyCanvasToTempCanvas()
+    drawClampedCanvasTransform(1, dx, dy)
+    return
+  }
   const ctx = canvasElement.getContext('2d')
   ctx.save()
   ctx.translate(dx, dy)
