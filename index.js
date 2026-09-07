@@ -5451,6 +5451,8 @@ let coordinateGridEnabled = false
 // 固定中は {clientX, clientY}、未固定なら null。
 let pinnedOrbit = null
 let juliaPinnedOrbit = null
+let mainOrbitHoverActive = false
+let juliaOrbitHoverActive = false
 let orbitTouchTapCandidate = false
 let juliaOrbitTouchTapCandidate = false
 let suppressOrbitClickUntil = 0
@@ -6072,6 +6074,7 @@ function onJuliaMouseDown(evt) {
 }
 
 function onJuliaMouseMove(evt) {
+  if (evt.type === 'mousemove') juliaOrbitHoverActive = true
   if (isJuliaCanvasInteractionBlockedByBuddhabrot()) {
     if (juliaCanvasElement) juliaCanvasElement.style.cursor = ''
     return
@@ -6765,7 +6768,10 @@ function drawOrbitOnCanvas(clientX, clientY) {
 }
 
 function _refreshMainOrbitOverlayAtLastPoint() {
-  if (!orbitDrawEnabled) return
+  if (!orbitDrawEnabled || !mainOrbitHoverActive) {
+    clearOrbitCanvas()
+    return
+  }
   try {
     const orbitView = _getMainOrbitRenderView()
     const [cReFxp, cImFxp] = _canvas2complexForView(lastX, lastY, orbitView.center, orbitView.zoom, fractal.precision)
@@ -6788,6 +6794,8 @@ function _refreshActiveOrbitOverlays() {
     try {
       drawOrbitOnJuliaCanvasAtComplex(juliaPinnedOrbit.re, juliaPinnedOrbit.im)
     } catch (_) {}
+  } else if (!juliaOrbitHoverActive) {
+    clearJuliaOrbitCanvas()
   }
 }
 
@@ -7019,6 +7027,7 @@ function onMouseDown(evt) {
 
 function onMouseMove(evt) {
   const [clientX, clientY] = _getClientCoordinatesFromEvent(evt)
+  if (evt.type === 'mousemove') mainOrbitHoverActive = true
   const buddhaOnJuliaView = isBuddhabrotViewShownOnJulia()
   // 固定した軌道の十字付近では、解除できることが分かるようポインター表示にする
   if (orbitDrawEnabled && pinnedOrbit) {
@@ -8263,6 +8272,7 @@ function initListeners() {
   canvasElement.addEventListener('mouseup', onMouseUp)
   canvasElement.addEventListener('mouseleave', () => {
     canvasElement.style.cursor = ''
+    mainOrbitHoverActive = false
     if (orbitDrawEnabled) {
       if (pinnedOrbit) {
         try {
@@ -8300,6 +8310,7 @@ function initListeners() {
     juliaCanvasElement.addEventListener('mouseup', onJuliaMouseUp)
     juliaCanvasElement.addEventListener('mouseleave', () => {
       if (juliaCanvasElement) juliaCanvasElement.style.cursor = ''
+      juliaOrbitHoverActive = false
       onJuliaMouseUp()
       if (orbitDrawEnabled) {
         if (juliaPinnedOrbit) {
