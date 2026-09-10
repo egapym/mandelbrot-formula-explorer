@@ -75,6 +75,8 @@
           <canvas id="detail-crosshair-canvas"></canvas>
           <!-- Center crosshair shown in Julia mode -->
           <div id="julia-crosshair" class="julia-crosshair" hidden></div>
+          <div id="detail-center-dot" class="julia-crosshair detail-center-dot" hidden></div>
+          <div id="detail-popup" hidden></div>
         </div>
         <!-- menu-toggle lives directly in #mandelbrot so it stays put when
                  #mandelbrot-canvas-wrap is moved into the settings preview -->
@@ -88,6 +90,8 @@
             <!-- Orbit visualization overlay for Julia canvas -->
             <canvas id="julia-orbit-canvas"></canvas>
             <canvas id="julia-detail-crosshair-canvas"></canvas>
+            <div id="julia-detail-center-dot" class="julia-crosshair detail-center-dot" hidden></div>
+            <div id="julia-detail-popup" hidden></div>
           </div>
         </div>
       </div>
@@ -497,13 +501,13 @@
                   class="col-form-label py-0 d-block"
                   data-bs-toggle="tooltip"
                   data-bs-placement="left"
-                  title="Show detailed information: hover on desktop, tap to pin on touch devices"
+                  title="Show detailed information at the active canvas center"
                   >Details</label
                 >
                 <div class="d-flex align-items-center py-1">
                   <div class="form-check form-switch m-0">
                     <input id="detail-toggle" class="form-check-input" type="checkbox" role="switch"
-                      title="Toggle detailed information: hover on desktop, tap to pin on touch devices" />
+                      title="Toggle detailed information at the active canvas center" />
                   </div>
                 </div>
                 </div>
@@ -908,9 +912,6 @@
           </div>
         </div>
       </div>
-
-	      <!-- popup element used to show hover details (positioned absolutely) -->
-	      <div id="detail-popup" hidden></div>
 
 	      <div class="modal fade support-modal" id="support-modal" tabindex="-1" aria-labelledby="support-title" aria-hidden="true">
 	        <div class="modal-dialog modal-dialog-centered">

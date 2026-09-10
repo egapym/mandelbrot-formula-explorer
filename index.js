@@ -3007,11 +3007,7 @@ try {
           try {
             if (target.kind === 'julia') {
               clearJuliaOrbitCanvas()
-              if (detailPinnedState?.isJulia) {
-                clearPinnedDetailPopup()
-              } else if (detailHoverState?.isJulia) {
-                _clearDetailHoverState()
-              }
+              if (detailEnabled) _renderDetailIndicator()
               if (juliaCanvasElement) juliaCanvasElement.style.cursor = ''
             }
             restoreSavedImageToCanvas(savedBuddhaImageData, target.canvas)
@@ -3044,11 +3040,7 @@ try {
               buddhaActive = true
               if (target.kind === 'julia') {
                 clearJuliaOrbitCanvas()
-                if (detailPinnedState?.isJulia) {
-                  clearPinnedDetailPopup()
-                } else if (detailHoverState?.isJulia) {
-                  _clearDetailHoverState()
-                }
+                if (detailEnabled) _renderDetailIndicator()
                 if (juliaCanvasElement) juliaCanvasElement.style.cursor = ''
               }
               // トグルは使える状態に戻す
@@ -3471,11 +3463,7 @@ async function startBuddhaRender() {
   BuddhabrotState.targetKind = target.kind
   if (target.kind === 'julia') {
     clearJuliaOrbitCanvas()
-    if (detailPinnedState?.isJulia) {
-      clearPinnedDetailPopup()
-    } else if (detailHoverState?.isJulia) {
-      _clearDetailHoverState()
-    }
+    if (detailEnabled) _renderDetailIndicator()
     if (juliaCanvasElement) juliaCanvasElement.style.cursor = ''
   }
 
@@ -4381,10 +4369,10 @@ const fractal = new Mandelbrot(canvasElement, new ProgressMonitor(progressElemen
 
 // ---------- detail popup state -----------------------------------
 let detailPopup = null
+let juliaDetailPopup = null
 let detailEnabled = false
-let detailHoverState = null
-let detailPinnedState = null
-const DETAIL_TOUCH_TOGGLE_DISTANCE = 20
+let detailCenterDot = null
+let juliaDetailCenterDot = null
 
 // 少数桁をそろえて表示する簡易フォーマッタ
 function _fmt(num) {
@@ -4412,7 +4400,7 @@ function formatFloatWithCoordPrecision(val) {
   const zoomBigInt = fractal.zoom.bigIntValue()
   const zoomStr = zoomBigInt.toString()
   const zoomExp = zoomStr.length - 1
-  const precisionCap = 6000
+  const precisionCap = 100
   const precision = Math.max(15, Math.min(fractal.precision, zoomExp + 10, precisionCap))
   if (typeof val !== 'number' || !Number.isFinite(val)) return String(val)
   return val.toFixed(precision)
@@ -4996,12 +4984,12 @@ function _chooseCoordinateGridMajorStep(scalePxPerUnit) {
 
 function _formatCoordinateGridNumber(value, step, suffix = '') {
   if (!Number.isFinite(value)) return ''
-  const threshold = Math.max(Math.abs(step) * 1e-8, 1e-12)
+  const threshold = Math.abs(step) * 1e-8
   let v = Math.abs(value) < threshold ? 0 : value
   if (Math.abs(v) >= 10000 || (Math.abs(v) > 0 && Math.abs(v) < 0.001)) {
     return `${v.toExponential(1).replace('+', '')}${suffix}`
   }
-  const decimals = step >= 1 ? 0 : Math.min(12, Math.ceil(-Math.log10(step)) + 1)
+  const decimals = step >= 1 ? 0 : Math.min(15, Math.ceil(-Math.log10(step)) + 2)
   let text = v.toFixed(decimals)
   text = text.replace(/(\.\d*?[1-9])0+$/, '$1').replace(/\.0+$/, '')
   if (text === '-0') text = '0'
@@ -5226,11 +5214,13 @@ async function redraw(resetCaches, cooldown) {
       redrawTimeout = null
       // Julia が有効なら待機後にそちらも再描画する
       if (juliaState.active && !isJuliaCanvasInteractionBlockedByBuddhabrot()) redrawJulia()
+      if (detailEnabled) _renderDetailIndicator()
     }, cooldown)
   } else {
     await fractal.render(resetCaches)
     // Julia が有効なら、現在の中心を c としてあわせて描画する
     if (juliaState.active && !isJuliaCanvasInteractionBlockedByBuddhabrot()) redrawJulia()
+    if (detailEnabled) _renderDetailIndicator()
   }
 }
 
@@ -5265,6 +5255,7 @@ function redrawJulia() {
   // 以前はメイン表示とズームを同期していたが、現在は Julia 側で独立管理する
   drawJuliaCoordinateGrid()
   renderer.render()
+  if (detailEnabled) _renderDetailIndicator()
 }
 
 /**
@@ -5557,7 +5548,7 @@ function stopRenderingForJuliaToggleDuringBuddhabrot() {
   return true
 }
 
-const scaleFactor = 1.02 // ズームを滑らかにするため 1 スクロールあたり約 2% に抑える
+const scaleFactor = 1.03 // ズームを滑らかに保ちつつ 1 スクロールあたり約 3% にする
 
 function zoomWithClicks(clicks, cooldown, options = {}) {
   zoomWithFactor(scaleFactor ** clicks, cooldown, options)
@@ -5864,7 +5855,7 @@ function zoomWithFactor(factor, cooldown, options = {}) {
 
   const deferGestureRedraw = options.gesture && isMainRenderGpuPath()
   if (deferGestureRedraw) {
-    if (detailPinnedState) clearPinnedDetailPopup()
+    if (detailEnabled) _renderDetailIndicator()
     const pendingView = ensurePendingInteractivePinchView()
     const zoomedPendingView = _zoomViewAroundCanvasPoint(
       pendingView.center,
@@ -5889,11 +5880,7 @@ function zoomWithFactor(factor, cooldown, options = {}) {
     // 新しい中心座標とズームを反映する
     fractal.setCenter(zoomedView.center)
     fractal.setZoom(zoomedView.zoom)
-    if (detailPinnedState) {
-      clearPinnedDetailPopup()
-    } else if (detailHoverState) {
-      _renderDetailIndicator()
-    }
+    if (detailEnabled) _renderDetailIndicator()
     scaleCanvas(zoomedView.appliedFactor, lastX, lastY)
     redraw(false, cooldown)
   }
@@ -5977,11 +5964,7 @@ function handleJuliaScroll(evt) {
   const offsetY = ptr[1].subtract(renderer.center[1].withScale(p)).multiply(invFactor)
   renderer.center = [ptr[0].subtract(offsetX), ptr[1].subtract(offsetY)]
   renderer.setZoom(newZoom)
-  if (detailPinnedState) {
-    clearPinnedDetailPopup()
-  } else if (detailHoverState) {
-    _renderDetailIndicator()
-  }
+  if (detailEnabled) _renderDetailIndicator()
 
   redrawJulia()
   _refreshPinnedOrbits()
@@ -6030,7 +6013,7 @@ function _juliaDocMouseMove(evt) {
   const dx = x - juliaDragStart[0]
   const dy = y - juliaDragStart[1]
   if (dx !== 0 || dy !== 0) invalidateJuliaBuddhabrotView()
-  if (detailPinnedState) clearPinnedDetailPopup()
+  if (detailEnabled) _renderDetailIndicator()
 
   const p = renderer.precision
   const w_fx = fxp.fromNumber(renderer.width, p)
@@ -7079,7 +7062,7 @@ function onMouseMove(evt) {
   }
 
   if (dragStart) {
-    if (detailPinnedState) clearPinnedDetailPopup()
+    if (detailEnabled) _renderDetailIndicator()
     // stopBuddhaPreserveDisplay は runner 実行中だけ呼ぶ。
     // 停止後に呼ぶと density がキャンバスへ描かれ、パンのたびに
     // Buddhabrot がフラクタルの上へ一瞬重なって見える。
@@ -7205,14 +7188,10 @@ function toGraphicsCoordinatesOnCanvas(canvas, clientX, clientY) {
   return [(relX / cw) * canvas.width, (relY / ch) * canvas.height]
 }
 
-// ホバーポップアップに表示する情報を計算する
-function computeMouseDetails(clientX, clientY, isJulia) {
+function computeDetailInfoForCoordinate(reFxp, imFxp, isJulia) {
   if (isJulia) {
     if (isJuliaCanvasInteractionBlockedByBuddhabrot()) return null
     if (!juliaState.active || !juliaState.renderer) return null
-    const canvas = juliaCanvasElement
-    const [px, py] = toGraphicsCoordinatesOnCanvas(canvas, clientX, clientY)
-    const [reFxp, imFxp] = juliaState.renderer.canvas2complex(px, py)
     const re = reFxp.toNumber ? reFxp.toNumber() : 0
     const im = imFxp.toNumber ? imFxp.toNumber() : 0
     const cReal = juliaState.renderer.juliaCRe
@@ -7225,8 +7204,6 @@ function computeMouseDetails(clientX, clientY, isJulia) {
     const zFinal = orbit[orbit.length - 1] || [re, im]
     return { re, im, reFxp, imFxp, iter, zFinal }
   } else {
-    const [px, py] = toGraphicsCoordinates(clientX, clientY)
-    const [reFxp, imFxp] = fractal.canvas2complex(px, py)
     const re = reFxp.toNumber ? reFxp.toNumber() : 0
     const im = imFxp.toNumber ? imFxp.toNumber() : 0
     // z0 入力は軌道描画と同じ方法で読む（ユーザーが編集可能な値）
@@ -7235,39 +7212,47 @@ function computeMouseDetails(clientX, clientY, isJulia) {
     const cImag = im
     let orbit
     const bailout = _getOrbitBailout(fractal)
-    if (reFxp !== null && imFxp !== null && fractal.fractalType === 'mandelbrot' && z0Real === 0 && z0Imag === 0) {
-      try {
-        ;({ orbit } = _computeOrbitHighPrec(reFxp, imFxp, bailout))
-      } catch (_) {
-        const iterFn = _getIterFn()
-        ;({ orbit } = _computeOrbitPoints(
-          z0Real,
-          z0Imag,
-          cReal,
-          cImag,
-          iterFn,
-          () => [],
-          fractal.max_iter,
-          bailout,
-        ))
-      }
-    } else {
-      const iterFn = _getIterFn()
-      ;({ orbit } = _computeOrbitPoints(
-        z0Real,
-        z0Imag,
-        cReal,
-        cImag,
-        iterFn,
-        () => [],
-        fractal.max_iter,
-        bailout,
-      ))
-    }
-    const iter = orbit.length - 1
+    const iterFn = _getIterFn()
+    ;({ orbit } = _computeOrbitPoints(
+      z0Real,
+      z0Imag,
+      cReal,
+      cImag,
+      iterFn,
+      () => [],
+      fractal.max_iter,
+      bailout,
+    ))
+    const iter = Math.min(fractal.max_iter, orbit.length - 1)
     const zFinal = orbit[orbit.length - 1] || [z0Real, z0Imag]
     return { re, im, reFxp, imFxp, iter, zFinal }
   }
+}
+
+function computeDetailInfoAtPoint(px, py, isJulia) {
+  if (isJulia) {
+    if (isJuliaCanvasInteractionBlockedByBuddhabrot()) return null
+    if (!juliaState.active || !juliaState.renderer) return null
+    const [reFxp, imFxp] = juliaState.renderer.canvas2complex(px, py)
+    return computeDetailInfoForCoordinate(reFxp, imFxp, true)
+  }
+  const view = _getMainOrbitRenderView()
+  const [reFxp, imFxp] = _canvas2complexForView(px, py, view.center, view.zoom, fractal.precision)
+  return computeDetailInfoForCoordinate(reFxp, imFxp, false)
+}
+
+function computeCenterDetails(isJulia) {
+  if (isJulia) {
+    if (!juliaState.active || !juliaState.renderer || isJuliaCanvasInteractionBlockedByBuddhabrot()) return null
+    const p = juliaState.renderer.precision
+    return computeDetailInfoForCoordinate(
+      juliaState.renderer.center[0].withScale(p),
+      juliaState.renderer.center[1].withScale(p),
+      true,
+    )
+  }
+  const view = _getMainOrbitRenderView()
+  return computeDetailInfoForCoordinate(view.center[0].withScale(fractal.precision), view.center[1].withScale(fractal.precision), false)
 }
 
 function formatDetailInfo(info) {
@@ -7282,16 +7267,6 @@ function formatDetailInfo(info) {
     return `${reStr} ${sign} ${norm}i`
   }
 
-  let coordStr
-  if (info.reFxp) {
-    const xStr = formatFxPCoord(info.reFxp)
-    let yStr = formatFxPCoord(info.imFxp)
-    yStr = negateDecimalString(yStr)
-    coordStr = joinReIm(xStr, yStr)
-  } else {
-    coordStr = joinReIm(_fmt(info.re), _fmt(info.im))
-  }
-
   const z = info.zFinal
   let zStr = ''
   if (z) {
@@ -7300,19 +7275,25 @@ function formatDetailInfo(info) {
     zStr = joinReIm(zr, zi)
   }
 
-  return `coord: ${coordStr}\niter: ${info.iter}\nz: ${zStr}`
+  return `iter: ${info.iter}\nz: ${zStr}`
 }
 
-function showDetailPopup(text, clientX, clientY) {
-  if (!detailPopup) return
-  detailPopup.textContent = text
-  detailPopup.style.left = `${clientX + 12}px`
-  detailPopup.style.top = `${clientY + 12}px`
-  detailPopup.hidden = false
+function showDetailPopup(text, isJulia = false) {
+  const popup = isJulia ? juliaDetailPopup : detailPopup
+  if (!popup) return
+  popup.textContent = text
+  popup.hidden = false
 }
 
-function hideDetailPopup() {
-  if (detailPopup) detailPopup.hidden = true
+function hideDetailPopup(isJulia = null) {
+  if (isJulia !== true && detailPopup) {
+    detailPopup.hidden = true
+    detailPopup.textContent = ''
+  }
+  if (isJulia !== false && juliaDetailPopup) {
+    juliaDetailPopup.hidden = true
+    juliaDetailPopup.textContent = ''
+  }
 }
 
 function _getDetailCrosshairCanvas(isJulia) {
@@ -7335,103 +7316,66 @@ function _clearDetailCrosshairs() {
   _clearDetailCrosshairCanvas(true)
 }
 
-function _getActiveDetailState() {
-  return detailPinnedState || detailHoverState
+function _shouldShowJuliaDetail() {
+  return Boolean(juliaState.active && juliaState.renderer && !isJuliaCanvasInteractionBlockedByBuddhabrot())
 }
 
-function _drawDetailCrosshairAtClient(clientX, clientY, isJulia) {
-  const overlayCanvas = _getDetailCrosshairCanvas(isJulia)
-  const ownerCanvas = _getDetailOwnerCanvas(isJulia)
-  if (!overlayCanvas || !ownerCanvas) return false
+function _canShowDetailReliably(isJulia) {
+  const renderer = isJulia ? juliaState.renderer : { zoom: _getMainOrbitRenderView().zoom }
+  return _canDrawOrbitReliably(renderer)
+}
 
-  const ow = overlayCanvas.offsetWidth
-  const oh = overlayCanvas.offsetHeight
-  if (ow < 1 || oh < 1) return false
-  if (overlayCanvas.width !== ow || overlayCanvas.height !== oh) {
-    overlayCanvas.width = ow
-    overlayCanvas.height = oh
+function _setDetailCenterDotVisibility(showMain, showJulia) {
+  if (detailCenterDot) {
+    detailCenterDot.hidden = !detailEnabled || !showMain
   }
-
-  const rect = ownerCanvas.getBoundingClientRect()
-  const cw = rect.width || ownerCanvas.offsetWidth || 1
-  const ch = rect.height || ownerCanvas.offsetHeight || 1
-  const cssX = ((clientX - rect.left) / cw) * ow
-  const cssY = ((clientY - rect.top) / ch) * oh
-
-  const ctx = overlayCanvas.getContext('2d')
-  ctx.clearRect(0, 0, ow, oh)
-  _paintCrosshairOnCtx(ctx, cssX, cssY)
-  return true
+  if (juliaDetailCenterDot) {
+    juliaDetailCenterDot.hidden = !detailEnabled || !showJulia
+  }
 }
 
 function _renderDetailIndicator() {
   _clearDetailCrosshairs()
   if (!detailEnabled) {
+    _setDetailCenterDotVisibility(false, false)
     hideDetailPopup()
     return
   }
 
-  const state = _getActiveDetailState()
-  if (!state) {
-    hideDetailPopup()
-    return
+  const showMain = _canShowDetailReliably(false)
+  const showJulia = showMain && _shouldShowJuliaDetail() && _canShowDetailReliably(true)
+  _setDetailCenterDotVisibility(showMain, showJulia)
+
+  if (showMain) {
+    if (!_showComputedCenterDetailPopup(false)) hideDetailPopup(false)
+  } else {
+    hideDetailPopup(false)
   }
 
-  if (!_showComputedDetailPopupAt(state.clientX, state.clientY, state.isJulia)) {
-    if (detailPinnedState === state) detailPinnedState = null
-    if (detailHoverState === state) detailHoverState = null
-    hideDetailPopup()
-    return
+  if (showJulia) {
+    if (!_showComputedCenterDetailPopup(true)) hideDetailPopup(true)
+  } else {
+    hideDetailPopup(true)
   }
-
-  if (detailPinnedState === state) {
-    _drawDetailCrosshairAtClient(state.clientX, state.clientY, state.isJulia)
-  }
-}
-
-function _setDetailHoverState(clientX, clientY, isJulia) {
-  detailHoverState = { clientX, clientY, isJulia }
-  _renderDetailIndicator()
-}
-
-function _clearDetailHoverState() {
-  detailHoverState = null
-  _renderDetailIndicator()
 }
 
 function clearAllDetailIndicators() {
-  detailHoverState = null
-  detailPinnedState = null
+  _setDetailCenterDotVisibility(false, false)
   _renderDetailIndicator()
 }
 
-function clearPinnedDetailPopup() {
-  detailPinnedState = null
-  _renderDetailIndicator()
-}
-
-function _showComputedDetailPopupAt(clientX, clientY, isJulia) {
-  const info = computeMouseDetails(clientX, clientY, isJulia)
+function _showComputedCenterDetailPopup(isJulia) {
+  const info = computeCenterDetails(isJulia)
   if (!info) return false
-  showDetailPopup(formatDetailInfo(info), clientX, clientY)
+  showDetailPopup(formatDetailInfo(info), isJulia)
   return true
-}
-
-function _togglePinnedDetailPopupAt(clientX, clientY, isJulia) {
-  if (
-    detailPinnedState &&
-    detailPinnedState.isJulia === isJulia &&
-    Math.hypot(clientX - detailPinnedState.clientX, clientY - detailPinnedState.clientY) < DETAIL_TOUCH_TOGGLE_DISTANCE
-  ) {
-    clearPinnedDetailPopup()
-    return
-  }
-  detailPinnedState = { clientX, clientY, isJulia }
-  _renderDetailIndicator()
 }
 
 function initDetailsFeature() {
   detailPopup = document.getElementById('detail-popup') || null
+  juliaDetailPopup = document.getElementById('julia-detail-popup') || null
+  detailCenterDot = document.getElementById('detail-center-dot') || null
+  juliaDetailCenterDot = document.getElementById('julia-detail-center-dot') || null
   const detailToggle = document.getElementById('detail-toggle')
   if (detailToggle) {
     detailToggle.addEventListener('change', (e) => {
@@ -7443,30 +7387,7 @@ function initDetailsFeature() {
       }
     })
   }
-  canvasElement.addEventListener('mousemove', (evt) => {
-    if (!detailEnabled || detailPinnedState) return
-    _setDetailHoverState(evt.clientX, evt.clientY, false)
-  })
-  canvasElement.addEventListener('mouseout', () => {
-    if (!detailPinnedState) _clearDetailHoverState()
-  })
-  if (juliaCanvasElement) {
-    juliaCanvasElement.addEventListener('mousemove', (evt) => {
-      if (isJuliaCanvasInteractionBlockedByBuddhabrot()) {
-        if (detailPinnedState?.isJulia) {
-          clearPinnedDetailPopup()
-        } else if (detailHoverState?.isJulia) {
-          _clearDetailHoverState()
-        }
-        return
-      }
-      if (!detailEnabled || detailPinnedState) return
-      _setDetailHoverState(evt.clientX, evt.clientY, true)
-    })
-    juliaCanvasElement.addEventListener('mouseout', () => {
-      if (!detailPinnedState) _clearDetailHoverState()
-    })
-  }
+  _renderDetailIndicator()
 }
 
 // ピクセル差分（整数）を高精度 FxP の複素平面差分へ変換する旧説明。
@@ -8383,7 +8304,7 @@ function initListeners() {
           const dx = x - juliaDragStart[0]
           const dy = y - juliaDragStart[1]
           if (dx !== 0 || dy !== 0) invalidateJuliaBuddhabrotView()
-          if (detailPinnedState) clearPinnedDetailPopup()
+          if (detailEnabled) _renderDetailIndicator()
 
           const p = renderer.precision
           const w_fx = fxp.fromNumber(renderer.width, p)
@@ -8456,7 +8377,7 @@ function initListeners() {
             return
           }
           invalidateJuliaBuddhabrotView()
-          if (detailPinnedState) clearPinnedDetailPopup()
+          if (detailEnabled) _renderDetailIndicator()
           const appliedFactor = zoomChanged ? newZoom.divide(zoomFx).toNumber() : 1
           const invFactor = fxp.fromNumber(1.0 / appliedFactor, p)
           const offsetX = ptr[0].subtract(renderer.center[0].withScale(p)).multiply(invFactor)
@@ -8489,9 +8410,7 @@ function initListeners() {
         suppressJuliaOrbitClickUntil = performance.now() + TOUCH_CLICK_SUPPRESS_MS
         _togglePinnedJuliaOrbitAtClient(touch.clientX, touch.clientY)
       }
-      if (detailEnabled && touch && !_juliaPinDragged && juliaState.active) {
-        _togglePinnedDetailPopupAt(touch.clientX, touch.clientY, true)
-      }
+      if (detailEnabled) _renderDetailIndicator()
     })
     juliaCanvasElement.addEventListener('touchcancel', () => {
       onJuliaMouseUp()
@@ -8582,7 +8501,7 @@ function initListeners() {
 
         const deferPinchRedraw = isMainRenderGpuPath()
         if (deferPinchRedraw) {
-          if (detailPinnedState) clearPinnedDetailPopup()
+          if (detailEnabled) _renderDetailIndicator()
           const pendingView = ensurePendingInteractivePinchView()
           pendingView.center = _centerAfterPixelDelta(pendingView.center, pendingView.zoom, dx, dy, fractal.precision)
           const zoomedPendingView = _zoomViewAroundCanvasPoint(
@@ -8630,9 +8549,7 @@ function initListeners() {
       suppressOrbitClickUntil = performance.now() + TOUCH_CLICK_SUPPRESS_MS
       _togglePinnedOrbitAtClient(touch.clientX, touch.clientY)
     }
-    if (detailEnabled && touch && !_orbitPinDragged) {
-      _togglePinnedDetailPopupAt(touch.clientX, touch.clientY, false)
-    }
+    if (detailEnabled) _renderDetailIndicator()
     // evt.preventDefault()
   })
   canvasElement.addEventListener('touchcancel', () => {

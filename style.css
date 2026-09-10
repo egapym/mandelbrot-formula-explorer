@@ -257,16 +257,24 @@ html.embedded-mode #mandelbrot-canvas {
 }
 
 /* 詳細モード時に座標や反復回数を表示するポップアップ */
-#detail-popup {
+#detail-popup,
+#julia-detail-popup {
   position: absolute;
+  bottom: 0;
+  left: 0;
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
   pointer-events: none;
   background: rgba(0, 0, 0, 0.6);
   color: #fff;
   padding: 4px 8px;
   border-radius: 4px;
-  font-size: 0.75rem;
+  font-size: 0.68rem;
   z-index: 1000;
-  white-space: pre;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
 }
 
 /* 設定欄全体を少しだけコンパクトに見せる */
@@ -858,6 +866,7 @@ footer {
   display: flex;
   align-items: stretch;
   overflow: hidden;
+  position: relative;
 }
 
 .canvas-wrap {
