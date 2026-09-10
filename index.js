@@ -7327,7 +7327,7 @@ function _canShowDetailReliably(isJulia) {
 
 function _setDetailCenterDotVisibility(showMain, showJulia) {
   if (detailCenterDot) {
-    detailCenterDot.hidden = !detailEnabled || !showMain
+    detailCenterDot.hidden = !detailEnabled || !showMain || juliaState.active
   }
   if (juliaDetailCenterDot) {
     juliaDetailCenterDot.hidden = !detailEnabled || !showJulia
@@ -9609,6 +9609,7 @@ function initListeners() {
             if (stoppedBuddhabrotRendering) restoreOrRedrawFractalDisplayAfterClearingBuddha('main')
           })
         }
+        if (detailEnabled) _renderDetailIndicator()
       })
     }
     // Julia リセットボタン
