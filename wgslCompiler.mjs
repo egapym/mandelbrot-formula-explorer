@@ -966,6 +966,17 @@ function astToWGSL(node, tokensTable) {
           `(${comp(a, 'x')}) >= 0.0)`
         return makeVec2FromChildren({ expr: realPart, kind: 'scalar' }, { expr: imagPart, kind: 'scalar' })
       }
+      case 'complexAtanSqrt':
+      case 'atanSqrt': {
+        const a = argNodes[0]
+        const full = a.kind === 'vec2' ? a.expr : `vec2<f32>(${a.expr}, 0.0)`
+        const magnitude = `sqrt(length(${full}))`
+        const theta = `select(0.0, 0.5 * atan((${comp(a, 'y')}) / (${comp(a, 'x')})), length(${full}) >= ${SAFE_EPS})`
+        return makeVec2FromChildren(
+          { expr: `(${magnitude}) * cos(${theta})`, kind: 'scalar' },
+          { expr: `(${magnitude}) * sin(${theta})`, kind: 'scalar' },
+        )
+      }
       case 'complexPower': {
         const base = argNodes[0]
         const expNode = argNodes[1]
@@ -1990,6 +2001,7 @@ function validateVariables(expr) {
     'exp',
     'log',
     'sqrt',
+    'atanSqrt',
     'abs',
     'atan2',
     'pow',
@@ -2040,6 +2052,7 @@ function validateVariables(expr) {
     'complexAbs',
     'complexConj',
     'complexSqrt',
+    'complexAtanSqrt',
     // 補助関数
     'vec2',
     'f32',

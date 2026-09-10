@@ -52,7 +52,7 @@ export const functionPresets = [
   { expr: 'fract(z*z) + c', label: 'fract tiling', z0Real: 0, z0Imag: 0 },
   { expr: 'mod(z*z, 1) + c', label: 'mod lattice', z0Real: 0, z0Imag: 0 },
   { expr: 'z*z + c + 0.01*sin(n*z)', label: 'iteration ripple', z0Real: 0, z0Imag: 0 },
-
+  { expr: 'exp((z^2 + z) / atanSqrt(c^3))', label: 'atan half-angle root', z0Real: 1, z0Imag: 1 },
   {
     expr: '(Re(z) + i*|Im(z)|)^2 + c',
     z0Real: 0,

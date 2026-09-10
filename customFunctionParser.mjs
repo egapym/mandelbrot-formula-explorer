@@ -241,6 +241,11 @@ export function compileIterationFunction(functionStr) {
                 const theta = r === 0 ? 0 : Math.atan2(a[1], a[0]) / 2;
                 return [r * Math.cos(theta), r * Math.sin(theta)];
             };
+            const complexAtanSqrt = (a) => {
+                const r = Math.sqrt(complexAbs(a));
+                const theta = a[0] === 0 && a[1] === 0 ? 0 : Math.atan(a[1] / a[0]) / 2;
+                return [r * Math.cos(theta), r * Math.sin(theta)];
+            };
             const complexLog = (a) => {
                 const r = complexAbs(a);
                 const theta = r === 0 ? 0 : Math.atan2(a[1], a[0]);
@@ -463,6 +468,11 @@ function createOptimizedFunction(expr) {
                 const theta = r === 0 ? 0 : Math.atan2(a[1], a[0]) / 2;
                 return [r * Math.cos(theta), r * Math.sin(theta)];
             };
+            const complexAtanSqrt = (a) => {
+                const r = Math.sqrt(complexAbs(a));
+                const theta = a[0] === 0 && a[1] === 0 ? 0 : Math.atan(a[1] / a[0]) / 2;
+                return [r * Math.cos(theta), r * Math.sin(theta)];
+            };
             const complexLog = (a) => {
                 const r = complexAbs(a);
                 const theta = r === 0 ? 0 : Math.atan2(a[1], a[0]);
@@ -550,7 +560,7 @@ function analyzeComplexity(expr) {
 
   // Count function calls
   const funcMatches = expr.match(
-    /\b(sin|cos|tan|sinh|cosh|tanh|exp|log|ln|sqrt|zeta|conj|Re|Im|abs|arg|abs2|fract|mod|rotate|fold|boxFold)\s*\(/g,
+    /\b(sin|cos|tan|sinh|cosh|tanh|exp|log|ln|sqrt|atanSqrt|zeta|conj|Re|Im|abs|arg|abs2|fract|mod|rotate|fold|boxFold)\s*\(/g,
   )
   if (funcMatches) complexity += funcMatches.length * 2
 
@@ -675,6 +685,7 @@ function parseExpression(expr) {
     ['cosh', (converted) => `complexCosh(${converted})`],
     ['tanh', (converted) => `complexTanh(${converted})`],
     ['sqrt', (converted) => `complexSqrt(${converted})`],
+    ['atanSqrt', (converted) => `complexAtanSqrt(${converted})`],
     ['zeta', (converted) => `complexZeta(${converted})`],
     ['fract', (converted) => `complexFract(${converted})`],
     [

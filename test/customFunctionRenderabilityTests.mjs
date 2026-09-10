@@ -221,6 +221,7 @@ async function main() {
   results.push(testRenderability('|Re(z+1)| + i*|Im(z+c)| + c'))
   results.push(testRenderability('sin(z+1) + c'))
   results.push(testRenderability('sqrt(z+1) + c'))
+  results.push(testRenderability('Exp((z^2 + z) / atanSqrt(c^3))', { z0Real: 1, z0Imag: 1 }))
   results.push(testRenderability('mod(z*z, 1) + c'))
   results.push(testRenderability('mod(z*z, n) + c'))
   results.push(testRenderability('zeta((0.35*z)) + c'))
