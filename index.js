@@ -10238,6 +10238,15 @@ function init() {
   if (params) {
     initFromParams(params)
   } else {
+    // HTML のフォールバック option は無効な "custom" なので、クエリなしでは
+    // 既定値を明示的に適用する。これにより、先頭 option を選択状態として保持する
+    // iOS Safari でも custom ではなく Mandelbrot が表示される。
+    const normalizedFractalParams = normalizeFractalTypeParams()
+    fractal.fractalType = normalizedFractalParams.fractalType
+    fractal.iterationFunction = normalizedFractalParams.iterationFunction
+    fractal.dataPresetIndex = normalizedFractalParams.fractalDataPresetIndex
+    DOM.fractalTypeSelect.value = normalizedFractalParams.fractalDataPresetIndex
+
     // パーマリンクがない場合も z0 入力は常に編集可能にしておく
     const elr = document.getElementById('z0-real')
     const eli = document.getElementById('z0-imag')
