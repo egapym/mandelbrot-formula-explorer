@@ -3412,6 +3412,13 @@ async function startBuddhaRender() {
   // すでに Buddhabrot 実行中なら一度止めてからやり直す。
   // View ON で再レンダーする場合は、既存表示を消さずに新しい結果へ差し替える。
   try {
+    // Stop 後の保持 runner は、停止前の通知コールバックを持っている。
+    // 新規レンダーでは再利用せず、保持中のキャンバスを残したまま作り直す。
+    if (!buddhaActive && buddhaPreservedDisplay && buddhaRunner) {
+      buddhaRunner.terminate?.()
+      buddhaRunner = null
+      buddhaPreservedDisplay = false
+    }
     if (buddhaActive) {
       if (targetWasShowingBuddha) {
         buddhaRunnerGeneration++
@@ -3592,6 +3599,8 @@ async function startBuddhaRender() {
         onProgress: (data) => {
           // delta が来る場合はその差分で進捗を進める
           try {
+            // 完全消去または再実行で無効化済みになったジョブの通知は反映しない。
+            if (buddhaRunnerGeneration !== runnerGeneration) return
             if (!buddhaActive) return
             const progressMonitor = getBuddhabrotProgressMonitor()
             if (!progressMonitor) return
@@ -3604,12 +3613,17 @@ async function startBuddhaRender() {
         onChunk: (_chunk) => {
           // 進捗更新は別で行うので、ここでは描画予約だけ行う
           try {
+            if (buddhaRunnerGeneration !== runnerGeneration) return
             scheduleDraw()
           } catch (e) {
             console.warn('Error scheduling buddha draw:', e?.message ? e.message : e)
           }
         },
         onComplete: (result) => {
+          // stop() は WebGPU の提出済みコマンドを取り消せないため、停止後にも
+          // 部分密度の完了通知が届く。表示保持中はこれを描画し、完全消去または
+          // 再実行で世代が変わった場合だけ無視する。
+          if (buddhaRunnerGeneration !== runnerGeneration) return
           try {
             finishBuddhabrotProgress()
             hideInactiveBuddhabrotProgress()
@@ -8618,8 +8632,10 @@ function initListeners() {
   })
   DOM.supersamplingToggle.addEventListener('change', (event) => {
     fractal.supersampling = parseInt(event.target.value, 10)
-    // Buddhabrot 表示中は、通常描画へ戻さずそのまま見せ続ける
-    if (!buddhaActive) redraw(true) // supersampling 切替時はキャッシュも更新する
+    // Stop 後も Buddhabrot の表示保持中は通常描画へ切り替えない。
+    // ここで redraw(true) すると保持画像・runner を破棄し、停止中 GPU の
+    // 非同期読み戻しと競合して縮小した古いフレームが重なる。
+    if (!buddhaActive && !buddhaPreservedDisplay) redraw(true) // supersampling 切替時はキャッシュも更新する
   })
   // 不要な再描画を避けるため、最後に適用した反復式を覚えておく
   let lastIterationFunctionValue = DOM.iterationFunctionInput ? DOM.iterationFunctionInput.value : ''
