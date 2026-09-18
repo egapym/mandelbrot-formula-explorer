@@ -5459,6 +5459,7 @@ let juliaPinnedOrbit = null
 let mainOrbitHoverActive = false
 let juliaOrbitHoverActive = false
 let orbitTouchTapCandidate = false
+let orbitTouchStart = null
 let juliaOrbitTouchTapCandidate = false
 let suppressOrbitClickUntil = 0
 let suppressJuliaOrbitClickUntil = 0
@@ -7058,7 +7059,7 @@ function onMouseMove(evt) {
   }
   // 軌道表示は早期 return より前に描く。
   // 固定済みのときはホバーによる再描画を行わず、その表示を保つ。
-  if (orbitDrawEnabled && !pinnedOrbit) {
+  if (evt.type === 'mousemove' && orbitDrawEnabled && !pinnedOrbit) {
     try {
       drawOrbitOnCanvas(clientX, clientY)
     } catch (_e) {}
@@ -8440,10 +8441,12 @@ function initListeners() {
       if (evt.cancelable && evt.touches.length >= 1) evt.preventDefault()
       if (evt.touches.length === 1) {
         orbitTouchTapCandidate = true
+        orbitTouchStart = [evt.touches[0].clientX, evt.touches[0].clientY]
         onMouseDown(evt)
       }
       if (evt.touches.length === 2) {
         orbitTouchTapCandidate = false
+        orbitTouchStart = null
         lastTouchDistance = Math.hypot(
           evt.touches[0].pageX - evt.touches[1].pageX,
           evt.touches[0].pageY - evt.touches[1].pageY,
@@ -8461,6 +8464,16 @@ function initListeners() {
     (evt) => {
       if (evt.touches.length === 1) {
         if (evt.cancelable && document.fullscreenElement == null) evt.preventDefault()
+        // タッチ中は hover 軌道を描かず、移動を検知した時点でタップ固定の候補から外す。
+        // これにより、未固定の状態からパンを始めても開始点の軌道が残らない。
+        const touch = evt.touches[0]
+        if (
+          orbitTouchTapCandidate &&
+          orbitTouchStart &&
+          (touch.clientX !== orbitTouchStart[0] || touch.clientY !== orbitTouchStart[1])
+        ) {
+          orbitTouchTapCandidate = false
+        }
         onMouseMove(evt)
         if (document.fullscreenElement != null) {
           // no preventDefault in full-screen mode because this may be used to exit full-screen
@@ -8468,6 +8481,7 @@ function initListeners() {
       }
       if (evt.touches.length === 2) {
         orbitTouchTapCandidate = false
+        orbitTouchStart = null
         if (evt.cancelable && document.fullscreenElement == null) evt.preventDefault()
         // Buddhabrot 表示中、またはトグルがオンならピンチ操作を無視する
         if (isMainCanvasInteractionBlockedByBuddhabrot()) {
@@ -8559,6 +8573,7 @@ function initListeners() {
     lastTouchCenter = null
     flushGpuInteractiveRedraw()
     orbitTouchTapCandidate = false
+    orbitTouchStart = null
     if (orbitDrawEnabled && touch && !_orbitPinDragged) {
       suppressOrbitClickUntil = performance.now() + TOUCH_CLICK_SUPPRESS_MS
       _togglePinnedOrbitAtClient(touch.clientX, touch.clientY)
@@ -8571,6 +8586,7 @@ function initListeners() {
     lastTouchDistance = null
     lastTouchCenter = null
     orbitTouchTapCandidate = false
+    orbitTouchStart = null
     flushGpuInteractiveRedraw()
   })
 
