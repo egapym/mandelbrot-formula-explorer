@@ -4,7 +4,7 @@
  * Licensed under GPL-3.0.
  */
 
-import { getParsedExpression } from './customFunctionParser.mjs'
+import { getIterationHistoryRequirements, getParsedExpression } from './customFunctionParser.mjs'
 import { BAILOUT_MIN, BAILOUT_SMOOTH } from './sharedCalculations.mjs'
 import { CUSTOM_FUNCTION_WGSL_HELPERS, jsExprToWGSL_safe } from './wgslCompiler.mjs'
 import { WorkerContext } from './workerContext.mjs'
@@ -224,25 +224,43 @@ export class MandelbrotCustomWebGPU {
         ? task.escapeRadius ** 2
         : 16
 
-    const result = await this.renderDirect({
-      w,
-      h,
-      max_iter: task.maxIter,
-      refr,
-      refi,
-      ddr0,
-      ddi0,
-      ddr,
-      ddi,
-      doSmooth: task.smooth,
-      bailout,
-      supersampling: task.supersampling,
-      iterationFunction: this.iterationFunction,
-      z0: task.z0 || [0, 0],
-      isJulia: task.fractalType === 'julia' || task.fractalType === 'julia-custom',
-      juliaC: [task.juliaRe ?? 0.0, task.juliaIm ?? 0.0],
-      escapeRadius: task.escapeRadius !== undefined ? task.escapeRadius : 4.0,
-    })
+    let result
+    try {
+      result = await this.renderDirect({
+        w,
+        h,
+        max_iter: task.maxIter,
+        refr,
+        refi,
+        ddr0,
+        ddi0,
+        ddr,
+        ddi,
+        doSmooth: task.smooth,
+        bailout,
+        supersampling: task.supersampling,
+        iterationFunction: this.iterationFunction,
+        z0: task.z0 || [0, 0],
+        isJulia: task.fractalType === 'julia' || task.fractalType === 'julia-custom',
+        juliaC: [task.juliaRe ?? 0.0, task.juliaIm ?? 0.0],
+        escapeRadius: task.escapeRadius !== undefined ? task.escapeRadius : 4.0,
+      })
+    } catch (error) {
+      const message = ErrorHelpers.format(error)
+      ErrorHelpers.logError('GPU Rendering', error)
+      this.p.onGpuUpdate({
+        jobToken: task.jobToken,
+        values: new Int32Array(w * h).fill(SHADER_CONSTANTS.IN_SET_INDEX),
+        smooth: task.smooth ? new Uint8ClampedArray(w * h) : null,
+        signs: new Int8Array(w * h),
+        zreal: new Float32Array(w * h),
+        zimag: new Float32Array(w * h),
+        renderedPixels: w * h,
+        isFinished: true,
+        error: message,
+      })
+      return { error: message }
+    }
 
     const values = result.values
     const smooth = result.smooth
@@ -353,6 +371,10 @@ class CustomFractalPipeline {
     }
 
     this.pipelineKey = key
+    const historyRequirements = getIterationHistoryRequirements(iterationFunction)
+    if (!historyRequirements.supportedOnGpu) {
+      throw new Error('GPU supports zAt()/zDelay() only with static non-negative integer arguments')
+    }
 
     // カスタム反復関数を WGSL へ変換する
     let wgslIterationExpr
@@ -384,7 +406,7 @@ class CustomFractalPipeline {
       }
     }
 
-    const shaderCode = this.generateShader(wgslIterationExpr, doSmooth, bailout, supersampling)
+    const shaderCode = this.generateShader(wgslIterationExpr, doSmooth, bailout, supersampling, historyRequirements)
 
     try {
       const shaderModule = device.createShaderModule({
@@ -487,9 +509,35 @@ class CustomFractalPipeline {
     }
   }
 
-  generateShader(iterationExpr, doSmooth, _bailout, supersampling) {
+  generateShader(iterationExpr, doSmooth, _bailout, supersampling, historyRequirements = { zAt: [], zDelay: [] }) {
     const ssScale = supersampling > 0 ? supersampling : 1
     const ssSamples = ssScale * ssScale
+    const historyDeclarations = [
+      ...historyRequirements.zAt.map((index) => `  var historyZAt_${index}: vec2<f32> = vec2<f32>(0.0, 0.0);`),
+      ...historyRequirements.zDelay
+        .filter((index) => index > 0)
+        .map((index) => `  var historyZDelayStorage_${index}: array<vec2<f32>, ${index}>;`),
+    ].join('\n')
+    // private 配列の初期値には依存せず、履歴不足を必ず (0, 0) にする。
+    const historyInitialize = historyRequirements.zDelay
+      .filter((index) => index > 0)
+      .map(
+        (index) =>
+          `  for (var historyInit_${index}: u32 = 0u; historyInit_${index} < ${index}u; historyInit_${index} = historyInit_${index} + 1u) { historyZDelayStorage_${index}[historyInit_${index}] = vec2<f32>(0.0, 0.0); }`,
+      )
+      .join('\n')
+    const historyBefore = [
+      ...historyRequirements.zAt.map((index) => `    if (iter == ${index}) { historyZAt_${index} = z; }`),
+      ...historyRequirements.zDelay.map((index) =>
+        index === 0
+          ? `    let historyZDelay_0 = z;`
+          : `    let historyZDelay_${index} = select(vec2<f32>(0.0, 0.0), historyZDelayStorage_${index}[u32(iter) % ${index}u], iter >= ${index});`,
+      ),
+    ].join('\n')
+    const historyAfter = historyRequirements.zDelay
+      .filter((index) => index > 0)
+      .map((index) => `    historyZDelayStorage_${index}[u32(iter) % ${index}u] = z;`)
+      .join('\n')
 
     return `
 struct Spec {
@@ -534,6 +582,8 @@ fn iterate(z_init: vec2<f32>, c: vec2<f32>) -> IterResult {
   var z = z_init;
   var iter: i32 = -1;
   var zq: f32 = z.x * z.x + z.y * z.y;
+${historyDeclarations}
+${historyInitialize}
 
   while (zq <= spec.bailout) {
     iter = iter + 1;
@@ -543,7 +593,9 @@ fn iterate(z_init: vec2<f32>, c: vec2<f32>) -> IterResult {
 
     // Custom iteration expression
     let n = f32(iter);
+${historyBefore}
     let z_next = ${iterationExpr};
+${historyAfter}
 
     // Robust NaN/Inf validation (WGSL doesn't have isFinite, use self-equality for NaN check)
     let is_valid = (z_next.x == z_next.x) && (z_next.y == z_next.y) &&

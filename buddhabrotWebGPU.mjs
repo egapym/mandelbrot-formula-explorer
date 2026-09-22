@@ -170,12 +170,17 @@ export class BuddhabrotWebGPU {
     // 簡易 WGSL カーネルを組み立てる。
     // CPU 版と完全一致ではないが、GPU 側での加算処理を行える。
     let customWGSLIteration = null
+    let historyRequirements = { zAt: [], zDelay: [], supportedOnGpu: true }
     let customIterationSupported =
       fractalType === 'mandelbrot' || fractalType === 'julia' || fractalType === 'julia-custom'
     if (params.iterationFunction) {
       try {
         const parser = await import('./customFunctionParser.mjs')
         const compiler = await import('./wgslCompiler.mjs')
+        historyRequirements = parser.getIterationHistoryRequirements(params.iterationFunction)
+        if (!historyRequirements.supportedOnGpu) {
+          throw new Error('GPU supports zAt()/zDelay() only with static non-negative integer arguments')
+        }
         const jsExpr = parser.getParsedExpression(params.iterationFunction)
         // パース済み式を安全な WGSL 式へ変換する
         let wgslExpr = compiler.jsExprToWGSL_safe(jsExpr)
@@ -199,6 +204,40 @@ export class BuddhabrotWebGPU {
       // 現在の z と c から次の z を求める式
       customWGSLIteration = `vec2<f32>(z.x * z.x - z.y * z.y + c.x, 2.0 * z.x * z.y + c.y)`
     }
+
+    const historyDeclarations = [
+      ...historyRequirements.zAt.map((index) => `    var historyZAt_${index}: vec2<f32> = vec2<f32>(0.0, 0.0);`),
+      ...historyRequirements.zDelay
+        .filter((index) => index > 0)
+        .map((index) => `    var historyZDelayStorage_${index}: array<vec2<f32>, ${index}>;`),
+    ].join('\n')
+    const clearDelayHistory = (prefix) =>
+      historyRequirements.zDelay
+        .filter((index) => index > 0)
+        .map(
+          (index) =>
+            `    for (var ${prefix}_${index}: u32 = 0u; ${prefix}_${index} < ${index}u; ${prefix}_${index} = ${prefix}_${index} + 1u) { historyZDelayStorage_${index}[${prefix}_${index}] = vec2<f32>(0.0, 0.0); }`,
+        )
+        .join('\n')
+    const historyInitialize = clearDelayHistory('historyInit')
+    const historyBefore = (counter) =>
+      [
+        ...historyRequirements.zAt.map((index) => `      if (${counter} == ${index}u) { historyZAt_${index} = z; }`),
+        ...historyRequirements.zDelay.map((index) =>
+          index === 0
+            ? `      let historyZDelay_0 = z;`
+            : `      let historyZDelay_${index} = select(vec2<f32>(0.0, 0.0), historyZDelayStorage_${index}[${counter} % ${index}u], ${counter} >= ${index}u);`,
+        ),
+      ].join('\n')
+    const historyAfter = (counter) =>
+      historyRequirements.zDelay
+        .filter((index) => index > 0)
+        .map((index) => `      historyZDelayStorage_${index}[${counter} % ${index}u] = z;`)
+        .join('\n')
+    const historyReset = [
+      ...historyRequirements.zAt.map((index) => `    historyZAt_${index} = vec2<f32>(0.0, 0.0);`),
+      clearDelayHistory('historyReset'),
+    ].join('\n')
 
     // customWGSLIteration を使って統一形式の WGSL カーネルを作る
     let wgsl
@@ -270,12 +309,16 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 	    var z = select(vec2<f32>(u.z0x, u.z0y), sample, u.isJulia != 0u);
 	    var escaped = false;
 	    var iter: u32 = 0u;
+${historyDeclarations}
+${historyInitialize}
     // カスタム式で反復する。式は vec2<f32> を返す必要がある
     loop {
       if (iter >= u.maxIter) { break; }
       // 一度一時変数へ入れてから妥当性を確認する
       let n = f32(iter);
+${historyBefore('iter')}
       var _tmp_iter = ${customWGSLIteration};
+${historyAfter('iter')}
       // WGSL には isnan / isfinite がないため、自己比較と上限値で判定する
       if (!(_tmp_iter.x == _tmp_iter.x) || !(_tmp_iter.y == _tmp_iter.y) || abs(_tmp_iter.x) > 1e20 || abs(_tmp_iter.y) > 1e20) {
         // 原点へ潰れて真っ黒にならないよう c へ戻す
@@ -289,6 +332,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 	    if (!((escaped && u.mode == 0u) || (!escaped && u.mode == 1u))) { continue; }
 	  // z0 から軌道をもう一度たどり、密度へ加算する
 	  z = select(vec2<f32>(u.z0x, u.z0y), sample, u.isJulia != 0u);
+${historyReset}
     // bandMode == 1（perTrajectory）なら軌道全体で使う band を先に決める
     var trajBandIdx: u32 = 0u;
     if (u.bandMode == 1u) {
@@ -326,7 +370,9 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     for (var oi: u32 = 0u; oi < iter; oi = oi + 1u) {
       // 一時変数へ評価してから妥当性を確認する
       let n = f32(oi);
+${historyBefore('oi')}
       var _tmp_iter = ${customWGSLIteration};
+${historyAfter('oi')}
       if (!(_tmp_iter.x == _tmp_iter.x) || !(_tmp_iter.y == _tmp_iter.y) || abs(_tmp_iter.x) > 1e20 || abs(_tmp_iter.y) > 1e20) {
         // 原点へ潰れて真っ黒にならないよう c へ戻す
         _tmp_iter = c;

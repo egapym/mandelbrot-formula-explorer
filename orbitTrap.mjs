@@ -141,6 +141,7 @@ export function calculatePixelOrbitTrap(cr, ci, z0r, z0i, iterFn, maxIter, trapS
 
   let zr = z0r
   let zi = z0i
+  const history = { z: [] }
 
   // 各モードの集計変数
   let dClosest = Infinity
@@ -163,7 +164,7 @@ export function calculatePixelOrbitTrap(cr, ci, z0r, z0i, iterFn, maxIter, trapS
   let stepBitmapV = null
 
   for (let i = 0; i < maxIter; i++) {
-    const res = iterFn(zr, zi, cr, ci, i)
+    const res = iterFn(zr, zi, cr, ci, i, history)
     let nr = res[0]
     let ni = res[1]
     // 数値が無限 / NaN になった場合はセンチネル値で置換
@@ -433,9 +434,10 @@ function _computeTIA(cr, ci, z0r, z0i, iterFn, maxIter) {
   let iterCount = 0
   let finalZq = 0.0
   let escaped = false
+  const history = { z: [] }
 
   for (let i = 0; i < maxIter; i++) {
-    const res = iterFn(zr, zi, cr, ci, i)
+    const res = iterFn(zr, zi, cr, ci, i, history)
     let nr = res[0]
     let ni = res[1]
     if (!Number.isFinite(nr) || !Number.isFinite(ni)) {

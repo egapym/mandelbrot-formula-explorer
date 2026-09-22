@@ -988,6 +988,19 @@
 	                      <td><code>z*z + c + 0.01*sin(n*z)</code></td>
 	                    </tr>
 	                    <tr>
+	                      <td><code>zAt(k)</code></td>
+	                      <td>The z value at iteration k. It is <code>0</code> until that iteration has been reached.</td>
+	                      <td><code>z*z + c - 0.2*zAt(20)</code></td>
+	                    </tr>
+	                    <tr>
+	                      <td><code>zDelay(k)</code></td>
+	                      <td>The z value from k iterations ago. It is <code>0</code> while there is insufficient history.</td>
+	                      <td><code>z*z + c + 0.2*zDelay(5)</code></td>
+	                    </tr>
+	                    <tr>
+	                      <td colspan="3" class="small text-muted">WebGPU supports static non-negative integer values for <code>k</code>. Other valid history expressions use CPU rendering.</td>
+	                    </tr>
+	                    <tr>
 	                      <td><code>i</code></td>
 	                      <td>Imaginary unit.</td>
 	                      <td><code>z*z + i*c</code></td>

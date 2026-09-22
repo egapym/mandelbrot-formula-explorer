@@ -8,7 +8,7 @@
  */
 
 import assert from 'node:assert/strict'
-import { compileIterationFunction, getParsedExpression } from '../customFunctionParser.mjs'
+import { compileIterationFunction, getIterationHistoryRequirements, getParsedExpression } from '../customFunctionParser.mjs'
 import { functionPresets } from '../functionPresets.mjs'
 import { CUSTOM_FUNCTION_WGSL_HELPERS, jsExprToWGSL_safe } from '../wgslCompiler.mjs'
 
@@ -192,6 +192,27 @@ function testIterationIndexVariableAffectsModOrbit() {
   )
 }
 
+function testOrbitHistoryReferences() {
+  const c = [0.3, -0.2]
+  const history = { z: [] }
+  const at = compileIterationFunction('zAt(2)')
+  const delay = compileIterationFunction('zDelay(1)')
+
+  assert.deepEqual(at(1, 2, c[0], c[1], 0, history), [0, 0], 'zAt(2) must be zero before iteration 2')
+  assert.deepEqual(delay(1, 2, c[0], c[1], 0, history), [0, 0], 'zDelay(1) must be zero at the first iteration')
+  assert.deepEqual(at(3, 4, c[0], c[1], 2, history), [3, 4], 'zAt(2) must return the z value at iteration 2')
+  assert.deepEqual(delay(5, 6, c[0], c[1], 3, history), [3, 4], 'zDelay(1) must return the previous z')
+
+  assert.equal(getIterationHistoryRequirements('zAt(20)').supportedOnGpu, true)
+  assert.equal(getIterationHistoryRequirements('zDelay(5)').supportedOnGpu, true)
+  assert.equal(getIterationHistoryRequirements('zDelay(100)').supportedOnGpu, true)
+  assert.deepEqual(getIterationHistoryRequirements('delayZ(5)').zDelay, [5])
+  assert.equal(getIterationHistoryRequirements('zDelay(n)').supportedOnGpu, false)
+  assert.match(jsExprToWGSL_safe(getParsedExpression('zAt(20)')), /historyZAt_20/)
+  assert.match(jsExprToWGSL_safe(getParsedExpression('zDelay(5)')), /historyZDelay_5/)
+  assert.match(jsExprToWGSL_safe(getParsedExpression('delayZ(5)')), /historyZDelay_5/)
+}
+
 function testGpuModuloSelfIdentity() {
   for (const operand of ['z', 'c', 'n']) {
     const wgsl = jsExprToWGSL_safe(getParsedExpression(`z*z + mod(${operand},${operand}) + c`))
@@ -210,6 +231,7 @@ async function main() {
   testRiemannZetaKnownValues()
   testRemovedFunctionsAreUnavailable()
   testIterationIndexVariableAffectsModOrbit()
+  testOrbitHistoryReferences()
   testGpuModuloSelfIdentity()
   const results = []
   // include a couple of expressions that previously triggered GPU bugs
@@ -224,6 +246,8 @@ async function main() {
   results.push(testRenderability('Exp((z^2 + z) / atanSqrt(c^3))', { z0Real: 1, z0Imag: 1 }))
   results.push(testRenderability('mod(z*z, 1) + c'))
   results.push(testRenderability('mod(z*z, n) + c'))
+  results.push(testRenderability('z*z + c - 0.15*zAt(20)'))
+  results.push(testRenderability('z*z + c + 0.2*zDelay(5)'))
   results.push(testRenderability('zeta((0.35*z)) + c'))
 
   for (const preset of functionPresets) {

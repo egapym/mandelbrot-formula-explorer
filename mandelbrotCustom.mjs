@@ -515,11 +515,12 @@ export class MandelbrotCustom {
     let zImag = z0im
     let iter = -1
     let zq = zReal * zReal + zImag * zImag
+    const history = { z: [] }
     while (zq <= bailout) {
       if (iter++ === max_iter) {
         return [ITERATION_CONFIG.IN_SET_INDEX, 0, 0, 0]
       }
-      const result = this.compiledFunction(zReal, zImag, cReal, cImag, iter)
+      const result = this.compiledFunction(zReal, zImag, cReal, cImag, iter, history)
       let r0 = result[0]
       let r1 = result[1]
       if (!Number.isFinite(r0) || !Number.isFinite(r1) || Number.isNaN(r0) || Number.isNaN(r1)) {
@@ -552,6 +553,7 @@ export class MandelbrotCustom {
     let zImag = this.z0Imag !== undefined ? this.z0Imag : DEFAULT_Z0_COMPONENT
     let iter = -1
     let zq = 0.0
+    const history = { z: [] }
 
     while (zq <= bailout) {
       if (iter++ === max_iter) {
@@ -559,7 +561,7 @@ export class MandelbrotCustom {
       }
 
       // Apply the custom iteration function
-      const result = this.compiledFunction(zReal, zImag, cReal, cImag, iter)
+      const result = this.compiledFunction(zReal, zImag, cReal, cImag, iter, history)
 
       // Normalize result to finite sentinel when GPU uses large finite sentinel
       let r0 = result[0]

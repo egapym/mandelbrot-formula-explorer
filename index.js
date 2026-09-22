@@ -5,7 +5,7 @@
 
 import { BuddhabrotRunner } from './buddhabrot.mjs'
 import { BUDDHA_PALETTES, buildBuddhaStops, getBuddhaPalette } from './buddhaPalettes.mjs'
-import { compileIterationFunction, getParsedExpression } from './customFunctionParser.mjs'
+import { compileIterationFunction, getIterationHistoryRequirements, getParsedExpression, usesIterationHistory } from './customFunctionParser.mjs'
 import * as favorites from './favorites.js'
 import { functionPresets } from './functionPresets.mjs'
 import * as fxp from './fxp.mjs'
@@ -34,6 +34,10 @@ function _trapSpecKey(trapSpec) {
   if (!trapSpec) return 'null'
   const { bitmapData, ...rest } = trapSpec
   return JSON.stringify(rest)
+}
+
+function supportsGpuIterationFunction(iterationFunction) {
+  return getIterationHistoryRequirements(iterationFunction).supportedOnGpu
 }
 
 function _orbitTrapColorPatternId(paletteObj) {
@@ -873,6 +877,7 @@ class Mandelbrot {
   _willUseGpuForCurrentRender() {
     return (
       this.useGpu &&
+      supportsGpuIterationFunction(this.iterationFunction) &&
       (this._canUseOrbitTrapGpu?.() ||
         (!this.paletteComponent?.palette?.requiresCpu &&
           ((this.fractalType === 'mandelbrot' && this.mandelbrotGpu?.available) ||
@@ -1003,6 +1008,7 @@ class Mandelbrot {
     const precisionOk = !this.requiredPrecision || this.requiredPrecision <= PRECISION_CONSTANTS.MIN_CPU_PRECISION
     return (
       this.useGpu &&
+      !usesIterationHistory(this.iterationFunction) &&
       isSupportedOrbitTrapPalette &&
       hasSupportedTrap &&
       supportedFractal &&
@@ -1053,6 +1059,7 @@ class Mandelbrot {
       this.useGpu &&
       !this.paletteComponent?.palette?.requiresCpu &&
       this.fractalType === 'custom' &&
+      supportsGpuIterationFunction(this.iterationFunction) &&
       this.mandelbrotCustomGpu?.available &&
       this.offscreens &&
       this.offscreens.length > 0
@@ -1195,6 +1202,7 @@ class Mandelbrot {
       this.useGpu &&
       !this.paletteComponent?.palette?.requiresCpu &&
       this.fractalType === 'custom' &&
+      supportsGpuIterationFunction(this.iterationFunction) &&
       this.mandelbrotCustomGpu?.available
     ) {
       this.onGpuResult(answer)
@@ -1805,7 +1813,12 @@ class JuliaRenderer {
       if (options.consumeSkip) this._skipGpuOnce = false
       return false
     }
-    return this.useGpu && !this.paletteComponent?.palette?.requiresCpu && this.juliaGpu?.available
+    return (
+      this.useGpu &&
+      supportsGpuIterationFunction(this.iterationFunction) &&
+      !this.paletteComponent?.palette?.requiresCpu &&
+      this.juliaGpu?.available
+    )
   }
 
   _canUseOrbitTrapGpu(options = {}) {
@@ -1817,7 +1830,14 @@ class JuliaRenderer {
     const trapSpec = paletteObj?.trapSpec
     const colorPatternId = _orbitTrapColorPatternId(paletteObj)
     if (trapSpec?.mode === 'tia') return false
-    return this.useGpu && !!trapSpec && colorPatternId != null && !!trapSpec?.shape && this.orbitTrapGpu?.available
+    return (
+      this.useGpu &&
+      !usesIterationHistory(this.iterationFunction) &&
+      !!trapSpec &&
+      colorPatternId != null &&
+      !!trapSpec?.shape &&
+      this.orbitTrapGpu?.available
+    )
   }
 
   startNextJob() {
@@ -3365,6 +3385,7 @@ function discardSavedBuddhaImageData() {
  */
 async function startBuddhaRender() {
   const target = getBuddhabrotTargetSnapshot()
+  const historyGpuSupported = supportsGpuIterationFunction(target.iterationFunction)
   const targetCanvas = target.canvas
   const targetRenderer = target.renderer
   // 呼び出し時点で Buddhabrot 表示中だったかを覚えておく
@@ -3723,6 +3744,7 @@ async function startBuddhaRender() {
       try {
         // アプリ全体または Buddhabrot 専用の GPU トグルが ON のときだけ試す
         if (
+          historyGpuSupported &&
           (() => {
             try {
               // Buddhabrot 専用 GPU トグルがあればそちらを優先する
@@ -3871,6 +3893,7 @@ async function startBuddhaRender() {
 
   // GPU 優先なら、start() 前に GPU runner を作って差し替えられるか試す
   if (
+    historyGpuSupported &&
     (() => {
       try {
         // Buddhabrot 専用 GPU トグルを優先し、なければ全体トグルを見る
@@ -6515,13 +6538,14 @@ function _computeOrbitHighPrec(cReFxp, cImFxp, bailout = _getOrbitBailout()) {
  */
 function _computeOrbitPoints(z0r, z0i, cr, ci, iterFn, _complexToScreen, maxIter, bailout = _getOrbitBailout()) {
   const orbit = [[z0r, z0i]]
+  const history = { z: [] }
   let zr = z0r,
     zi = z0i,
     escaped = false
   for (let iter = 0; iter < maxIter; iter++) {
     let nzr, nzi
     try {
-      ;[nzr, nzi] = iterFn(zr, zi, cr, ci, iter)
+      ;[nzr, nzi] = iterFn(zr, zi, cr, ci, iter, history)
     } catch (_e) {
       break
     }

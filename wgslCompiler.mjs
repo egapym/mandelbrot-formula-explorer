@@ -610,6 +610,19 @@ function astToWGSL(node, tokensTable) {
           { expr: `-(${comp(a, 'y')})`, kind: 'scalar' },
         )
       }
+      case 'complexZAt': {
+        const step = String(scalarFromNode(argNodes[0])).replace(/\.0$/, '')
+        return { expr: `historyZAt_${step}`, kind: 'vec2', x: `historyZAt_${step}.x`, y: `historyZAt_${step}.y` }
+      }
+      case 'complexZDelay': {
+        const step = String(scalarFromNode(argNodes[0])).replace(/\.0$/, '')
+        return {
+          expr: `historyZDelay_${step}`,
+          kind: 'vec2',
+          x: `historyZDelay_${step}.x`,
+          y: `historyZDelay_${step}.y`,
+        }
+      }
       case 'complexRe': {
         const a = argNodes[0]
         return { expr: comp(a, 'x'), kind: 'scalar' }
@@ -2064,6 +2077,8 @@ function validateVariables(expr) {
 
   const invalidVars = []
   for (const id of identifiers) {
+    // 動的な添字は GPU 実行前に CPU へフォールバックするが、式そのものは有効。
+    if (/^historyZ(?:At|Delay)_[A-Za-z0-9_]+$/.test(id)) continue
     if (!validNames.has(id)) {
       invalidVars.push(id)
     }

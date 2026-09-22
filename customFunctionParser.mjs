@@ -69,6 +69,38 @@ const RIEMANN_ZETA_CPU_SOURCE = `
 // 再コンパイルを避けるためのキャッシュ
 export const functionCache = new Map()
 
+/**
+ * 軌道履歴を必要とする式か判定する。履歴はピクセルごとに保持する必要があるため、
+ * 現時点では正確な CPU 経路だけで評価する。
+ */
+export function usesIterationHistory(functionStr) {
+  return /\b(?:zAt|zDelay|delayZ)\s*\(/i.test(functionStr || '')
+}
+
+/** GPU で確保する軌道履歴を抽出する。GPU は静的な非負整数の添字だけを扱う。 */
+export function getIterationHistoryRequirements(functionStr) {
+  const requirements = { zAt: [], zDelay: [], supportedOnGpu: true }
+  const callPattern = /\b(zAt|zDelay|delayZ)\s*\(([^)]*)\)/gi
+  let match
+  while ((match = callPattern.exec(functionStr || ''))) {
+    const indexText = match[2].trim()
+    if (!/^\d+$/.test(indexText)) {
+      requirements.supportedOnGpu = false
+      continue
+    }
+    const index = Number(indexText)
+    if (!Number.isSafeInteger(index)) {
+      requirements.supportedOnGpu = false
+      continue
+    }
+    const target = match[1].toLowerCase() === 'zat' ? requirements.zAt : requirements.zDelay
+    if (!target.includes(index)) target.push(index)
+  }
+  requirements.zAt.sort((a, b) => a - b)
+  requirements.zDelay.sort((a, b) => a - b)
+  return requirements
+}
+
 function splitTopLevelArgs(s) {
   const args = []
   let depth = 0
@@ -106,7 +138,7 @@ const patternMap = new Map([
 /**
  * AST 最適化を使ってカスタム反復関数をパースし、コンパイルする
  * @param {string} functionStr - 関数文字列（例: "z*z + c"）
- * @returns {Function} (zReal, zImag, cReal, cImag) を受け取り [newReal, newImag] を返す関数
+ * @returns {Function} (zReal, zImag, cReal, cImag, n, history) を受け取り [newReal, newImag] を返す関数
  */
 export function compileIterationFunction(functionStr) {
   // まずキャッシュを確認する
@@ -300,11 +332,18 @@ export function compileIterationFunction(functionStr) {
             const z = [zReal, zImag];
             const c = [cReal, cImag];
             const iterIndex = Number.isFinite(n) ? n : 0;
+            const zHistory = history?.z || [];
+            zHistory[iterIndex] = [zReal, zImag];
+            const historyIndex = (step) => Math.max(0, Math.trunc(complexScalar(step)));
+            // zAt(k): k 回目の z。まだ到達していなければ 0。
+            const complexZAt = (step) => zHistory[historyIndex(step)] || [0, 0];
+            // zDelay(k): k 回前の z。履歴不足なら 0。
+            const complexZDelay = (step) => zHistory[iterIndex - historyIndex(step)] || [0, 0];
 
             ${jsCode}
         `
 
-    const compiledFunc = new Function('zReal', 'zImag', 'cReal', 'cImag', 'n', functionBody)
+    const compiledFunc = new Function('zReal', 'zImag', 'cReal', 'cImag', 'n', 'history', functionBody)
 
     // 生成した関数が数値ペアを返すか簡単に確認する
     try {
@@ -527,11 +566,18 @@ function createOptimizedFunction(expr) {
             const z = [zReal, zImag];
             const c = [cReal, cImag];
             const iterIndex = Number.isFinite(n) ? n : 0;
+            const zHistory = history?.z || [];
+            zHistory[iterIndex] = [zReal, zImag];
+            const historyIndex = (step) => Math.max(0, Math.trunc(complexScalar(step)));
+            // zAt(k): k 回目の z。まだ到達していなければ 0。
+            const complexZAt = (step) => zHistory[historyIndex(step)] || [0, 0];
+            // zDelay(k): k 回前の z。履歴不足なら 0。
+            const complexZDelay = (step) => zHistory[iterIndex - historyIndex(step)] || [0, 0];
 
             ${optimizedCode}
         `
 
-    const compiledFunc = new Function('zReal', 'zImag', 'cReal', 'cImag', 'n', functionBody)
+    const compiledFunc = new Function('zReal', 'zImag', 'cReal', 'cImag', 'n', 'history', functionBody)
 
     // 関数をテストする
     const testResult = compiledFunc(0, 0, 0, 0)
@@ -686,6 +732,10 @@ function parseExpression(expr) {
     ['tanh', (converted) => `complexTanh(${converted})`],
     ['sqrt', (converted) => `complexSqrt(${converted})`],
     ['atanSqrt', (converted) => `complexAtanSqrt(${converted})`],
+    ['zAt', (_converted, convertedArgs) => `complexZAt(${convertedArgs[0] ?? '[0, 0]'})`],
+    ['zDelay', (_converted, convertedArgs) => `complexZDelay(${convertedArgs[0] ?? '[0, 0]'})`],
+    // 初期提案時の表記を保存 URL でも壊さないための互換別名。
+    ['delayZ', (_converted, convertedArgs) => `complexZDelay(${convertedArgs[0] ?? '[0, 0]'})`],
     ['zeta', (converted) => `complexZeta(${converted})`],
     ['fract', (converted) => `complexFract(${converted})`],
     [

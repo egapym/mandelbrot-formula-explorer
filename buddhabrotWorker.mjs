@@ -384,6 +384,7 @@ async function runSampling(opts) {
     let zy = isJulia ? sampleIm : typeof opts.z0Imag === 'number' ? opts.z0Imag : 0
     let escaped = false
     let trajLen = 0
+    const history = { z: [] }
     if (isJulia) {
       trajBuf[0] = sampleRe
       trajBuf[1] = sampleIm
@@ -395,7 +396,7 @@ async function runSampling(opts) {
       let x2, y2
       if (compiledIter) {
         try {
-          const res = compiledIter(zx, zy, cr, ci, iter)
+          const res = compiledIter(zx, zy, cr, ci, iter, history)
           x2 = Number(res[0])
           y2 = Number(res[1])
         } catch (_e) {
