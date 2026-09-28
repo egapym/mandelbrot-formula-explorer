@@ -8748,7 +8748,8 @@ function initListeners() {
 
     // フラクタル種別変更時は既定の表示へ戻す
     fractal.setZoom(getInitialFractalZoom(fractal.precision))
-    fractal.restartWorkers()
+    // 描画タスクには種別と反復式が含まれ、redraw() が前のジョブを取り消す。
+    // ここで Worker を作り直す必要はないため、読み込み済みの Worker を使い回す。
     _clearPinnedOrbits()
     redraw(true) // フラクタル種別変更時はキャッシュも更新する
     lastIterationFunctionValue = DOM.iterationFunctionInput ? DOM.iterationFunctionInput.value : ''
@@ -8859,7 +8860,7 @@ function initListeners() {
 
     // 以前は custom 関数で GPU を強制オフにしていたが、現在はトグル状態を変更しない。
 
-    fractal.restartWorkers()
+    // redraw() が古いジョブを無効化するため、Worker は再生成せず使い回す。
     _clearPinnedOrbits()
     redraw(true) // 反復式変更時はキャッシュも更新する
 
