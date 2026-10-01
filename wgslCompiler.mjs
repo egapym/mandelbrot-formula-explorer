@@ -525,8 +525,8 @@ function astToWGSL(node, tokensTable) {
         const a = argNodes[0]
         const b = argNodes[1]
         return makeVec2FromChildren(
-          { expr: `${comp(a, 'x')} + ${comp(b, 'x')}`, kind: 'scalar' },
-          { expr: `${comp(a, 'y')} + ${comp(b, 'y')}`, kind: 'scalar' },
+          { expr: `(${comp(a, 'x')}) + (${comp(b, 'x')})`, kind: 'scalar' },
+          { expr: `(${comp(a, 'y')}) + (${comp(b, 'y')})`, kind: 'scalar' },
         )
       }
       case 'complexSub':
@@ -534,8 +534,8 @@ function astToWGSL(node, tokensTable) {
         const a = argNodes[0]
         const b = argNodes[1]
         return makeVec2FromChildren(
-          { expr: `${comp(a, 'x')} - ${comp(b, 'x')}`, kind: 'scalar' },
-          { expr: `${comp(a, 'y')} - ${comp(b, 'y')}`, kind: 'scalar' },
+          { expr: `(${comp(a, 'x')}) - (${comp(b, 'x')})`, kind: 'scalar' },
+          { expr: `(${comp(a, 'y')}) - (${comp(b, 'y')})`, kind: 'scalar' },
         )
       }
       case 'complexMultiply':

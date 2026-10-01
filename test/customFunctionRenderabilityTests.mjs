@@ -222,9 +222,19 @@ function testGpuModuloSelfIdentity() {
       /floor\(/,
       `mod(${operand},${operand}) must be folded to zero before f32 modulo arithmetic`,
     )
-    assert.match(wgsl, /\+ c\.x/)
-    assert.match(wgsl, /\+ c\.y/)
+    assert.match(wgsl, /\+\s+\(?c\.x/)
+    assert.match(wgsl, /\+\s+\(?c\.y/)
   }
+}
+
+function testNestedComplexAdditionAndSubtractionGrouping() {
+  const expression = 'z*z - (c - 5)'
+  const cpu = compileIterationFunction(expression)
+  assert.deepEqual(cpu(0, 0, 1, 2, 0), [4, -2], 'CPU reference semantics for z² - (c - 5)')
+
+  const wgsl = jsExprToWGSL_safe(getParsedExpression(expression))
+  assert.match(wgsl, /-\s*\(\(c\.x\)\s*-\s*\(5\.0\)\)/, 'WGSL must preserve the nested real subtraction')
+  assert.match(wgsl, /-\s*\(\(c\.y\)\s*-\s*\(0\.0\)\)/, 'WGSL must preserve the nested imaginary subtraction')
 }
 
 async function main() {
@@ -233,6 +243,7 @@ async function main() {
   testIterationIndexVariableAffectsModOrbit()
   testOrbitHistoryReferences()
   testGpuModuloSelfIdentity()
+  testNestedComplexAdditionAndSubtractionGrouping()
   const results = []
   // include a couple of expressions that previously triggered GPU bugs
   results.push(testRenderability('sin(Re(z)) + i*cos(Im(z)) + c'))
