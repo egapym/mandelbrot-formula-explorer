@@ -270,14 +270,16 @@ async function runSampling(opts) {
    * 疎な更新ピクセルだけを送る補助関数
    */
   const flushSparse = (jobCtx) => {
-    if (dirtyList.length === 0) return
-    if (!jobCtx.isActive()) return
+    if (dirtyList.length === 0 || !jobCtx.isActive()) return false
 
     const n = dirtyList.length
     const indices = new Uint32Array(n)
     const rvals = new Float32Array(n)
     const gvals = new Float32Array(n)
     const bvals = new Float32Array(n)
+    // 黒の band は密度に値を加えない。初回表示を待たせないため、
+    // 実際に可視の寄与を含むチャンクだけを描画側へ渡す。
+    let hasVisibleDensity = false
 
     for (let i = 0; i < n; i++) {
       const idx = dirtyList[i]
@@ -285,6 +287,7 @@ async function runSampling(opts) {
       rvals[i] = localR[idx]
       gvals[i] = localG[idx]
       bvals[i] = localB[idx]
+      if (rvals[i] !== 0 || gvals[i] !== 0 || bvals[i] !== 0) hasVisibleDensity = true
       // 転送後はローカル値を 0 に戻す
       localR[idx] = 0
       localG[idx] = 0
@@ -295,6 +298,8 @@ async function runSampling(opts) {
       }
     }
     dirtyList = []
+
+    if (!hasVisibleDensity) return false
 
     jobCtx.sendChunk(
       {
@@ -309,6 +314,7 @@ async function runSampling(opts) {
       },
       [indices.buffer, rvals.buffer, gvals.buffer, bvals.buffer],
     )
+    return true
   }
 
   /**
@@ -558,13 +564,14 @@ async function runSampling(opts) {
         }
       }
 
-      // renderDelay が有効な場合は、遅延値にかかわらず各点の描画完了後に
-      // ただちにフラッシュしてから次の点へ進む。
+      // renderDelay は、表示を更新した後だけ適用する。黒 band のように
+      // 密度へ寄与しない点まで待機すると、最初の可視描画が大幅に遅れる。
       if (renderDelay > 0) {
-        flushSparse(jobCtx)
-        await new Promise((r) => setTimeout(r, renderDelay))
-        if (jobCtx.shouldStop()) break
-        jobCtx.sendProgress(s, samples)
+        if (flushSparse(jobCtx)) {
+          await new Promise((r) => setTimeout(r, renderDelay))
+          if (jobCtx.shouldStop()) break
+          jobCtx.sendProgress(s, samples)
+        }
       }
     }
 
