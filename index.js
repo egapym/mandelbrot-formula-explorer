@@ -5696,6 +5696,20 @@ function drawClampedCanvasTransform(scale, tx, ty, sourceCanvas = tempCanvas, de
   }
 }
 
+function drawCanvasTransformKeepingPreviousFrame(
+  scale,
+  tx,
+  ty,
+  sourceCanvas = tempCanvas,
+  destinationCanvas = canvasElement,
+) {
+  const ctx = destinationCanvas.getContext('2d')
+  ctx.save()
+  ctx.setTransform(scale, 0, 0, scale, tx, ty)
+  ctx.drawImage(sourceCanvas, 0, 0)
+  ctx.restore()
+}
+
 function clearPendingInteractiveRedrawState() {
   if (gpuInteractiveRedrawTimer != null) {
     clearTimeout(gpuInteractiveRedrawTimer)
@@ -5715,6 +5729,15 @@ function clearPendingInteractiveRedrawState() {
 
 function reapplyPendingInteractiveTransform() {
   if (!hasPendingInteractiveTransform()) return
+  if (pendingInteractivePinchView != null) {
+    copyCanvasToTempCanvas()
+    drawCanvasTransformKeepingPreviousFrame(
+      pendingInteractiveTransformScale,
+      pendingInteractiveTransformTx,
+      pendingInteractiveTransformTy,
+    )
+    return
+  }
   if (shouldUseClampedGpuPreview()) {
     copyCanvasToTempCanvas()
     drawClampedCanvasTransform(
@@ -7162,6 +7185,11 @@ function onMouseMove(evt) {
 // 現在のキャンバス画像を指定点まわりで拡大縮小する
 // 背景で再描画している間も、ユーザーにはすぐ見た目の変化を返せる
 function scaleCanvas(factor, x, y) {
+  if (pendingInteractivePinchView != null) {
+    copyCanvasToTempCanvas()
+    drawCanvasTransformKeepingPreviousFrame(factor, (1 - factor) * x, (1 - factor) * y)
+    return
+  }
   if (shouldUseClampedGpuPreview()) {
     copyCanvasToTempCanvas()
     drawClampedCanvasTransform(factor, (1 - factor) * x, (1 - factor) * y)
@@ -7181,6 +7209,11 @@ function scaleCanvas(factor, x, y) {
 }
 
 function panCanvas(dx, dy) {
+  if (pendingInteractivePinchView != null) {
+    copyCanvasToTempCanvas()
+    drawCanvasTransformKeepingPreviousFrame(1, dx, dy)
+    return
+  }
   if (shouldUseClampedGpuPreview()) {
     copyCanvasToTempCanvas()
     drawClampedCanvasTransform(1, dx, dy)
