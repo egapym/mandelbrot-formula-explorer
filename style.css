@@ -972,6 +972,7 @@ footer {
   }
 
   #settings .settings-action-row--buddha .action-col--render,
+  #settings .settings-action-row--buddha .action-col--stop,
   #settings .settings-action-row--buddha .action-col--download,
   #settings .settings-action-row--primary>* {
     grid-column: 1 / -1;
