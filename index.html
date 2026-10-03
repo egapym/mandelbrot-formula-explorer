@@ -727,7 +727,7 @@
                 </div>
               </div>
               <div class="g-1 row settings-action-row settings-action-row--buddha">
-                <div class="col-4 action-col action-col--render">
+                <div class="col-8 action-col action-col--render">
                   <button
                     id="buddha-render"
                     class="btn btn-primary btn-sm w-100"
@@ -736,7 +736,7 @@
                     Render Buddhabrot
                   </button>
                 </div>
-                <div class="col-2 action-col action-col--stop">
+                <div class="col-4 action-col action-col--stop">
                   <button
                     id="buddha-stop"
                     class="btn btn-outline-danger btn-sm w-100"
@@ -744,30 +744,6 @@
                     title="Stop Buddhabrot"
                   >
                     Stop
-                  </button>
-                </div>
-                <div class="col-3 action-col action-col--scale">
-                  <select
-                    id="buddha-scale"
-                    class="form-select form-select-sm"
-                    title="High-resolution rendering multiplier"
-                  >
-                    <option value="1" selected>1x (screen)</option>
-                    <option value="2">2x</option>
-                    <option value="3">3x</option>
-                    <option value="4">4x</option>
-                    <option value="5">5x</option>
-                  </select>
-                </div>
-                <div class="col-3 action-col action-col--download">
-                  <button
-                    id="buddha-download"
-                    class="btn btn-success btn-sm w-100"
-                    type="button"
-                    disabled
-                    title="Download high-resolution images"
-                  >
-                    Save Hi-Res Image
                   </button>
                 </div>
               </div>
@@ -784,22 +760,22 @@
             <div class="col col-sm-6">
               <button
                 class="btn btn-success btn-sm w-100"
-                id="reset"
-                title="Reset all settings (iterations, palette, zoom, position, etc.) to their initial default values. Shortcut: Backspace"
-              >
-                Reset All Settings
-              </button>
-            </div>
-          </div>
-          <div class="g-1 row settings-action-row settings-action-row--secondary">
-            <div class="col col-sm-6 d-flex align-items-center">
-              <button
                 id="save-image"
-                class="btn btn-success btn-sm w-100"
                 type="button"
                 title="Save current image as PNG"
               >
                 Save Image
+              </button>
+            </div>
+          </div>
+          <div class="g-1 row settings-action-row settings-action-row--secondary">
+            <div class="col-12 d-flex align-items-center">
+              <button
+                id="reset"
+                class="btn btn-success btn-sm w-100"
+                title="Reset all settings (iterations, palette, zoom, position, etc.) to their initial default values. Shortcut: Backspace"
+              >
+                Reset All Settings
               </button>
             </div>
           </div>

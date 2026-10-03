@@ -91,7 +91,6 @@ At very high resolutions, switching can happen at different zoom levels to reduc
 - Brightness and gamma controls with reset buttons
 - CPU render speed delay slider with reset button
 - Render and Stop actions
-- Hi-res scale selector (1x to 5x) and Save Hi-Res Image action
 
 ### Navigation, Export, and Session Flow
 

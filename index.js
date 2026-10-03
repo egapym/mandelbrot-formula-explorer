@@ -522,8 +522,6 @@ const DOM = {
     renderSpeed: document.getElementById('buddha-draw-speed'),
     render: document.getElementById('buddha-render'),
     stop: document.getElementById('buddha-stop'),
-    scale: document.getElementById('buddha-scale'),
-    download: document.getElementById('buddha-download'),
     mode: document.getElementById('buddhaMode'),
   },
   palette: {
@@ -3330,7 +3328,6 @@ function invalidateJuliaBuddhabrotView({ clearVisible = false } = {}) {
     discardSavedBuddhaImageData()
     savedFractalImageData = null
     BuddhabrotState.targetKind = null
-    disableBuddhaDownload()
   }
   lockBuddhabrotViewToggle()
   return true
@@ -3674,18 +3671,6 @@ async function startBuddhaRender() {
           }
           // 通常フラクタルへ戻せるよう、savedFractalImageData は保持したままにする
 
-          // scale が 1 より大きいときだけ高解像度ダウンロードを有効化する
-          const scaleSel = document.getElementById('buddha-scale')
-          const downloadBtn = document.getElementById('buddha-download')
-          if (scaleSel && downloadBtn) {
-            const scale = parseInt(scaleSel.value, 10) || 1
-            // density バッファがあり、scale > 1 のときだけ有効化する
-            if (scale > 1 && buddhaRunner && buddhaRunner.densityR) {
-              downloadBtn.disabled = false
-            } else {
-              downloadBtn.disabled = true
-            }
-          }
           // 途中停止後は古い画像を掴んでいることがあるため、ここで取り直しておく
           if (buddhaPreservedDisplay) {
             requestAnimationFrame(() => {
@@ -3832,38 +3817,9 @@ async function startBuddhaRender() {
   }
 
   // runner の設定を更新して開始する
-  // 要求 scale から最終描画サイズを決める
-  let scale = 1
-  try {
-    const scaleSel = document.getElementById('buddha-scale')
-    if (scaleSel) scale = Math.max(1, parseInt(scaleSel.value, 10) || 1)
-  } catch (_e) {
-    scale = 1
-  }
-
-  const targetWidth = Math.max(1, Math.round(targetCanvas.width * scale))
-  const targetHeight = Math.max(1, Math.round(targetCanvas.height * scale))
+  const targetWidth = targetCanvas.width
+  const targetHeight = targetCanvas.height
   if (abortIfBuddhaRenderCanceled()) return
-
-  if (scale === 1) {
-    // 1x 描画では高解像度画像を作らないので、ダウンロードを無効化する
-    disableBuddhaDownload()
-  }
-
-  // 以前の高解像度ダウンロード状態を消し、古い URL も破棄する
-  try {
-    const downloadBtn = document.getElementById('buddha-download')
-    if (downloadBtn) {
-      if (downloadBtn.dataset.hiresBlobUrl) {
-        URL.revokeObjectURL(downloadBtn.dataset.hiresBlobUrl)
-        delete downloadBtn.dataset.hiresBlobUrl
-        delete downloadBtn.dataset.hiresFilename
-      }
-      downloadBtn.disabled = true
-    }
-  } catch (e) {
-    console.warn('Error resetting buddha-download state before start:', e?.message ? e.message : e)
-  }
 
   buddhaRunner.width = targetWidth
   buddhaRunner.height = targetHeight
@@ -4040,9 +3996,6 @@ function stopAndClearBuddha(suppressToggleChange = false) {
     }
   }
 
-  // Buddhabrot 消去時は高解像度ダウンロードも無効化する
-  disableBuddhaDownload()
-
   // 進捗が積み上がらないようリセットする
   try {
     finishBuddhabrotProgress(BuddhabrotState.targetKind)
@@ -4196,9 +4149,6 @@ function stopBuddhaPreserveDisplay() {
   } catch (e) {
     console.warn('Error disabling buddha toggle in stopBuddhaPreserveDisplay():', e?.message ? e.message : e)
   }
-  // 停止中・保持表示中は高解像度ダウンロードを無効化する
-  disableBuddhaDownload()
-
   // 再開時に進捗が積み上がらないようリセットする
   try {
     finishBuddhabrotProgress(BuddhabrotState.targetKind)
@@ -4954,17 +4904,6 @@ let buddhaRunnerGeneration = 0
 let buddhaRenderRequestGeneration = 0
 let buddhaRenderPending = false
 
-function disableBuddhaDownload() {
-  const btn = document.getElementById('buddha-download')
-  if (!btn) return
-  if (btn.dataset.hiresBlobUrl) {
-    URL.revokeObjectURL(btn.dataset.hiresBlobUrl)
-    delete btn.dataset.hiresBlobUrl
-    delete btn.dataset.hiresFilename
-  }
-  btn.disabled = true
-}
-
 // 明るさとガンマの連続更新をまとめ、高解像度での重い再描画を減らす
 let buddhaRedrawScheduled = false
 function scheduleBuddhaRedraw() {
@@ -5575,7 +5514,6 @@ function stopRenderingForJuliaToggleDuringBuddhabrot() {
   } else {
     finishBuddhabrotProgress(BuddhabrotState.targetKind)
     hideInactiveBuddhabrotProgress(BuddhabrotState.targetKind)
-    disableBuddhaDownload()
     const toggle = DOM.buddha.toggle || document.getElementById('buddha-toggle')
     if (toggle) {
       toggle.checked = false
@@ -6256,9 +6194,6 @@ function applyCoordinates() {
     }
     // 表示が変わるので保存済み画像を無効化する
     savedFractalImageData = null
-
-    // 座標適用時は高解像度ダウンロードも無効にする
-    disableBuddhaDownload()
 
     // 座標適用では、現在のフラクタル種別や反復式は上書きしない。
     // fractal.fractalType と関連 UI を維持する。
@@ -8798,8 +8733,6 @@ function initListeners() {
     } catch (e) {
       console.warn('Error locking buddha toggle on fractalType change:', e?.message ? e.message : e)
     }
-    // フラクタル種別が変わったら高解像度ダウンロードも無効化する
-    disableBuddhaDownload()
     // z0 入力は常に編集可能だが、整合性のためヘルパーは呼んでおく
     setZ0Enabled(true)
     // custom 以外へ変わったら、以前の反復式エラー表示を消して UI を戻す
@@ -8939,7 +8872,6 @@ function initListeners() {
     redraw()
   })
   DOM.fullScreenButton.addEventListener('click', (_event) => {
-    disableBuddhaDownload()
     toggleFullScreen()
   })
   fullResToggle.addEventListener('change', (_event) => {
@@ -9202,74 +9134,6 @@ function initListeners() {
     }
   } catch (e) {
     console.warn('Error wiring buddha-stop button:', e)
-  }
-
-  // Buddhabrot 用の高解像度ダウンロードボタン
-  try {
-    const downloadBtn = document.getElementById('buddha-download')
-    if (downloadBtn) {
-      downloadBtn.disabled = true
-      downloadBtn.addEventListener('click', async () => {
-        try {
-          if (!buddhaRunner?.densityR) return
-          const scaleSel = document.getElementById('buddha-scale')
-          const scale = scaleSel ? Math.max(1, parseInt(scaleSel.value, 10) || 1) : 1
-          const w = buddhaRunner.width
-          const h = buddhaRunner.height
-          const off = document.createElement('canvas')
-          off.width = w
-          off.height = h
-          const offCtx2 = off.getContext('2d')
-          const img = offCtx2.createImageData(w, h)
-          const len = w * h
-          const brightness =
-            parseFloat(document.getElementById('buddha-brightness')?.value) || buddhaRunner.brightness || 1.8
-          const gamma = parseFloat(document.getElementById('buddha-gamma')?.value) || buddhaRunner.gamma || 0.8
-          const rBuf = buddhaRunner.densityR
-          const gBuf = buddhaRunner.densityG
-          const bBuf = buddhaRunner.densityB
-          let max = 0
-          for (let i = 0; i < len; i++) {
-            const v = (rBuf[i] || 0) + (gBuf[i] || 0) + (bBuf[i] || 0)
-            if (v > max) max = v
-          }
-          if (max === 0) return
-          for (let i = 0; i < len; i++) {
-            const rv = rBuf[i] || 0
-            const gv = gBuf[i] || 0
-            const bv = bBuf[i] || 0
-            const lr = Math.log10(1 + rv) / Math.log10(1 + max)
-            const lg = Math.log10(1 + gv) / Math.log10(1 + max)
-            const lb = Math.log10(1 + bv) / Math.log10(1 + max)
-            const rn = Math.min(1, (lr * brightness) ** gamma)
-            const gn = Math.min(1, (lg * brightness) ** gamma)
-            const bn = Math.min(1, (lb * brightness) ** gamma)
-            const idx = i * 4
-            img.data[idx] = Math.round(255 * rn)
-            img.data[idx + 1] = Math.round(255 * gn)
-            img.data[idx + 2] = Math.round(255 * bn)
-            img.data[idx + 3] = 255
-          }
-          offCtx2.putImageData(img, 0, 0)
-          off.toBlob((blob) => {
-            if (!blob) return
-            const url = URL.createObjectURL(blob)
-            const filename = `buddhabrot_${scale}x_${w}x${h}.png`
-            const a = document.createElement('a')
-            a.href = url
-            a.download = filename
-            document.body.appendChild(a)
-            a.click()
-            a.remove()
-            setTimeout(() => URL.revokeObjectURL(url), 5000)
-          })
-        } catch (e) {
-          console.warn('Error generating hi-res download:', e?.message ? e.message : e)
-        }
-      })
-    }
-  } catch (e) {
-    console.warn('Error wiring buddha-download button:', e?.message ? e.message : e)
   }
 
   // 画像保存ボタン
@@ -9719,8 +9583,6 @@ function initListeners() {
 }
 
 function reset() {
-  // 表示をリセットするときは高解像度ダウンロードを無効にする
-  disableBuddhaDownload()
   // 実行中の Buddhabrot はすぐ停止する
   try {
     stopAndClearBuddha()
@@ -9831,10 +9693,6 @@ function reset() {
   } catch (e) {
     console.warn('Error resetting buddha-draw-speed in reset():', e?.message ? e.message : e)
   }
-
-  // buddha-scale を 1x へ戻す
-  const buddhaScaleEl = document.getElementById('buddha-scale')
-  if (buddhaScaleEl) buddhaScaleEl.value = '1'
 
   // メインフラクタルのパレットを mandelbrot に戻す
   try {

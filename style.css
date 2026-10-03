@@ -661,8 +661,7 @@ footer {
   white-space: nowrap;
 }
 
-#settings .settings-animation-control,
-#settings #buddha-scale {
+#settings .settings-animation-control {
   min-width: 0;
 }
 
