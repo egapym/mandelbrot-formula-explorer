@@ -681,6 +681,18 @@ footer {
   border-color: rgba(124, 252, 0, 0.72) !important;
 }
 
+#animation-panel .animation-range-label {
+  display: flex;
+  align-items: baseline;
+  gap: 0.25rem;
+}
+
+#animation-panel .animation-range-value {
+  display: inline-block;
+  min-inline-size: 4ch;
+  font-variant-numeric: tabular-nums;
+}
+
 /* フルスクリーン時は入力欄を半透明背景でも読みやすくする */
 #settings.fullscreen input[type="text"],
 #settings.fullscreen input[type="number"],

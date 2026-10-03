@@ -865,9 +865,13 @@
                 <span>Animation Settings</span>
                 <button id="anim-reset" class="btn btn-sm btn-outline-secondary rounded-pill slider-reset ms-2" type="button" title="Reset animation settings">↺</button>
               </div>
-              <label for="anim-speed" class="form-label mb-0">Zoom speed <output id="anim-speed-value">0.15</output></label>
+              <label for="anim-speed" class="form-label mb-0 animation-range-label">
+                <span>Zoom speed</span><output id="anim-speed-value" class="animation-range-value">0.15</output>
+              </label>
               <input id="anim-speed" type="range" class="form-range" min="0.03" max="0.60" step="0.01" value="0.15" />
-              <label for="anim-fps" class="form-label mb-0">Frame rate <output id="anim-fps-value">30 fps</output></label>
+              <label for="anim-fps" class="form-label mb-0 animation-range-label">
+                <span>Frame rate</span><output id="anim-fps-value" class="animation-range-value">30 fps</output>
+              </label>
               <input id="anim-fps" type="range" class="form-range" min="15" max="60" step="1" value="30" />
               <div class="d-flex gap-1 mb-2">
                 <button id="anim-prepare" type="button" class="btn btn-primary btn-sm flex-fill">Prepare</button>
