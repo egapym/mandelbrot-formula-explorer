@@ -1004,10 +1004,6 @@ footer {
     grid-template-columns: minmax(0, 1fr) auto minmax(3.75rem, auto);
   }
 
-  #settings .settings-coordinate-control-grid #applyCoords {
-    font-size: 0.72rem;
-  }
-
   #settings .settings-inline-stop {
     margin-left: 0;
   }
