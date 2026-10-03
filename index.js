@@ -3,6 +3,8 @@
  * @modified
  */
 
+import { AnimationStore, PreparedAnimation, createAnimationPath } from './animation.mjs'
+import { AnimationGpuSession } from './animationGpuSession.mjs'
 import { BuddhabrotRunner } from './buddhabrot.mjs'
 import { BUDDHA_PALETTES, buildBuddhaStops, getBuddhaPalette } from './buddhaPalettes.mjs'
 import { compileIterationFunction, getIterationHistoryRequirements, getParsedExpression, usesIterationHistory } from './customFunctionParser.mjs'
@@ -18,6 +20,12 @@ import { BAILOUT_SMOOTH, mandelbrot_high_precision } from './sharedCalculations.
 import { jsExprToWGSL_safe } from './wgslCompiler.mjs'
 import { WorkerContext } from './workerContext.mjs'
 import { createWorkerFrom } from './workerLoader.mjs'
+
+let preparedAnimation = null
+let animationInvalidation = null
+let animationUiPending = false
+let animationSetupGeneration = 0
+let animationRedrawAfterStop = false
 
 // ============================================================================
 // ユーティリティ: trapSpecのキャッシュキー生成
@@ -941,6 +949,9 @@ class Mandelbrot {
   }
 
   initPallete(redraw) {
+    if (preparedAnimation?.busy || animationUiPending) return
+    const hadAnimation = !!preparedAnimation?.store
+    if (hadAnimation) invalidateAnimation()
     this.palette = palette.initPallet(
       this.paletteComponent.palette,
       this.paletteComponent.density,
@@ -949,6 +960,10 @@ class Mandelbrot {
       this.max_iter,
     )
     renderPalette(this.palette, this.paletteComponent.palette)
+    if (hadAnimation && redraw) {
+      this.render(true)
+      return
+    }
     if (redraw) {
       // トラップ計算の仕様 (trapSpec) が変わった場合は再計算が必要。
       // OTパレットへの切り替え時、異なるOTパレット間の切り替え時、
@@ -1159,17 +1174,6 @@ class Mandelbrot {
           task._center = [task.xOffset + Math.floor(task.w / 2), task.yOffset + Math.floor(task.h / 2)]
           tasksArr.push(task)
         }
-      }
-
-      // アニメーション中はキャンバス中央付近のタイルを優先する
-      if (animationState?.running) {
-        const cx = Math.floor(w / 2)
-        const cy = Math.floor(h / 2)
-        tasksArr.sort((a, b) => {
-          const da = (a._center[0] - cx) * (a._center[0] - cx) + (a._center[1] - cy) * (a._center[1] - cy)
-          const db = (b._center[0] - cx) * (b._center[0] - cx) + (b._center[1] - cy) * (b._center[1] - cy)
-          return da - db
-        })
       }
 
       // 並べ替え済みなら近い順でキューへ積む
@@ -1547,6 +1551,14 @@ class Mandelbrot {
   }
 
   async render(resetCaches) {
+    if (this === fractal && preparedAnimation) {
+      if (preparedAnimation.busy || animationUiPending) {
+        if (animationInvalidation) animationRedrawAfterStop = true
+        return
+      }
+      invalidateAnimation()
+      queueMicrotask(updateAnimationUi)
+    }
     const zoomClamped = this.applyZoomLimitForRenderMode(this._willUseGpuForCurrentRender())
     if (zoomClamped && this === fractal) {
       updateCoordinateInputs()
@@ -2236,6 +2248,7 @@ class ProgressMonitor {
     this.done = 0
     this.lastUpdate = 0
     this.startTime = 0
+    this.finishedAt = null
     this.completed = false
     this.visible = false
     this.lastHiddenAt = Number.NEGATIVE_INFINITY
@@ -2249,6 +2262,7 @@ class ProgressMonitor {
     this.completed = false
     this.lastUpdate = performance.now()
     this.startTime = this.lastUpdate
+    this.finishedAt = null
     this._cancelPendingShow()
     this._draw(0)
     this._showWithCooldown()
@@ -2282,8 +2296,11 @@ class ProgressMonitor {
       this.completed = true
       this._draw(100)
     }
+    // 完了時刻は最初の finish() で固定する。Buddhabrot View の切り替えや
+    // 停止処理から finish() が重ねて呼ばれても、Render time を再計算しない。
+    if (this.finishedAt === null) this.finishedAt = performance.now()
     // 完了後に描画時間を表示し、進捗表示を隠す
-    const jobTime = performance.now() - this.startTime
+    const jobTime = this.finishedAt - this.startTime
     if (showRenderTime && this.timeElementId) {
       const renderTimeElement = document.getElementById(this.timeElementId)
       if (renderTimeElement) {
@@ -3270,11 +3287,11 @@ function hideInactiveBuddhabrotProgress(targetKind = BuddhabrotState.targetKind)
   hideProgressMonitor(getBuddhabrotProgressMonitor(targetKind === 'julia' ? 'main' : 'julia'))
 }
 
-function finishBuddhabrotProgress(targetKind = BuddhabrotState.targetKind) {
+function finishBuddhabrotProgress(targetKind = BuddhabrotState.targetKind, options = {}) {
   const progressMonitor = getBuddhabrotProgressMonitor(targetKind)
   if (!progressMonitor) return
   try {
-    progressMonitor.finish?.()
+    progressMonitor.finish?.(options)
   } catch (e) {
     console.warn('Error finishing Buddhabrot progress:', e?.message ? e.message : e)
     hideProgressMonitor(progressMonitor)
@@ -3329,7 +3346,7 @@ function invalidateJuliaBuddhabrotView({ clearVisible = false } = {}) {
     if (BuddhabrotState.targetKind === 'julia' && buddhaRunner?.running) {
       buddhaRunner.stop()
     }
-    finishBuddhabrotProgress(BuddhabrotState.targetKind)
+    finishBuddhabrotProgress(BuddhabrotState.targetKind, { showRenderTime: false })
     hideInactiveBuddhabrotProgress(BuddhabrotState.targetKind)
     buddhaActive = false
     buddhaPreservedDisplay = false
@@ -4006,7 +4023,7 @@ function stopAndClearBuddha(suppressToggleChange = false) {
 
   // 進捗が積み上がらないようリセットする
   try {
-    finishBuddhabrotProgress(BuddhabrotState.targetKind)
+    finishBuddhabrotProgress(BuddhabrotState.targetKind, { showRenderTime: false })
     hideInactiveBuddhabrotProgress(BuddhabrotState.targetKind)
   } catch (e) {
     console.warn('Error finishing progress in stopAndClearBuddha():', e?.message ? e.message : e)
@@ -4159,7 +4176,7 @@ function stopBuddhaPreserveDisplay() {
   }
   // 再開時に進捗が積み上がらないようリセットする
   try {
-    finishBuddhabrotProgress(BuddhabrotState.targetKind)
+    finishBuddhabrotProgress(BuddhabrotState.targetKind, { showRenderTime: false })
     hideInactiveBuddhabrotProgress(BuddhabrotState.targetKind)
   } catch (e) {
     console.warn('Error finishing progress in stopBuddhaPreserveDisplay():', e?.message ? e.message : e)
@@ -4427,326 +4444,290 @@ if (juliaCanvasElement) {
 }
 
 // なめらかな移動用のアニメーション状態と補助関数
-const animationState = {
-  running: false,
-  startCenter: null,
-  startZoom: null,
-  targetCenter: null,
-  targetZoom: null,
-  startTime: 0,
-  duration: 1000,
-  reqId: null,
+const animationLockedControls = new Map()
+let animationGpuAvailable = false
+
+function animationUnavailableReason() {
+  if (!animationGpuAvailable) return 'WebGPU is unavailable in this browser.'
+  if (!AnimationStore.supported()) return 'Animation requires temporary storage (OPFS and Web Locks).'
+  if (!fractal.useGpu) return 'Enable GPU to prepare an animation.'
+  if (juliaState.active || buddhaActive || buddhaPreservedDisplay)
+    return 'Animation is unavailable in Julia and Buddhabrot modes.'
+  if (!selectAnimationGpu(fractal)) return 'The current formula, palette or zoom cannot be rendered with WebGPU.'
+  return ''
 }
 
-function easeOutCubic(t) {
-  return 1 - (1 - t) ** 3
-}
-
-// FxP 用の線形補間。補間前に scale をそろえる。
-function fxpLerp(a, b, t) {
-  // 各 scale と fractal.precision の最大値を採用する
-  const scale = Math.max(a.scale, b.scale, fractal.precision || a.scale)
-  const aa = a.withScale(scale)
-  const bb = b.withScale(scale)
-  const delta = bb.subtract(aa)
-  const frac = fxp.fromNumber(t, scale)
-  return aa.add(delta.multiply(frac))
-}
-
-// zoom 用の指数補間。対数空間で補間する。
-function _fxpZoomInterp(a, b, t) {
-  try {
-    const aNum = a.toNumber()
-    const bNum = b.toNumber()
-    if (!Number.isFinite(aNum) || !Number.isFinite(bNum) || aNum <= 0 || bNum <= 0) throw new Error('bad')
-    const ratio = bNum / aNum
-    // NaN / Inf を避ける
-    const interp = aNum * ratio ** t
-    // 適切な scale の FxP として作る
-    const scale = Math.max(a.scale, b.scale, fractal.precision || a.scale)
-    return fxp.fromNumber(interp, scale)
-  } catch (_e) {
-    // 数値変換に失敗したら通常の FxP 線形補間へ戻す
-    return fxpLerp(a, b, t)
+function selectAnimationGpu(view) {
+  if (!view.useGpu || !supportsGpuIterationFunction(view.iterationFunction)) return null
+  if (view._canUseOrbitTrapGpu()) return 'orbit'
+  if (view.paletteComponent.palette.requiresCpu) return null
+  if (view.fractalType === 'mandelbrot') {
+    return shouldUseDirectMandelbrotGpu(view) ? 'direct' : view.mandelbrotGpu.available ? 'perturbation' : null
   }
+  return view.fractalType === 'custom' && view.mandelbrotCustomGpu.available ? 'direct' : null
 }
 
-// 非常に大きい範囲向けの BigInt ベース FxP 補間
-function _fxpLerpBig(a, b, t) {
-  const scale = Math.max(a.scale, b.scale, fractal.precision || a.scale)
-  const aa = a.withScale(scale)
-  const bb = b.withScale(scale)
-  const delta = bb.bigInt - aa.bigInt
-  const denom = 1000000n // 1e6 resolution for interpolation
-  const numer = BigInt(Math.floor(t * Number(denom)))
-  const resBig = aa.bigInt + (delta * numer) / denom
-  return new fxp.FxP(resBig, scale)
-}
-
-function startAnimation(targetCenter, targetZoom, durationMs) {
-  // 既存のアニメーションがあれば止める
-  stopAnimation()
-  // 終了後に戻せるよう、直前の描画設定を保存する
-  animationState.prev = {
-    useGpu: fractal.useGpu,
-    max_iter: fractal.max_iter,
-    supersampling: fractal.supersampling,
-    smooth: fractal.smooth,
-  }
-
-  // 開始値、目標値、時間情報を保存する
-  animationState.startCenter = [fractal.center[0], fractal.center[1]]
-  animationState.startZoom = fractal.zoom
-  animationState.targetCenter = targetCenter
-  animationState.targetZoom = targetZoom
-  animationState.startTime = performance.now()
-  animationState.duration = Math.max(10, durationMs || 1000)
-  animationState.running = true
-
-  // モード競合を避けるため、アニメーション中は Julia トグルを無効化する
-  try {
-    const juliaToggleEl = document.getElementById('julia-toggle')
-    if (juliaToggleEl) juliaToggleEl.disabled = true
-  } catch (_e) {}
-  try {
-    const origIter = animationState.prev?.max_iter ? animationState.prev.max_iter : fractal.max_iter
-    // アニメーション中の反復回数は、元の半分以上かつ 300 以上、ただし元値は超えない
-    const animIter = Math.min(origIter, Math.max(Math.floor(origIter * 0.5), 300))
-    fractal.useGpu = false
-    fractal.max_iter = animIter
-    fractal.supersampling = 0
-    fractal.smooth = false
-    try {
-      fractal.initPallete()
-    } catch (_e) {}
-  } catch (e) {
-    console.warn('Error switching to low-quality mode for animation:', e)
-  }
-
-  // パン速度が一定になるよう、ピクセル距離からパン時間を決める
-  const PAN_SPEED_PX_PER_SEC = 800 // pan speed in pixels per second (tunable)
-  const minPanMs = 700 // minimum pan time
-  try {
-    const startNumX = animationState.startCenter[0].toNumber()
-    const startNumY = animationState.startCenter[1].toNumber()
-    const targetNumX = animationState.targetCenter[0].toNumber()
-    const targetNumY = animationState.targetCenter[1].toNumber()
-    const startZoomNum = animationState.startZoom.toNumber()
-    // ピクセル差分は概ね coordDelta * zoom で見積もる
-    const dx = (targetNumX - startNumX) * startZoomNum
-    const dy = (targetNumY - startNumY) * startZoomNum
-    const pixelDist = Math.sqrt(dx * dx + dy * dy)
-    let panDuration = Math.max(minPanMs, (pixelDist / PAN_SPEED_PX_PER_SEC) * 1000)
-    // ズーム時間を残すため、panDuration は全体の 90% までに抑える
-    const maxPan = Math.max(0.1, animationState.duration * 0.9)
-    if (panDuration > maxPan) panDuration = maxPan
-    // 残り時間を zoomDuration に使う。最低 100ms は確保する
-    let zoomDuration = Math.max(100, animationState.duration - panDuration)
-
-    // 開始と終了を少し速めに感じさせるため、二次 easing を使う
-    function easeInOutQuad(t) {
-      return t < 0.5 ? 2 * t * t : 1 - (-2 * t + 2) ** 2 / 2
+function updateAnimationUi() {
+  const toggle = document.getElementById('anim-enable')
+  if (!toggle || !preparedAnimation) return
+  const enabled = toggle.checked
+  const busy = preparedAnimation.busy || animationUiPending || !!animationInvalidation
+  toggle.disabled = !animationGpuAvailable
+  toggle.title = animationGpuAvailable
+    ? 'Prepare a GPU animation to the applied coordinates'
+    : 'WebGPU is unavailable in this browser'
+  document.getElementById('animation-panel').classList.toggle('d-none', !enabled)
+  const exceptions = new Set(['anim-enable', 'anim-play', 'gpu'])
+  if (busy) {
+    for (const control of document.querySelectorAll(
+      '#settings input, #settings select, #settings button, #settings textarea',
+    )) {
+      if (exceptions.has(control.id)) continue
+      if (!animationLockedControls.has(control)) animationLockedControls.set(control, control.disabled)
+      control.disabled = true
     }
+  } else {
+    for (const [control, disabled] of animationLockedControls) control.disabled = disabled
+    animationLockedControls.clear()
+  }
+  const reason = animationUnavailableReason()
+  document.getElementById('anim-prepare').disabled =
+    busy || !enabled || !!reason || preparedAnimation.state === 'ready'
+  const playButton = document.getElementById('anim-play')
+  const canStop = preparedAnimation.busy || animationUiPending
+  playButton.textContent = canStop ? 'Stop' : 'Play'
+  playButton.classList.toggle('btn-success', !canStop)
+  playButton.classList.toggle('btn-outline-danger', canStop)
+  playButton.disabled = (!canStop && (busy || !enabled || !!reason || preparedAnimation.state !== 'ready')) ||
+    (canStop && preparedAnimation.stopping)
+  document.getElementById('anim-speed-value').value = Number(document.getElementById('anim-speed').value).toFixed(2)
+  document.getElementById('anim-fps-value').value = `${document.getElementById('anim-fps').value} fps`
+  document.getElementById('anim-progress').value = preparedAnimation.progress
+  document.getElementById('anim-progress-value').value =
+    `${preparedAnimation.progress === 100 ? 100 : Math.floor(preparedAnimation.progress)}%`
+  document.getElementById('anim-progress-row').classList.toggle('d-none', preparedAnimation.state !== 'preparing')
+  document.getElementById('anim-status').textContent =
+    preparedAnimation.error ||
+    reason ||
+    {
+      idle: 'Apply coordinates, then prepare.',
+      preparing: 'Preparing frames…',
+      ready: 'Ready to play from the beginning.',
+      playing: 'Playing…',
+    }[preparedAnimation.state]
+}
 
-    function step(now) {
-      const elapsed = now - animationState.startTime
-      let finishedEarly = false
-      try {
-        if (elapsed <= panDuration) {
-          // PAN: 一定速度で進めるため、距離割合で線形補間する
-          const localT = Math.max(0, Math.min(1, elapsed / panDuration))
-          const nx = fxpLerp(animationState.startCenter[0], animationState.targetCenter[0], localT)
-          const ny = fxpLerp(animationState.startCenter[1], animationState.targetCenter[1], localT)
-          fractal.setCenter([nx, ny])
-          fractal.setZoom(animationState.startZoom)
-        } else {
-          // ZOOM: 中心は目標座標へ固定し、zoom を進める
-          fractal.setCenter([animationState.targetCenter[0], animationState.targetCenter[1]])
-          const localElapsed = elapsed - panDuration
-          const localT = Math.max(0, Math.min(1, localElapsed / zoomDuration))
+function invalidateAnimation() {
+  animationSetupGeneration++
+  if (!preparedAnimation || animationInvalidation || (!preparedAnimation.store && !preparedAnimation.busy)) return
+  animationInvalidation = preparedAnimation
+    .discard()
+    .catch((error) => {
+      preparedAnimation.reportError(error, 'cleanup')
+    })
+    .finally(() => {
+      animationInvalidation = null
+      updateAnimationUi()
+      if (animationRedrawAfterStop) {
+        animationRedrawAfterStop = false
+        redraw()
+      }
+    })
+}
 
-          // 対数空間で台形プロファイルにし、ズーム深度に依らず最大速度をそろえる
-          const sNum = animationState.startZoom.toNumber()
-          const eNum = animationState.targetZoom.toNumber()
-          if (Number.isFinite(sNum) && sNum > 0 && Number.isFinite(eNum) && eNum > 0) {
-            const deltaLog = Math.log(eNum) - Math.log(sNum)
-            const absDelta = Math.abs(deltaLog)
-            // 対数空間での最大速度
-            const MAX_LOG_RATE_PER_MS = 0.002 // ~2.0 per second
-            // 加減速に使う短いランプ時間
-            const RAMP_MS = 150
+async function prepareAnimation() {
+  if (preparedAnimation.busy || preparedAnimation.state === 'ready' || animationUiPending || animationUnavailableReason())
+    return
+  animationUiPending = true
+  const setupGeneration = ++animationSetupGeneration
+  updateAnimationUi()
+  let session
+  try {
+    if (animationInvalidation) await animationInvalidation
+    clearPendingInteractiveRedrawState()
+    clearTimeout(redrawTimeout)
+    redrawTimeout = null
+    cancelActiveMainRender()
+    // Wait for existing device work to settle before entering error scopes.
+    await Promise.allSettled([
+      fractal.mandelbrotGpu.running,
+      fractal.mandelbrotCustomGpu.running,
+      fractal.orbitTrapGpu.running,
+    ])
+    if (
+      setupGeneration !== animationSetupGeneration ||
+      !document.getElementById('anim-enable').checked ||
+      !fractal.useGpu
+    )
+      return
+    const targetCenter = [...fractal.center]
+    const targetZoom = fractal.zoom
+    const path = createAnimationPath({
+      startCenter: [fxp.fromNumber(-0.5, fractal.precision), fxp.fromNumber(0, fractal.precision)],
+      startZoom: getInitialFractalZoom(fractal.precision),
+      targetCenter,
+      targetZoom,
+      speed: Number(document.getElementById('anim-speed').value),
+      fps: Number(document.getElementById('anim-fps').value),
+    })
+    // Inherit geometry helpers, but keep every changing value independent.
+    const view = Object.assign(Object.create(Mandelbrot.prototype), fractal, {
+      center: [...targetCenter],
+      zoom: targetZoom,
+    })
+    session = new AnimationGpuSession({
+      view,
+      sources: {
+        direct: fractal.mandelbrotCustomGpu,
+        perturbation: fractal.mandelbrotGpu,
+        orbit: fractal.orbitTrapGpu,
+      },
+      select: selectAnimationGpu,
+      z0: ['z0-real', 'z0-imag'].map((id) => Number(document.getElementById(id)?.value) || 0),
+      colorPatternId: _orbitTrapColorPatternId(fractal.paletteComponent.palette),
+      createScreen: () => {
+        const canvas = document.createElement('canvas')
+        canvas.width = view.width
+        canvas.height = view.height
+        return new Offscreen(canvas, 1, true, true)
+      },
+    })
+    await preparedAnimation.prepare(path, (frame, signal) => session.render(frame, signal))
+  } catch (error) {
+    preparedAnimation.reportError(error)
+  } finally {
+    session?.dispose()
+    animationUiPending = false
+    updateAnimationUi()
+  }
+}
 
-            // 最大速度を守るために必要な zoomDuration を計算する
-            const computedZoomMs = Math.ceil(absDelta / MAX_LOG_RATE_PER_MS + RAMP_MS)
-            // 計算結果の方が長ければ zoomDuration を延長する
-            const finalZoomMs = Math.max(zoomDuration, computedZoomMs, 100)
-            if (finalZoomMs !== zoomDuration) {
-              zoomDuration = finalZoomMs
-              animationState.duration = panDuration + zoomDuration
-            }
+async function playAnimation() {
+  if (animationInvalidation || animationUiPending || animationUnavailableReason()) return
+  clearPendingInteractiveRedrawState()
+  cancelActiveMainRender()
+  _clearPinnedOrbits()
+  await preparedAnimation.play((image, frame) => {
+    fractal.setZoom(frame.zoom)
+    fractal.setCenter([...frame.center])
+    const context = canvasElement.getContext('2d')
+    context.clearRect(0, 0, canvasElement.width, canvasElement.height)
+    context.drawImage(image, 0, 0)
+    savedFractalImageData = null
+    updateCoordinateInputs()
+    showZoomFactor()
+    _refreshActiveOrbitOverlays()
+  })
+  updatePermalink()
+}
 
-            // ランプ区間と巡航区間を再計算する
-            let rampMs = Math.min(RAMP_MS, finalZoomMs / 2)
-            let cruiseMs = finalZoomMs - 2 * rampMs
-            let maxRate = MAX_LOG_RATE_PER_MS
-
-            // 巡航区間が負になるほど短い場合は、ランプを縮めて最大速度も下げる
-            if (cruiseMs < 0) {
-              rampMs = finalZoomMs / 2
-              cruiseMs = 0
-              // 総面積が absDelta になるよう maxRate を逆算する
-              maxRate = absDelta / (cruiseMs + rampMs || 1)
-            }
-
-            // localElapsed 時点までの対数変化量を積分で求める
-            let area = 0
-            if (localElapsed <= 0) {
-              area = 0
-            } else if (localElapsed < rampMs) {
-              // 立ち上がり区間
-              const t = localElapsed
-              area = (maxRate / (2 * rampMs)) * t * t
-            } else if (localElapsed < rampMs + cruiseMs) {
-              // 立ち上がり完了後の巡航区間
-              area = 0.5 * maxRate * rampMs + maxRate * (localElapsed - rampMs)
-            } else if (localElapsed < rampMs + cruiseMs + rampMs) {
-              // 減速区間
-              const t = localElapsed - (rampMs + cruiseMs) // 0..rampMs
-              // 減速区間の積分
-              area = 0.5 * maxRate * rampMs + maxRate * cruiseMs + maxRate * (t - (t * t) / (2 * rampMs))
-            } else {
-              // 完了済み
-              area = 0.5 * maxRate * rampMs + maxRate * cruiseMs + 0.5 * maxRate * rampMs
-            }
-
-            // area を全体変化量に対する割合へ変換する
-            const frac = absDelta > 0 ? Math.min(1, area / absDelta) : 1
-            // 必要量に達したら早期完了扱いにする
-            if (frac >= 1) {
-              // 最終 zoom を厳密に合わせ、すぐ終了できるようにする
-              fractal.setZoom(animationState.targetZoom)
-              finishedEarly = true
-            } else {
-              const curLog = Math.log(sNum) + Math.sign(deltaLog) * frac * absDelta
-              const cur = Math.exp(curLog)
-              const nz = fxp.fromNumber(cur, fractal.precision || animationState.startZoom.scale)
-              fractal.setZoom(nz)
-            }
-          } else {
-            const le = easeInOutQuad(localT)
-            const nz = fxpLerp(animationState.startZoom, animationState.targetZoom, le)
-            fractal.setZoom(nz)
-          }
+function initAnimationControls() {
+  preparedAnimation = new PreparedAnimation({ changed: updateAnimationUi })
+  const toggle = document.getElementById('anim-enable')
+  toggle.checked = false
+  toggle.disabled = true
+  document.getElementById('anim-prepare').addEventListener('click', prepareAnimation)
+  document.getElementById('anim-play').addEventListener('click', () => {
+    if (preparedAnimation.busy || animationUiPending) {
+      animationSetupGeneration++
+      preparedAnimation.stop()
+    } else {
+      playAnimation()
+    }
+  })
+  document.getElementById('anim-reset').addEventListener('click', () => {
+    const speed = document.getElementById('anim-speed')
+    const fps = document.getElementById('anim-fps')
+    speed.value = speed.defaultValue
+    fps.value = fps.defaultValue
+    invalidateAnimation()
+    updateAnimationUi()
+  })
+  toggle.addEventListener('change', () => {
+    if (toggle.checked) {
+      fractal.useGpu = true
+      document.getElementById('gpu').checked = true
+      fractal.applyZoomLimitForConfiguredMode()
+      redraw()
+    } else invalidateAnimation()
+    updateAnimationUi()
+  })
+  for (const id of ['anim-speed', 'anim-fps'])
+    document.getElementById(id).addEventListener('input', () => {
+      invalidateAnimation()
+      updateAnimationUi()
+    })
+  // Capture before existing handlers so preparation/playback cannot be changed
+  // by canvas gestures or keyboard shortcuts. Stop and GPU/OFF remain available.
+  for (const type of [
+    'pointerdown',
+    'pointermove',
+    'mousedown',
+    'mousemove',
+    'touchstart',
+    'touchmove',
+    'wheel',
+    'dblclick',
+    'click',
+    'keydown',
+    'input',
+    'change',
+  ]) {
+    document.addEventListener(
+      type,
+      (event) => {
+        const target = event.target
+        const allowed = target.closest?.('#anim-play, #anim-enable, #gpu')
+        if (
+          (preparedAnimation.busy || animationUiPending) &&
+          !allowed &&
+          (target.closest?.('canvas, .canvas-wrap') ||
+            (!['wheel', 'touchstart', 'touchmove', 'pointermove', 'mousemove'].includes(type) &&
+              target.closest?.('#settings')) ||
+            type === 'keydown') &&
+          !['Tab', 'PageUp', 'PageDown'].includes(event.key)
+        ) {
+          event.preventDefault()
+          event.stopImmediatePropagation()
+          return
         }
-
-        redraw()
-        _refreshActiveOrbitOverlays()
-      } catch (e) {
-        console.warn('Animation step error:', e)
-        stopAnimation()
-        return
-      }
-
-      // zoomDuration 延長の可能性を踏まえて全体進捗を再計算する
-      const tGlobal = Math.min(1, (performance.now() - animationState.startTime) / (panDuration + zoomDuration))
-
-      if (!finishedEarly && tGlobal < 1 && animationState.running) {
-        animationState.reqId = requestAnimationFrame(step)
-      } else {
-        // 完了処理
-        try {
-          if (animationState.prev) {
-            // アニメーション後は自動で GPU に戻さず、CPU モードを維持する
-            fractal.useGpu = false
-            // UI 上の GPU トグルも CPU モードに合わせる
-            const gpuToggle = document.getElementById('gpu')
-            if (gpuToggle) gpuToggle.checked = false
-            fractal.max_iter = animationState.prev.max_iter
-            fractal.supersampling = animationState.prev.supersampling
-            fractal.smooth = animationState.prev.smooth
-            // smooth の状態も UI へ反映する
-            try {
-              const smoothEl = document.getElementById('smooth')
-              if (smoothEl) smoothEl.checked = !!fractal.smooth
-            } catch (_e) {}
-            fractal.initPallete()
-          }
-        } catch (e) {
-          console.warn('Error restoring render state after animation:', e)
+        if (
+          (type === 'input' || type === 'change') &&
+          !target.id?.startsWith('anim-') &&
+          !['coordX', 'coordY', 'coordZoom'].includes(target.id)
+        ) {
+          invalidateAnimation()
+          queueMicrotask(updateAnimationUi)
         }
-        animationState.running = false
-        animationState.reqId = null
-        redraw()
-        _refreshActiveOrbitOverlays()
-        updatePermalink()
-      }
-    }
-
-    animationState.reqId = requestAnimationFrame(step)
-  } catch (e) {
-    // パン時間やズーム時間の計算に失敗したら単純な補間へ戻す
-    console.warn('Error computing pan duration, falling back to default animation:', e)
-    function step(now) {
-      const elapsed = now - animationState.startTime
-      const t = Math.min(1, elapsed / animationState.duration)
-      const le = easeOutCubic(t)
-      try {
-        const nx = fxpLerp(animationState.startCenter[0], animationState.targetCenter[0], le)
-        const ny = fxpLerp(animationState.startCenter[1], animationState.targetCenter[1], le)
-        const nz = fxpLerp(animationState.startZoom, animationState.targetZoom, le)
-        fractal.setCenter([nx, ny])
-        fractal.setZoom(nz)
-        redraw()
-        _refreshActiveOrbitOverlays()
-      } catch (_err) {
-        stopAnimation()
-        return
-      }
-      if (t < 1 && animationState.running) animationState.reqId = requestAnimationFrame(step)
-      else {
-        animationState.running = false
-        animationState.reqId = null
-        redraw()
-        _refreshActiveOrbitOverlays()
-        updatePermalink()
-      }
-    }
-    animationState.reqId = requestAnimationFrame(step)
+      },
+      { capture: true, passive: false },
+    )
   }
-}
-
-function stopAnimation() {
-  if (animationState.reqId) {
-    cancelAnimationFrame(animationState.reqId)
-    animationState.reqId = null
-  }
-  // 保存しておいた描画状態があれば戻す
-  try {
-    if (animationState.prev) {
-      // 手動停止時も CPU モードを維持する
-      fractal.useGpu = false
-      const gpuToggle = document.getElementById('gpu')
-      if (gpuToggle) gpuToggle.checked = false
-      fractal.max_iter = animationState.prev.max_iter
-      fractal.supersampling = animationState.prev.supersampling
-      fractal.smooth = animationState.prev.smooth
-      try {
-        const smoothEl = document.getElementById('smooth')
-        if (smoothEl) smoothEl.checked = !!fractal.smooth
-      } catch (_e) {}
-      fractal.initPallete()
-    }
-  } catch (e) {
-    console.warn('Error restoring render state on stopAnimation:', e)
-  }
-  animationState.running = false
-  // Julia トグルを再度有効化する
-  try {
-    const juliaToggleEl = document.getElementById('julia-toggle')
-    if (juliaToggleEl) juliaToggleEl.disabled = false
-  } catch (_e) {}
-  // 元の品質設定で再描画する
-  redraw()
+  if (AnimationStore.supported())
+    AnimationStore.cleanup().catch((error) => {
+      preparedAnimation.reportError(error, 'cleanup')
+      updateAnimationUi()
+    })
+  Promise.allSettled([
+    fractal.mandelbrotGpu.devicePromise,
+    fractal.mandelbrotCustomGpu.devicePromise,
+    fractal.orbitTrapGpu.devicePromise,
+  ]).then((results) => {
+    const devices = results
+      .filter((result) => result.status === 'fulfilled' && result.value)
+      .map((result) => result.value)
+    animationGpuAvailable = devices.length > 0
+    for (const device of devices)
+      device.lost.then(() => {
+        animationGpuAvailable = false
+        toggle.checked = false
+        invalidateAnimation()
+        preparedAnimation.reportError(new Error('WebGPU device lost'))
+        updateAnimationUi()
+      })
+    updateAnimationUi()
+  })
+  updateAnimationUi()
 }
 
 /**
@@ -5520,7 +5501,7 @@ function stopRenderingForJuliaToggleDuringBuddhabrot() {
   if (shouldClearBuddhabrot) {
     stopAndClearBuddha()
   } else {
-    finishBuddhabrotProgress(BuddhabrotState.targetKind)
+    finishBuddhabrotProgress(BuddhabrotState.targetKind, { showRenderTime: false })
     hideInactiveBuddhabrotProgress(BuddhabrotState.targetKind)
     const toggle = DOM.buddha.toggle || document.getElementById('buddha-toggle')
     if (toggle) {
@@ -6213,30 +6194,13 @@ function applyCoordinates() {
       zoom: zoomWasClamped ? formatZoomValueForInput(targetZoom) : zoomStr,
     }
 
-    // いったん初期位置へ戻してから目標位置へアニメーションする
     _clearPinnedOrbits()
-    fractal.setCenter([fxp.fromNumber(-0.5), fxp.fromNumber(0)])
-    fractal.setZoom(getInitialFractalZoom(fractal.precision))
-    // 表示が変わるので保存済み画像を無効化する
+    fractal.setZoom(targetZoom)
+    fractal.setCenter(targetCenter)
     savedFractalImageData = null
     redraw()
-
-    const animEnabled = document.getElementById('anim-enable')?.checked
-    const SPEED = 0.15 // fixed animation speed (per user request)
-    const baseMs = 2000
-    const duration = Math.max(50, Math.floor(baseMs / SPEED))
-    if (animEnabled) {
-      startAnimation(targetCenter, targetZoom, duration)
-    } else {
-      // 先に zoom を入れて目標精度を決め、その後で center を入れる。
-      // こうすると、内部精度へ変換する際の量子化や切り捨てを抑えられる。
-      fractal.setZoom(targetZoom)
-      fractal.setCenter(targetCenter)
-      savedFractalImageData = null
-      redraw()
-      _refreshActiveOrbitOverlays()
-      updatePermalink()
-    }
+    _refreshActiveOrbitOverlays()
+    updatePermalink()
 
     // 表示上の精度落ちを避けるため、再描画後に入力値を戻す
     setTimeout(() => {
@@ -7754,6 +7718,7 @@ function refreshDevicePixelBoxSize() {
 }
 
 function resizeToCanvasSize() {
+  invalidateAnimation()
   // ── Julia Mode ──────────────────────────────────────────────────────────
   if (juliaState?.active) {
     // ── Julia プレビュー表示: Julia はメイン表示、MB は設定内のプレビューサイズ ──
@@ -8047,7 +8012,7 @@ function applyFullscreenState() {
     }
 
     buddhaActive = false
-    finishBuddhabrotProgress(BuddhabrotState.targetKind)
+    finishBuddhabrotProgress(BuddhabrotState.targetKind, { showRenderTime: false })
     hideInactiveBuddhabrotProgress(BuddhabrotState.targetKind)
     savedFractalImageData = null
     redraw(true)
@@ -9373,34 +9338,11 @@ function initListeners() {
             initFromParams(fav.params)
             _clearPinnedOrbits()
 
-            // Move to initial home position immediately, then animate to target
-            fractal.setCenter([fxp.fromNumber(-0.5), fxp.fromNumber(0)])
-            fractal.setZoom(getInitialFractalZoom(fractal.precision))
+            fractal.setZoom(targetZoom)
+            fractal.setCenter(targetCenter)
             fractal.initPallete()
             redraw()
-
-            const animEnabled = document.getElementById('anim-enable')?.checked
-            const SPEED = 0.15 // 固定のアニメーション速度
-            const baseMs = 2000
-            const duration = Math.max(50, Math.floor(baseMs / SPEED))
-            if (animEnabled) {
-              // アニメーション時に GPU が有効ならオフへ切り替える
-              const gpuEl = document.getElementById('gpu')
-              if (gpuEl?.checked) {
-                gpuEl.checked = false
-                // すぐ反映されるよう内部状態も直接更新する
-                fractal.useGpu = false
-              }
-              startAnimation(targetCenter, targetZoom, duration)
-            } else {
-              // 即時適用時は、先に zoom を入れてから center を入れる。
-              // 深い座標への変換で切り捨てが起きにくくなる。
-              fractal.setZoom(targetZoom)
-              fractal.setCenter(targetCenter)
-              fractal.initPallete()
-              redraw()
-              updatePermalink()
-            }
+            updatePermalink()
           }
           // セレクトをプレースホルダーへ戻す
           jumpSel.selectedIndex = 0
@@ -9420,24 +9362,7 @@ function initListeners() {
     })
   }
 
-  // アニメーション関連 UI
-  try {
-    const animStopBtn = document.getElementById('anim-stop')
-    if (animStopBtn) {
-      animStopBtn.addEventListener('click', () => {
-        stopAnimation()
-      })
-    }
-    // 速度スライダーは廃止済みで、速度はコード側で固定する
-    const animEnableEl = document.getElementById('anim-enable')
-    if (animEnableEl) {
-      // 既定値はオフ
-      animEnableEl.checked = false
-      // アニメーショントグルは GPU トグルを直接は触らない
-    }
-  } catch (e) {
-    console.warn('Error wiring animation controls:', e?.message ? e.message : e)
-  }
+  initAnimationControls()
 
   // Orbit 表示の操作
   try {

@@ -647,7 +647,7 @@ footer {
 
 #settings .settings-coordinate-control-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto minmax(4.5rem, auto);
+  grid-template-columns: minmax(0, 1fr) auto;
   gap: 0.25rem;
   align-items: center;
 }
@@ -663,6 +663,22 @@ footer {
 
 #settings .settings-animation-control {
   min-width: 0;
+}
+
+/* Settings panels use a transparent surface so the shared settings background
+   remains visible; the accent is carried by the outline instead. */
+.settings-outline-panel {
+  background: transparent !important;
+  border-width: 1px !important;
+  border-style: solid !important;
+}
+
+.settings-outline-panel-orbit {
+  border-color: rgba(92, 227, 205, 0.72) !important;
+}
+
+.settings-outline-panel-animation {
+  border-color: rgba(124, 252, 0, 0.72) !important;
 }
 
 /* フルスクリーン時は入力欄を半透明背景でも読みやすくする */

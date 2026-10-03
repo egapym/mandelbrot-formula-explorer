@@ -245,7 +245,7 @@
 <!-- Orbit Trap カスタム設定パネル                                   -->
 <!-- orbit_trap_custom パレット選択時のみ表示される                   -->
 <!-- ============================================================ -->
-<div id="orbit-trap-panel" class="d-none border rounded p-2 mb-2" style="background:rgba(0,0,0,0.15)">
+<div id="orbit-trap-panel" class="d-none border rounded p-2 mb-2 settings-outline-panel settings-outline-panel-orbit">
   <div class="mb-1 fw-semibold d-flex align-items-center" style="font-size:0.82em;opacity:0.8">
     <span>Orbit Trap Settings</span>
     <button id="ot-reset" class="btn btn-sm btn-outline-secondary rounded-pill slider-reset ms-2">↺</button>
@@ -842,20 +842,12 @@
                           type="checkbox"
                           role="switch"
                           id="anim-enable"
-                          title="Enable automatic animation that cycles through saved favorite locations"
+                          title="Prepare and play a GPU-rendered animation to the applied coordinates"
+                          disabled
                         />
                       </div>
                     </div>
                   </div>
-                  <button
-                    id="anim-stop"
-                    class="btn btn-outline-danger btn-sm settings-inline-stop"
-                    title="Stop animation"
-                    type="button"
-                  >
-                    Stop
-                  </button>
-                  <!-- Animation speed fixed to 0.15 (slider removed) -->
                 </div>
               </div>
               <div class="col-12">
@@ -867,6 +859,25 @@
                   Reset Coordinates
                 </button>
               </div>
+            </div>
+            <div id="animation-panel" class="d-none border rounded p-2 my-2 settings-outline-panel settings-outline-panel-animation">
+              <div class="mb-2 fw-semibold d-flex align-items-center" style="font-size:0.82em;opacity:0.8">
+                <span>Animation Settings</span>
+                <button id="anim-reset" class="btn btn-sm btn-outline-secondary rounded-pill slider-reset ms-2" type="button" title="Reset animation settings">↺</button>
+              </div>
+              <label for="anim-speed" class="form-label mb-0">Zoom speed <output id="anim-speed-value">0.15</output></label>
+              <input id="anim-speed" type="range" class="form-range" min="0.03" max="0.60" step="0.01" value="0.15" />
+              <label for="anim-fps" class="form-label mb-0">Frame rate <output id="anim-fps-value">30 fps</output></label>
+              <input id="anim-fps" type="range" class="form-range" min="15" max="60" step="1" value="30" />
+              <div class="d-flex gap-1 mb-2">
+                <button id="anim-prepare" type="button" class="btn btn-primary btn-sm flex-fill">Prepare</button>
+                <button id="anim-play" type="button" class="btn btn-success btn-sm flex-fill" disabled>Play</button>
+              </div>
+              <div id="anim-progress-row" class="d-none d-flex align-items-center gap-2">
+                <progress id="anim-progress" class="flex-grow-1" max="100" value="0" aria-label="Animation preparation progress"></progress>
+                <output id="anim-progress-value">0%</output>
+              </div>
+              <div id="anim-status" class="small mt-1" role="status" aria-live="polite"></div>
             </div>
             <hr />
             <!-- <div class="mb-0 row">

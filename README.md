@@ -98,7 +98,30 @@ At very high resolutions, switching can happen at different zoom levels to reduc
 - Reset All Settings action
 - Save Image action
 - Jump To favorites selector
-- Animation toggle and stop action
+- GPU-only prepared animation with zoom-speed and frame-rate sliders
+
+Enable **Animation**, apply coordinates, then select **Prepare**.
+Preparation renders the entire path at the current resolution, iterations, smooth
+coloring, and supersampling settings. The percentage reaches 100% after all frames
+have been saved; **Play** then starts at the initial view, pans to the target, and
+zooms in. Playback uses the saved images without recalculating the fractal.
+
+**Stop** cancels preparation or holds the current playback frame. A subsequent
+**Play** starts again from the beginning. Changing rendering settings, speed, frame
+rate, coordinates, or canvas resolution requires preparation again. Unapplied
+coordinate text is not used as the target. Animation OFF hides its settings and Stop.
+
+Animation requires WebGPU and browser temporary storage (OPFS and Web Locks).
+It turns GPU on automatically and does not fall back to CPU rendering. Julia,
+Buddhabrot, and settings unsupported by the GPU cannot be prepared. Lossless PNG
+frames are stored temporarily with a limit of 2 GiB or 80% of estimated free quota,
+whichever is smaller. Buffer limits and a 128 MiB decoded-image budget are checked
+without reducing quality. Temporary frames are deleted on invalidation; abandoned
+sessions are cleaned on the next visit without deleting another tab's active data.
+
+Animation checks: `node --test test/animationTests.mjs`. With the local server
+running, open `test/animationBrowserTests.html` and `test/gpuResourceTests.html`
+in a WebGPU-capable browser for GPU and storage integration tests.
 
 ### Coordinates and Diagnostics
 
@@ -182,4 +205,7 @@ http://localhost:3030/test/gpuResourceTests.html
 ```
 
 They cover buffer reuse, output stability after setting changes, odd image sizes,
-readback buffer limits, mapping failure recovery, and optional profiling.
+readback buffer limits, mapping failure recovery, and optional profiling. Shader
+outputs are also compared with frozen pre-optimization generators, including
+reference-limit ties, custom formulas using iteration numbers and orbit history,
+smooth coloring, and supersampling.

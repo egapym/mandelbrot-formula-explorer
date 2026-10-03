@@ -97,10 +97,10 @@ function _customIterationToWGSL(iterationFunction) {
 }
 
 export class OrbitTrapWebGPU {
-  constructor(errorCallback = null) {
+  constructor(errorCallback = null, options = {}) {
     this.errorCallback = errorCallback
     this.available = true
-    this.devicePromise = this._initGpu()
+    this.devicePromise = options.devicePromise || this._initGpu()
     this.pipeline = null
     this.pipelineKey = null
     this.bindGroupLayout = null

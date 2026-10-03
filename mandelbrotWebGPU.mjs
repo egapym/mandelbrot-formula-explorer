@@ -14,7 +14,7 @@ export class MandelbrotWebGPU {
   /**
    * @param {WorkerContext} ctx
    */
-  constructor(p, ctx, errorCallback) {
+  constructor(p, ctx, errorCallback, options = {}) {
     this.p = p
     this.ctx = ctx
     this.errorCallback = errorCallback
@@ -24,7 +24,7 @@ export class MandelbrotWebGPU {
     this.fractalType = 'mandelbrot' // 既定のフラクタル種別
     // 利用可能な GPU / device があるかどうかを表す
     this.available = true
-    this.devicePromise = this.initGpu()
+    this.devicePromise = options.devicePromise || this.initGpu()
     this.mandelbrotPipeline = this.createPipeline()
     this.running = Promise.resolve()
     this.currentTask = null
@@ -190,6 +190,7 @@ export class MandelbrotWebGPU {
         bailout,
         skipTopLeft,
         supersampling: task.supersampling,
+        deferReadback: !!task.finalOnly,
       })
       const remainingIndices = result.indices
       values = result.values
@@ -198,6 +199,7 @@ export class MandelbrotWebGPU {
       zreal = result.zreal
       zimag = result.zimag
       if (this.shouldStop()) {
+        if (task.finalOnly) return { error: 'Stopped' }
         this.p.onGpuUpdate({
           jobToken: task.jobToken,
           values,
@@ -246,6 +248,7 @@ export class MandelbrotWebGPU {
           const ri = refi + BigInt(Math.trunc((y / h) * cHeight))
           const ref = await this.calculate_reference(rr, ri, bigScale, scale, bailout)
           if (this.shouldStop()) {
+            if (task.finalOnly) return { error: 'Stopped' }
             this.p.onGpuUpdate({
               jobToken: task.jobToken,
               values,
@@ -276,11 +279,15 @@ export class MandelbrotWebGPU {
       }
       solved = indices.length === 0
       const now = performance.now()
-      if (!solved && now - lastUpdate > updateIntervalMs) {
+      if (!task.finalOnly && !solved && now - lastUpdate > updateIntervalMs) {
         this.intermediateUpdate(values, smooth, signs, zreal, zimag)
         lastUpdate = now
       }
       passnr++
+    }
+    if (task.finalOnly) {
+      const finalResult = await this.mandelbrotPipeline.readResults({ doSmooth: task.smooth })
+      ;({ values, smooth, signs, zreal, zimag } = finalResult)
     }
     await this.mandelbrotPipeline.finish()
 
@@ -506,6 +513,11 @@ class MandelbrotPipeline {
       this.dispose()
       this.bufferDevice = device
     }
+    const referenceBytes = (data.max_iter + 2) * 8
+    if (!Number.isSafeInteger(referenceBytes) || referenceBytes > device.limits.maxBufferSize ||
+        referenceBytes > device.limits.maxStorageBufferBindingSize) {
+      throw new RangeError('Reference orbit exceeds the GPU buffer limit')
+    }
     const pipeline = await this.getPipeline(
       device,
       this.workgroupSize,
@@ -534,12 +546,14 @@ class MandelbrotPipeline {
 
     this.zBuffer = this.reuseBuffer(device, 'zBuffer', {
       label: 'zr buffer',
-      size: 4 * (data.max_iter + 1) * 2,
+      // The final allowed iteration may escape; the reference generator then
+      // appends one more point for the escape value. Reserve both extra points.
+      size: 4 * (data.max_iter + 2) * 2,
       usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
     })
     this.zqErrorBoundBuffer = this.reuseBuffer(device, 'zqErrorBoundBuffer', {
       label: 'zq error bound buffer',
-      size: 4 * (data.max_iter + 1),
+      size: 4 * (data.max_iter + 2),
       usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
     })
     this.smoothBuffer = this.reuseBuffer(device, 'smoothBuffer', {
@@ -628,6 +642,11 @@ class MandelbrotPipeline {
    */
   async run(data) {
     const device = await this.devicePromise
+    // Guard before writeBuffer: validation failures otherwise arrive asynchronously
+    // and can leave the perturbation loop running on invalid reference data.
+    if (data.zBuffer.byteLength > this.zBuffer.size || data.zqErrorBoundBuffer.byteLength > this.zqErrorBoundBuffer.size) {
+      throw new RangeError('Reference orbit exceeds the allocated GPU buffer capacity')
+    }
     device.queue.writeBuffer(this.zBuffer, 0, data.zBuffer)
     device.queue.writeBuffer(this.zqErrorBoundBuffer, 0, data.zqErrorBoundBuffer)
 
@@ -644,7 +663,7 @@ class MandelbrotPipeline {
         remainingIndices.push(element)
       }
       if (this.ctx.shouldStop()) {
-        const result = await this.readResults(data)
+        const result = data.deferReadback ? {} : await this.readResults(data)
         await this.finish()
         return {
           indices: [],
@@ -652,7 +671,7 @@ class MandelbrotPipeline {
         }
       }
     }
-    const result = await this.readResults(data)
+    const result = data.deferReadback ? {} : await this.readResults(data)
     return {
       indices: new Uint32Array(remainingIndices),
       ...result,
@@ -821,7 +840,9 @@ class MandelbrotPipeline {
                     lastZz = zz;
                     zzq = dot(zz, zz);
                     if (zzq < zqErrorBound) {
-                        ${supersampling > 0 ? 'allConverged = false; break;' : 'return;'}
+                        // No channel is published until every sample succeeds.
+                        // A failed sample invalidates this entire reference pass.
+                        return;
                     }
 
                     let ez_2z = z + zz;
@@ -847,7 +868,6 @@ class MandelbrotPipeline {
                 var totalIter = 0.0;
                 var totalSmooth = 0.0;
                 var sampleCount = 0;
-                var allConverged = true;
                 var capturedSign = 0u;
                 var capturedZr = 0.0;
                 var capturedZi = 0.0;
@@ -872,8 +892,9 @@ class MandelbrotPipeline {
                                 break;
                             }
                             if (iter >= spec.refSize) {
-                                allConverged = false;
-                                break;
+                                // Leave the pixel pending for the next reference;
+                                // computing its remaining samples cannot rescue it.
+                                return;
                             }
 
                             while (max(abs(ez.x), abs(ez.y)) > 2) {
@@ -919,7 +940,7 @@ class MandelbrotPipeline {
                     }
                 }
 
-                if (!allConverged || sampleCount == 0) {
+                if (sampleCount == 0) {
                     return;
                 }
 
@@ -950,17 +971,19 @@ class MandelbrotPipeline {
                 var ez = dc;
                 var lastZz = vec2f(0.0, 0.0);
 
+                // The first limit reached decides whether the pixel is interior
+                // or needs another reference. Keep max_iter precedence on ties.
+                let iterationLimit = min(spec.max_iter, spec.refSize);
                 var iter = -1;
                 var zzq = 0.0;
                 while (zzq <= ${bailout}) {
                     iter = iter + 1;
-                    if (iter == spec.max_iter) {
-                        values[i] = 2;
-                        smoothBuffer[i] = 0;
-                        indexBuffer[iid] = -1;
-                        return;
-                    }
-                    if (iter >= spec.refSize) {
+                    if (iter >= iterationLimit) {
+                        if (iter == spec.max_iter) {
+                            values[i] = 2;
+                            smoothBuffer[i] = 0;
+                            indexBuffer[iid] = -1;
+                        }
                         return;
                     }
 

@@ -1,6 +1,9 @@
 import { MandelbrotCustomWebGPU } from '../mandelbrotCustomWebGPU.mjs'
 import { MandelbrotWebGPU } from '../mandelbrotWebGPU.mjs'
 import { WorkerContext } from '../workerContext.mjs'
+import * as fxp from '../fxp.mjs'
+import { checkPerturbationShaderParity } from './perturbationShaderTests.mjs'
+import { checkCustomShaderParity } from './customShaderTests.mjs'
 
 const assert = (condition, message) => { if (!condition) throw new Error(message) }
 const equal = (a, b) => {
@@ -80,6 +83,60 @@ async function checkMandelbrotReuse() {
   }
 }
 
+async function checkReferenceBoundaryAndFinalReadback() {
+  let output
+  const renderer = new MandelbrotWebGPU({ onGpuUpdate(answer) { if (answer.isFinished) output = answer } }, new WorkerContext(), error => { throw new Error(error) })
+  const device = await renderer.devicePromise
+  const pipeline = renderer.mandelbrotPipeline
+  device.pushErrorScope('validation')
+  try {
+    renderer.max_iter = 1000
+    // Escapes on the last allowed iteration and appends the escape-value point.
+    const ref = await renderer.calculate_reference(fxp.fromNumber(0.2500098571777344, 64).bigInt, 0n, 64n, 64, 256)
+    assert(ref.zBuffer.byteLength === 8016, 'Fixture no longer reproduces the reported 8016-byte orbit')
+    const params = { w: 7, h: 5, indices: new Uint32Array(35), max_iter: 1000, doSmooth: true, bailout: 256, supersampling: 0 }
+    await pipeline.beforeRun(params)
+    assert(pipeline.zBuffer.size === 8016 && pipeline.zqErrorBoundBuffer.size === 4008, 'Missing final reference point capacity')
+    device.queue.writeBuffer(pipeline.zBuffer, 0, ref.zBuffer)
+    device.queue.writeBuffer(pipeline.zqErrorBoundBuffer, 0, ref.zqErrorBoundBuffer)
+    await device.queue.onSubmittedWorkDone()
+    let rejected = false
+    try { await pipeline.run({ ...params, zBuffer: new Float32Array(2006), zqErrorBoundBuffer: ref.zqErrorBoundBuffer }) }
+    catch (error) { rejected = error instanceof RangeError }
+    assert(rejected, 'Oversized reference reached writeBuffer')
+
+    let reads = 0
+    const readResults = pipeline.readResults.bind(pipeline)
+    pipeline.readResults = async data => { reads++; return readResults(data) }
+    const stats = []
+    for (const zoom of [1, 1e6, 1e10]) {
+      const cx = fxp.fromNumber(-0.743643887037151, 80)
+      const cy = fxp.fromNumber(0.13182590420533, 80)
+      const half = fxp.fromNumber(2 / zoom, 80)
+      const task = { w: 127, h: 95, frameWidth: 127, frameHeight: 95, xOffset: 0, yOffset: 0,
+        frameTopLeft: [cx.subtract(half), cy.subtract(half)], frameBottomRight: [cx.add(half), cy.add(half)],
+        maxIter: 1000, precision: 80, smooth: true, supersampling: 0, escapeRadius: 4,
+        fractalType: 'mandelbrot', resetCaches: true, paramHash: 'parity', skipTopLeft: false }
+      let baseline
+      for (const finalOnly of [false, true]) {
+        reads = 0
+        const started = performance.now()
+        await renderer.process({ ...task, finalOnly, jobToken: crypto.randomUUID(), jobId: crypto.randomUUID() })
+        assert(output?.isFinished && !output.error, 'Deep zoom render failed')
+        if (!finalOnly) baseline = output
+        else { equal(baseline, output); assert(reads === 1, 'Preparation must read full channels only once') }
+        stats.push({ zoom, finalOnly, reads, ms: Math.round(performance.now() - started) })
+      }
+    }
+    console.info('Preparation readback comparison', stats)
+    globalThis.animationReadbackComparison = stats
+  } finally {
+    const error = await device.popErrorScope()
+    pipeline.dispose()
+    assert(!error, error?.message)
+  }
+}
+
 async function run() {
   const errors = []
   const renderer = new MandelbrotCustomWebGPU({ onGpuUpdate() {} }, new WorkerContext(), error => errors.push(error))
@@ -135,9 +192,12 @@ async function run() {
     assert(device.features.has('timestamp-query') ? sample.gpuMs >= 0 : sample.gpuMs === null, 'Incorrect timestamp fallback')
     await checkMandelbrotReadback()
     await checkMandelbrotReuse()
+    await checkReferenceBoundaryAndFinalReadback()
+    await checkPerturbationShaderParity(device)
+    await checkCustomShaderParity(device)
     await device.queue.onSubmittedWorkDone()
     assert(errors.length === 0, errors.join('\n'))
-    return 'PASS: repeated renders, odd dimensions, resize, smooth, supersampling, history, bailout, device limit, map failure recovery, profiling, Mandelbrot channel readback and buffer reuse'
+    return 'PASS: repeated renders, odd dimensions, resize, smooth, supersampling, history, bailout, device limit, map failure recovery, profiling, Mandelbrot channel readback, buffer reuse, 8016-byte reference boundary, deep-zoom final-only readback parity, optimized shader parity (SS OFF/2/4/8/16/32), custom iteration-limit parity (160 cases)'
   } finally {
     renderer.pipeline.dispose()
     delete globalThis.fractalGpuPerformance

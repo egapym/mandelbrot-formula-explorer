@@ -119,14 +119,14 @@ export class MandelbrotCustomWebGPU {
    * @param {WorkerContext} ctx - worker の実行コンテキスト
    * @param {Function} errorCallback - エラー通知関数
    */
-  constructor(p, ctx, errorCallback) {
+  constructor(p, ctx, errorCallback, options = {}) {
     this.p = p
     this.ctx = ctx
     this.errorCallback = errorCallback
     this.iterationFunction = 'z*z + c' // 既定値
     // 実際に使える GPU / device があるかどうかを保持する
     this.available = true
-    this.devicePromise = this.initGpu()
+    this.devicePromise = options.devicePromise || this.initGpu()
     this.pipeline = this.createPipeline()
     this.running = Promise.resolve()
     this.currentTask = null
@@ -594,6 +594,8 @@ struct IterResult {
 // Returns IterResult(iterValue, smoothValue, signValue, escapeZr, escapeZi)
 // signValue: 0=in-set, 1=same sign at escape, 2=different sign at escape
 fn iterate(z_init: vec2<f32>, c: vec2<f32>) -> IterResult {
+  // Uniform-only conversion: evaluate once, rather than on every iteration.
+  let iterationLimit = i32(spec.max_iter);
   var z = z_init;
   var iter: i32 = -1;
   var zq: f32 = z.x * z.x + z.y * z.y;
@@ -602,7 +604,7 @@ ${historyInitialize}
 
   while (zq <= spec.bailout) {
     iter = iter + 1;
-    if (iter == i32(spec.max_iter)) {
+    if (iter == iterationLimit) {
       return IterResult(${SHADER_CONSTANTS.IN_SET_INDEX}u, 0u, 0u, 0.0, 0.0);
     }
 

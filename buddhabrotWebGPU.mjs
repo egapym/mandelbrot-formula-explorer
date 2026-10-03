@@ -294,6 +294,9 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   if (id >= u.invocations) { return; }
   var state: u32 = ((id * 747796405u) ^ u.seed) + 2891336453u;
   let spt = u.samplesPerThread;
+  // Uniform-only values are constant throughout sampling.
+  let iterationLimit = u.maxIter;
+  let escapeRadiusSquared = u.escapeRadius * u.escapeRadius;
   // サンプリングで繰り返し使う不変値を先に計算しておく
   let scale_local = u.zoom * f32(u.width);
   let invDenom_local = 4.0 / scale_local;
@@ -313,7 +316,7 @@ ${historyDeclarations}
 ${historyInitialize}
     // カスタム式で反復する。式は vec2<f32> を返す必要がある
     loop {
-      if (iter >= u.maxIter) { break; }
+      if (iter >= iterationLimit) { break; }
       // 一度一時変数へ入れてから妥当性を確認する
       let n = f32(iter);
 ${historyBefore('iter')}
@@ -326,10 +329,12 @@ ${historyAfter('iter')}
       }
       z = _tmp_iter;
       let zzq = dot(z, z);
-      if (zzq > u.escapeRadius * u.escapeRadius) { escaped = true; break; }
+      if (zzq > escapeRadiusSquared) { escaped = true; break; }
       iter = iter + 1u;
 	    }
 	    if (!((escaped && u.mode == 0u) || (!escaped && u.mode == 1u))) { continue; }
+	  // Compute the band denominator once per accepted orbit, outside replay.
+	  let iterationDenominator = f32(max(1u, iterationLimit));
 	  // z0 から軌道をもう一度たどり、密度へ加算する
 	  z = select(vec2<f32>(u.z0x, u.z0y), sample, u.isJulia != 0u);
 ${historyReset}
@@ -338,7 +343,7 @@ ${historyReset}
     if (u.bandMode == 1u) {
       var denom_t: u32 = 1u;
       if (iter > 1u) { denom_t = iter - 1u; }
-      let fracTraj = f32(iter) / f32(max(1u, u.maxIter));
+      let fracTraj = f32(iter) / iterationDenominator;
       var bi_t: u32 = 0u;
       while (bi_t < u.bandCount && fracTraj >= bands[bi_t].color.a) { bi_t = bi_t + 1u; }
       trajBandIdx = bi_t;
@@ -396,10 +401,10 @@ ${historyAfter('oi')}
         frac = 0.0;
       } else if (u.bandMode == 2u) {
   // perPoint（旧 perIteration）では軌道インデックスを maxIter 比率へ変換する
-        frac = f32(oi) / f32(max(1u, u.maxIter));
+        frac = f32(oi) / iterationDenominator;
       } else {
         // 既定の perPoint でも maxIter に対する比率を使う
-        frac = f32(oi) / f32(max(1u, u.maxIter));
+        frac = f32(oi) / iterationDenominator;
       }
       // CPU と同じになるよう、frac >= 累積値 の間は次の band へ進める
       var bandIdx: u32 = 0u;
