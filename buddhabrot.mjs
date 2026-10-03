@@ -6,6 +6,30 @@
 
 import { createWorkerFrom } from './workerLoader.mjs'
 
+// CPU Buddhabrot is recreated when its view is rerendered, but a Worker does
+// not need to be recreated with it.  Keeping idle workers avoids refetching
+// the module (and its imports) for every Render click.  Workers are released
+// only after stop/terminate and remain owned by this page until it unloads.
+const idleWorkers = []
+let nextRunnerId = 0
+
+async function acquireWorker() {
+  return idleWorkers.pop() || createWorkerFrom('buddhabrotWorker.mjs', { type: 'module' })
+}
+
+function releaseWorker(worker) {
+  try {
+    worker.onmessage = null
+    worker.postMessage({ cmd: 'stop' })
+    idleWorkers.push(worker)
+  } catch (_e) {
+    // A worker that is no longer usable must not be put back in the pool.
+    try {
+      worker.terminate()
+    } catch (_ignored) {}
+  }
+}
+
 // ============================================================================
 // 定数
 // ============================================================================
@@ -120,7 +144,8 @@ export class BuddhabrotRunner {
     // レンダリング速度の制御値（ミリ秒）。サンプル生成の間隔に使う
     this.renderDelay = options.renderDelay ?? 0
     // 描画セッション管理用の ID。古い worker メッセージを除外する
-    this._currentJobId = 0
+    this._runnerId = ++nextRunnerId
+    this._currentJobId = null
     this._initWorkers()
   }
 
@@ -130,13 +155,19 @@ export class BuddhabrotRunner {
    */
   _initWorkers() {
     this.terminate()
-    // キャッシュ済みの Blob URL からワーカーを作成し、
-    // worker スクリプトの取得回数を抑える
+    this._terminated = false
+    // プール済みの Worker を再利用し、worker スクリプトの取得回数を抑える
     const creates = []
     for (let i = 0; i < this.workerCount; i++) {
-      // createWorkerFrom は getWorkerBlobUrl を内部で使い Worker を返す
-      const p = createWorkerFrom('buddhabrotWorker.mjs', { type: 'module' })
+      const p = acquireWorker()
         .then((w) => {
+          // terminate() can run while an asynchronously created worker is
+          // still loading.  Return that worker to the pool instead of leaking
+          // it or attaching it to a disposed runner.
+          if (this._terminated) {
+            releaseWorker(w)
+            return null
+          }
           w.onmessage = (e) => this._onWorkerMessage(e)
           this.workers.push(w)
           return w
@@ -156,13 +187,12 @@ export class BuddhabrotRunner {
    */
   terminate() {
     for (const w of this.workers) {
-      try {
-        w.terminate()
-      } catch (e) {
-        ErrorHelpers.warn('Worker Termination', e)
-      }
+      releaseWorker(w)
     }
     this.workers = []
+    this._terminated = true
+    this.running = false
+    this._currentJobId = null
   }
 
   /**
@@ -200,6 +230,7 @@ export class BuddhabrotRunner {
 
   async start(params = {}) {
     if (this.running) return
+    this._terminated = false
     this.resetDensity()
     this.maxIter = params.maxIter ?? this.maxIter
     this.samples = params.samples ?? this.samples
@@ -210,7 +241,8 @@ export class BuddhabrotRunner {
       this.renderDelay = params.renderDelay
     }
     // この描画用の新しい job ID を発行し、古いメッセージを除外する
-    this._currentJobId = (this._currentJobId + 1) | 0
+    this._jobSequence = (this._jobSequence || 0) + 1
+    this._currentJobId = `${this._runnerId}:${this._jobSequence}`
 
     // 内部バッファを現在の描画サイズに合わせて作り直す
     // これにより前回と異なるサイズのデータが混ざって
@@ -293,7 +325,8 @@ export class BuddhabrotRunner {
   stop() {
     this.running = false
     // 現在の job ID を無効化して、残っているメッセージを無視する
-    this._currentJobId = (this._currentJobId + 1) | 0
+    this._jobSequence = (this._jobSequence || 0) + 1
+    this._currentJobId = `${this._runnerId}:${this._jobSequence}`
     // 再開時に古い進捗が混ざらないように進捗情報をリセットする
     if (this._workerSamplesDone) {
       this._workerSamplesDone.fill(0)

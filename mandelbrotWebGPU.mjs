@@ -4,6 +4,7 @@
  */
 
 import * as fxp from './fxp.mjs'
+import { beginGpuProfile, endGpuProfile } from './gpuPerformance.mjs'
 import { BAILOUT_SMOOTH } from './sharedCalculations.mjs'
 import { smoothen, WorkerContext } from './workerContext.mjs'
 
@@ -62,6 +63,7 @@ export class MandelbrotWebGPU {
       this.devicePromise = this.initGpu()
       // 再初期化完了までは一時的に利用不可とみなす
       this.available = false
+      this.mandelbrotPipeline.dispose()
       this.mandelbrotPipeline = this.createPipeline()
     })
     return device
@@ -90,12 +92,6 @@ export class MandelbrotWebGPU {
     this.max_iter = task.maxIter
     const w = task.w
     const h = task.h
-
-    // スーパーサンプリング設定が変わったらパイプラインを作り直す
-    if (this.lastSupersampling !== task.supersampling) {
-      this.lastSupersampling = task.supersampling
-      this.mandelbrotPipeline = this.createPipeline(task.supersampling)
-    }
 
     this.running = this.calculate(w, h, task.skipTopLeft, task)
     await this.running
@@ -488,6 +484,8 @@ class MandelbrotPipeline {
 
     this.workgroupSize = 64 // recommended default
     this.testsem = 0
+    this.buffers = new Map()
+    this.bufferDevice = null
   }
 
   /**
@@ -504,6 +502,10 @@ class MandelbrotPipeline {
       data.max_iter = 1000
     }
     const device = await this.devicePromise
+    if (this.bufferDevice !== device) {
+      this.dispose()
+      this.bufferDevice = device
+    }
     const pipeline = await this.getPipeline(
       device,
       this.workgroupSize,
@@ -514,84 +516,92 @@ class MandelbrotPipeline {
     )
     this.doSmooth = data.doSmooth
 
-    this.specBuffer = device.createBuffer({
+    this.specBuffer = this.reuseBuffer(device, 'specBuffer', {
       size: SPEC_SIZE,
       usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
     })
 
-    this.indexBuffer = device.createBuffer({
+    this.indexBuffer = this.reuseBuffer(device, 'indexBuffer', {
       label: 'index buffer',
       size: data.indices.byteLength,
       usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC,
     })
-    this.valuesBuffer = device.createBuffer({
+    this.valuesBuffer = this.reuseBuffer(device, 'valuesBuffer', {
       label: 'values buffer',
       size: data.w * data.h * 4,
       usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC,
     })
 
-    this.zBuffer = device.createBuffer({
+    this.zBuffer = this.reuseBuffer(device, 'zBuffer', {
       label: 'zr buffer',
       size: 4 * (data.max_iter + 1) * 2,
       usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
     })
-    this.zqErrorBoundBuffer = device.createBuffer({
+    this.zqErrorBoundBuffer = this.reuseBuffer(device, 'zqErrorBoundBuffer', {
       label: 'zq error bound buffer',
       size: 4 * (data.max_iter + 1),
       usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
     })
-    this.smoothBuffer = device.createBuffer({
+    this.smoothBuffer = this.reuseBuffer(device, 'smoothBuffer', {
       label: 'smooth buffer',
       size: data.w * data.h * 4, // u32, WebGPU does not support u8 or similar
       usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC,
     })
-    this.signsBuffer = device.createBuffer({
+    this.signsBuffer = this.reuseBuffer(device, 'signsBuffer', {
       label: 'signs buffer',
       size: data.w * data.h * 4, // u32 per pixel (0=in-set, 1=same-sign, 2=diff-sign)
       usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC,
     })
-    this.zrealBuffer = device.createBuffer({
+    this.zrealBuffer = this.reuseBuffer(device, 'zrealBuffer', {
       label: 'zreal buffer',
       size: data.w * data.h * 4,
       usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC,
     })
-    this.zimagBuffer = device.createBuffer({
+    this.zimagBuffer = this.reuseBuffer(device, 'zimagBuffer', {
       label: 'zimag buffer',
       size: data.w * data.h * 4,
       usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC,
     })
 
     // Pre-create the buffers that will be used later to copy the results into
-    this.resultIndexBuffer = device.createBuffer({
+    this.resultIndexBuffer = this.reuseBuffer(device, 'resultIndexBuffer', {
       label: 'result index buffer',
       size: data.indices.byteLength,
       usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
     })
-    this.resultValuesBuffer = device.createBuffer({
+    this.resultValuesBuffer = this.reuseBuffer(device, 'resultValuesBuffer', {
       label: 'result buffer',
       size: data.w * data.h * 4,
       usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
     })
-    this.resultSmoothBuffer = device.createBuffer({
+    this.resultSmoothBuffer = this.reuseBuffer(device, 'resultSmoothBuffer', {
       label: 'smooth result buffer',
       size: data.w * data.h * 4,
       usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
     })
-    this.resultSignsBuffer = device.createBuffer({
+    this.resultSignsBuffer = this.reuseBuffer(device, 'resultSignsBuffer', {
       label: 'signs result buffer',
       size: data.w * data.h * 4,
       usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
     })
-    this.resultZrealBuffer = device.createBuffer({
+    this.resultZrealBuffer = this.reuseBuffer(device, 'resultZrealBuffer', {
       label: 'zreal result buffer',
       size: data.w * data.h * 4,
       usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
     })
-    this.resultZimagBuffer = device.createBuffer({
+    this.resultZimagBuffer = this.reuseBuffer(device, 'resultZimagBuffer', {
       label: 'zimag result buffer',
       size: data.w * data.h * 4,
       usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
     })
+
+    // Fresh allocations are zeroed by WebGPU. Reused output buffers must have
+    // the same initial contents, including pixels not yet solved by perturbation.
+    const clear = device.createCommandEncoder()
+    for (const buffer of [this.valuesBuffer, this.smoothBuffer, this.signsBuffer, this.zrealBuffer, this.zimagBuffer]) {
+      clear.clearBuffer(buffer)
+    }
+    device.queue.submit([clear.finish()])
 
     const bindGroupEntries = [
       { binding: 0, resource: { buffer: this.specBuffer } },
@@ -712,76 +722,64 @@ class MandelbrotPipeline {
   }
 
   async readResults(data) {
+    const profile = beginGpuProfile('mandelbrot.readback')
     const device = await this.devicePromise
-    const encoder = device.createCommandEncoder({
-      label: 'mandelbrot result encoder',
-    })
-    encoder.copyBufferToBuffer(this.valuesBuffer, 0, this.resultValuesBuffer, 0, this.resultValuesBuffer.size)
-    encoder.copyBufferToBuffer(this.signsBuffer, 0, this.resultSignsBuffer, 0, this.resultSignsBuffer.size)
-    encoder.copyBufferToBuffer(this.zrealBuffer, 0, this.resultZrealBuffer, 0, this.resultZrealBuffer.size)
-    encoder.copyBufferToBuffer(this.zimagBuffer, 0, this.resultZimagBuffer, 0, this.resultZimagBuffer.size)
-
-    if (data.doSmooth) {
-      encoder.copyBufferToBuffer(this.smoothBuffer, 0, this.resultSmoothBuffer, 0, this.resultSmoothBuffer.size)
-    }
+    const encoder = device.createCommandEncoder({ label: 'mandelbrot result encoder' })
+    const pairs = [
+      [this.valuesBuffer, this.resultValuesBuffer],
+      [this.signsBuffer, this.resultSignsBuffer],
+      [this.zrealBuffer, this.resultZrealBuffer],
+      [this.zimagBuffer, this.resultZimagBuffer],
+    ]
+    if (data.doSmooth) pairs.push([this.smoothBuffer, this.resultSmoothBuffer])
+    for (const [source, target] of pairs) encoder.copyBufferToBuffer(source, 0, target, 0, target.size)
     device.queue.submit([encoder.finish()])
 
-    const values = new Int32Array(this.resultValuesBuffer.size / 4)
-    await this.resultValuesBuffer.mapAsync(GPUMapMode.READ)
-    values.set(new Int32Array(this.resultValuesBuffer.getMappedRange()))
-    this.resultValuesBuffer.unmap()
-
-    await this.resultSignsBuffer.mapAsync(GPUMapMode.READ)
-    const signsU32 = new Uint32Array(this.resultSignsBuffer.getMappedRange().slice())
-    this.resultSignsBuffer.unmap()
-    const signs = new Int8Array(signsU32.length)
-    for (let k = 0; k < signsU32.length; k++) signs[k] = signsU32[k]
-
-    const smooth = new Uint8ClampedArray(this.resultSmoothBuffer.size / 4)
-    if (this.doSmooth) {
-      await this.resultSmoothBuffer.mapAsync(GPUMapMode.READ)
-      smooth.set(new Int32Array(this.resultSmoothBuffer.getMappedRange()))
-      this.resultSmoothBuffer.unmap()
-    }
-
-    const zreal = new Float32Array(this.resultZrealBuffer.size / 4)
-    await this.resultZrealBuffer.mapAsync(GPUMapMode.READ)
-    zreal.set(new Float32Array(this.resultZrealBuffer.getMappedRange()))
-    this.resultZrealBuffer.unmap()
-
-    const zimag = new Float32Array(this.resultZimagBuffer.size / 4)
-    await this.resultZimagBuffer.mapAsync(GPUMapMode.READ)
-    zimag.set(new Float32Array(this.resultZimagBuffer.getMappedRange()))
-    this.resultZimagBuffer.unmap()
-
-    return {
-      values,
-      smooth,
-      signs,
-      zreal,
-      zimag,
+    // Start all mappings together; wait for every settlement before cleanup on failure.
+    try {
+      const results = await Promise.allSettled(pairs.map(([, target]) => target.mapAsync(GPUMapMode.READ)))
+      const failure = results.find((result) => result.status === 'rejected')
+      if (failure) throw failure.reason
+      const mappedAt = performance.now()
+      const values = new Int32Array(new Int32Array(this.resultValuesBuffer.getMappedRange()))
+      const signs = new Int8Array(new Uint32Array(this.resultSignsBuffer.getMappedRange()))
+      const smooth = new Uint8ClampedArray(this.resultSmoothBuffer.size / 4)
+      if (data.doSmooth) smooth.set(new Int32Array(this.resultSmoothBuffer.getMappedRange()))
+      const zreal = new Float32Array(new Float32Array(this.resultZrealBuffer.getMappedRange()))
+      const zimag = new Float32Array(new Float32Array(this.resultZimagBuffer.getMappedRange()))
+      endGpuProfile(profile, {
+        waitAndCopyMs: profile ? mappedAt - profile.started : 0,
+        decodeMs: performance.now() - mappedAt,
+        readbackBytes: pairs.reduce((sum, [, target]) => sum + target.size, 0),
+      })
+      return { values, smooth, signs, zreal, zimag }
+    } finally {
+      for (const [, target] of pairs) if (target.mapState === 'mapped') target.unmap()
     }
   }
 
-  /**
-   * Destroys all buffers
-   */
+  reuseBuffer(device, name, descriptor) {
+    const cached = this.buffers.get(name)
+    if (cached?.size === descriptor.size && cached.usage === descriptor.usage) return cached
+    cached?.destroy()
+    this.buffers.delete(name)
+    const buffer = device.createBuffer(descriptor)
+    this.buffers.set(name, buffer)
+    return buffer
+  }
+
   async finish() {
-    this.specBuffer.destroy()
-    this.indexBuffer.destroy()
-    this.valuesBuffer.destroy()
-    this.zBuffer.destroy()
-    this.zqErrorBoundBuffer.destroy()
-    this.smoothBuffer.destroy()
-    this.signsBuffer.destroy()
-    this.zrealBuffer.destroy()
-    this.zimagBuffer.destroy()
-    this.resultIndexBuffer.destroy()
-    this.resultValuesBuffer.destroy()
-    this.resultSmoothBuffer.destroy()
-    this.resultSignsBuffer.destroy()
-    this.resultZrealBuffer.destroy()
-    this.resultZimagBuffer.destroy()
+    // Keep allocations for the next serialized render. beforeRun clears output
+    // channels once per job; subsequent perturbation passes retain their results.
+  }
+
+  dispose() {
+    for (const buffer of this.buffers.values()) buffer.destroy()
+    this.buffers.clear()
+    this.bufferDevice = null
+    this.bindGroup = null
+    this.pipeline = null
+    this.pipelineKey = null
   }
 
   async getPipeline(device, workgroupSize, smooth, bailout, supersampling, fractalType = 'mandelbrot') {

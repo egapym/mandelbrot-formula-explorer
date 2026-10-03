@@ -9,6 +9,7 @@ import { compileIterationFunction, getIterationHistoryRequirements, getParsedExp
 import * as favorites from './favorites.js'
 import { functionPresets } from './functionPresets.mjs'
 import * as fxp from './fxp.mjs'
+import { beginGpuProfile, endGpuProfile } from './gpuPerformance.mjs'
 import * as mcgpu from './mandelbrotCustomWebGPU.mjs'
 import * as mgpu from './mandelbrotWebGPU.mjs'
 import { OrbitTrapWebGPU } from './orbitTrapBitmapWebGPU.mjs'
@@ -2164,6 +2165,7 @@ class Offscreen {
   }
 
   render(palette, _max_iter, withSmooth, paletteObj = null) {
+    const profile = beginGpuProfile('display.color-and-canvas')
     const bufferData = this.buffer.data // Uint8ClampedArray
     const smoothData = this.smoothbuffer.data // Uint8ClampedArray
     const values = this.values // Int32Array
@@ -2195,6 +2197,7 @@ class Offscreen {
       }
     }
 
+    const coloredAt = performance.now()
     this.offscreencontext.putImageData(this.buffer, 0, 0)
     this.maincontext.imageSmoothingEnabled = false
     this.maincontext.drawImage(
@@ -2214,6 +2217,11 @@ class Offscreen {
         this.smoothscreen.height * this.scale,
       )
     }
+    endGpuProfile(profile, {
+      colorMs: profile ? coloredAt - profile.started : 0,
+      canvasSubmitMs: performance.now() - coloredAt,
+      width: this.buffer.width, height: this.buffer.height,
+    })
   }
 }
 

@@ -634,53 +634,12 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     }
     device.queue.writeBuffer(bandContribBuf, 0, bandContribs.buffer, 0, bandContribs.byteLength)
 
-    // デバッグ用に uniform と band を読み戻し、転送内容を確認する
-    try {
-      const readUniform = device.createBuffer({
-        size: 80,
-        usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
-      })
-      const readBands = device.createBuffer({
-        size: Math.max(16, bandData.byteLength),
-        usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
-      })
-      const dbgEnc = device.createCommandEncoder()
-      dbgEnc.copyBufferToBuffer(uniformBuf, 0, readUniform, 0, 80)
-      dbgEnc.copyBufferToBuffer(bandBuf, 0, readBands, 0, bandData.byteLength)
-      device.queue.submit([dbgEnc.finish()])
-      await Promise.all([readUniform.mapAsync(GPUMapMode.READ), readBands.mapAsync(GPUMapMode.READ)])
-
-      try {
-        readBands.unmap()
-      } catch (e) {
-        console.warn('buddhabrotWebGPU: failed to read band buf', e?.message ? e.message : e)
-      }
-    } catch (e) {
-      console.warn('buddhabrotWebGPU: debug readback failed', e?.message ? e.message : e)
-    }
-
-    // 実行前にバッファを 0 へ戻し、毎回同じ初期状態にする
-    const zeroInit = new Uint8Array(bufSize)
-    try {
-      device.queue.writeBuffer(this._cachedBuffers.rBuf, 0, zeroInit)
-      device.queue.writeBuffer(this._cachedBuffers.gBuf, 0, zeroInit)
-      device.queue.writeBuffer(this._cachedBuffers.bBuf, 0, zeroInit)
-    } catch (_e) {
-      // writeBuffer が失敗する環境では一時 staging buffer に戻す
-      const zeroStaging = device.createBuffer({
-        size: bufSize,
-        usage: GPUBufferUsage.COPY_SRC,
-        mappedAtCreation: true,
-      })
-      const zm = zeroStaging.getMappedRange()
-      new Uint8Array(zm).set(zeroInit)
-      zeroStaging.unmap()
-      const zeroEncoder = device.createCommandEncoder()
-      zeroEncoder.copyBufferToBuffer(zeroStaging, 0, this._cachedBuffers.rBuf, 0, bufSize)
-      zeroEncoder.copyBufferToBuffer(zeroStaging, 0, this._cachedBuffers.gBuf, 0, bufSize)
-      zeroEncoder.copyBufferToBuffer(zeroStaging, 0, this._cachedBuffers.bBuf, 0, bufSize)
-      device.queue.submit([zeroEncoder.finish()])
-    }
+    // Clear on the GPU; avoid allocating and uploading a full-sized CPU zero array.
+    const zeroEncoder = device.createCommandEncoder()
+    zeroEncoder.clearBuffer(rBuf)
+    zeroEncoder.clearBuffer(gBuf)
+    zeroEncoder.clearBuffer(bBuf)
+    device.queue.submit([zeroEncoder.finish()])
 
     // 次元ごとの最大 compute workgroup 数を取得する
     const maxPerDim = device.limits?.maxComputeWorkgroupsPerDimension || 65535

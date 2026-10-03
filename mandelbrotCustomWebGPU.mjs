@@ -5,6 +5,7 @@
  */
 
 import { getIterationHistoryRequirements, getParsedExpression } from './customFunctionParser.mjs'
+import { beginGpuProfile, createGpuTimer, endGpuProfile } from './gpuPerformance.mjs'
 import { BAILOUT_MIN, BAILOUT_SMOOTH } from './sharedCalculations.mjs'
 import { CUSTOM_FUNCTION_WGSL_HELPERS, jsExprToWGSL_safe } from './wgslCompiler.mjs'
 import { WorkerContext } from './workerContext.mjs'
@@ -136,7 +137,9 @@ export class MandelbrotCustomWebGPU {
     const adapter = await navigator.gpu?.requestAdapter({
       powerPreference: 'high-performance',
     })
-    const device = await adapter?.requestDevice()
+    const device = await adapter?.requestDevice({
+      requiredFeatures: adapter.features.has('timestamp-query') ? ['timestamp-query'] : [],
+    })
     if (!device) {
       // CPU へ安全にフォールバックできるよう利用不可にする
       this.available = false
@@ -158,6 +161,7 @@ export class MandelbrotCustomWebGPU {
       console.log('GPU lost, reloading')
       this.devicePromise = this.initGpu()
       this.available = false
+      this.pipeline.dispose()
       this.pipeline = this.createPipeline()
     })
     return device
@@ -187,12 +191,6 @@ export class MandelbrotCustomWebGPU {
     this.max_iter = task.maxIter
     const w = task.w
     const h = task.h
-
-    // スーパーサンプリング設定が変わったらパイプラインを作り直す
-    if (this.lastSupersampling !== task.supersampling) {
-      this.lastSupersampling = task.supersampling
-      this.pipeline = this.createPipeline()
-    }
 
     this.running = this.calculate(w, h, task)
     await this.running
@@ -323,6 +321,7 @@ export class MandelbrotCustomWebGPU {
   }
 
   async renderDirect(params) {
+    const profile = beginGpuProfile('custom.prepare')
     const device = await this.devicePromise
     const pipeline = await this.pipeline.getPipeline(
       device,
@@ -331,6 +330,8 @@ export class MandelbrotCustomWebGPU {
       params.supersampling,
       params.iterationFunction,
     )
+
+    endGpuProfile(profile)
 
     // パイプライン生成に失敗したらエラーを返す
     if (!pipeline) {
@@ -358,6 +359,8 @@ class CustomFractalPipeline {
     this.devicePromise = devicePromise
     this.pipeline = null
     this.pipelineKey = null
+    this.resources = null
+    this.pipelineCache = new Map()
     // GPU の占有率を上げるため 2D workgroup を使う
     // (16, 8) は画像処理向けの無難なバランス設定
     this.workgroupSizeX = WORKGROUP_CONFIG.SIZE_X
@@ -365,8 +368,18 @@ class CustomFractalPipeline {
   }
 
   async getPipeline(device, doSmooth, bailout, supersampling, iterationFunction) {
-    const key = `${doSmooth}:${bailout}:${supersampling}:${iterationFunction}`
+    const key = `${doSmooth}:${supersampling}:${iterationFunction}`
     if (this.pipelineKey === key && this.pipeline) {
+      return this.pipeline
+    }
+
+    const cached = this.pipelineCache.get(key)
+    if (cached) {
+      this.pipelineCache.delete(key)
+      this.pipelineCache.set(key, cached)
+      this.pipelineKey = key
+      this.pipeline = cached.pipeline
+      this.bindGroupLayout = cached.bindGroupLayout
       return this.pipeline
     }
 
@@ -482,6 +495,8 @@ class CustomFractalPipeline {
       })
 
       this.bindGroupLayout = bindGroupLayout
+      this.pipelineCache.set(key, { pipeline: this.pipeline, bindGroupLayout })
+      if (this.pipelineCache.size > 4) this.pipelineCache.delete(this.pipelineCache.keys().next().value)
       return this.pipeline
     } catch (e) {
       ErrorHelpers.logError('Pipeline Creation Failed', e)
@@ -714,23 +729,10 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     const w = params.w
     const h = params.h
 
-    // Create buffers using helpers
-    const specBuffer = BufferHelpers.createBuffer(
-      device,
-      SHADER_CONSTANTS.SPEC_SIZE,
-      GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
-    )
-
-    const valuesBuffer = BufferHelpers.createStorageBuffer(device, w * h * 4)
-
-    let smoothBuffer = null
-    if (params.doSmooth) {
-      smoothBuffer = BufferHelpers.createStorageBuffer(device, w * h * 4)
-    }
-
-    const signsBuffer = BufferHelpers.createStorageBuffer(device, w * h * 4)
-    const zrealBuffer = BufferHelpers.createStorageBuffer(device, w * h * 4)
-    const zimagBuffer = BufferHelpers.createStorageBuffer(device, w * h * 4)
+    const profile = beginGpuProfile('custom.compute-readback')
+    const preparedAt = performance.now()
+    const resources = this.getResources(device, w * h, params.doSmooth)
+    const { specBuffer, valuesBuffer, smoothBuffer, signsBuffer, zrealBuffer, zimagBuffer, readBuffers } = resources
     const specData = new ArrayBuffer(SHADER_CONSTANTS.SPEC_SIZE)
     const specView = new DataView(specData)
     let offset = 0
@@ -782,90 +784,115 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     bindGroupEntries.push({ binding: 4, resource: { buffer: zrealBuffer } })
     bindGroupEntries.push({ binding: 5, resource: { buffer: zimagBuffer } })
 
-    const bindGroup = device.createBindGroup({
-      layout: this.bindGroupLayout,
-      entries: bindGroupEntries,
-    })
-
-    // Dispatch compute shader
-    const commandEncoder = device.createCommandEncoder()
-    const passEncoder = commandEncoder.beginComputePass()
-    passEncoder.setPipeline(this.pipeline)
-    passEncoder.setBindGroup(0, bindGroup)
-
-    const workgroupsX = Math.ceil(w / this.workgroupSizeX)
-    const workgroupsY = Math.ceil(h / this.workgroupSizeY)
-    passEncoder.dispatchWorkgroups(workgroupsX, workgroupsY, 1)
-    passEncoder.end()
-
-    // Read back results
-    const valuesReadBuffer = BufferHelpers.createReadBuffer(device, w * h * 4)
-    commandEncoder.copyBufferToBuffer(valuesBuffer, 0, valuesReadBuffer, 0, w * h * 4)
-
-    let smoothReadBuffer = null
-    if (params.doSmooth) {
-      smoothReadBuffer = BufferHelpers.createReadBuffer(device, w * h * 4)
-      commandEncoder.copyBufferToBuffer(smoothBuffer, 0, smoothReadBuffer, 0, w * h * 4)
+    if (resources.layout !== this.bindGroupLayout) {
+      resources.bindGroup = device.createBindGroup({ layout: this.bindGroupLayout, entries: bindGroupEntries })
+      resources.layout = this.bindGroupLayout
     }
+    const bindGroup = resources.bindGroup
 
-    const signsReadBuffer = BufferHelpers.createReadBuffer(device, w * h * 4)
-    commandEncoder.copyBufferToBuffer(signsBuffer, 0, signsReadBuffer, 0, w * h * 4)
+    const timer = createGpuTimer(device, profile)
+    try {
+      const commandEncoder = device.createCommandEncoder()
+      const passEncoder = commandEncoder.beginComputePass(timer ? { timestampWrites: timer.timestampWrites } : {})
+      passEncoder.setPipeline(this.pipeline)
+      passEncoder.setBindGroup(0, bindGroup)
+      passEncoder.dispatchWorkgroups(Math.ceil(w / this.workgroupSizeX), Math.ceil(h / this.workgroupSizeY), 1)
+      passEncoder.end()
 
-    const zrealReadBuffer = BufferHelpers.createReadBuffer(device, w * h * 4)
-    commandEncoder.copyBufferToBuffer(zrealBuffer, 0, zrealReadBuffer, 0, w * h * 4)
-
-    const zimagReadBuffer = BufferHelpers.createReadBuffer(device, w * h * 4)
-    commandEncoder.copyBufferToBuffer(zimagBuffer, 0, zimagReadBuffer, 0, w * h * 4)
-
-    device.queue.submit([commandEncoder.finish()])
-
-    // Wait for results
-    await valuesReadBuffer.mapAsync(GPUMapMode.READ)
-    const valuesData = new Int32Array(valuesReadBuffer.getMappedRange())
-    const values = new Int32Array(valuesData)
-    valuesReadBuffer.unmap()
-
-    let smooth = null
-    if (params.doSmooth) {
-      await smoothReadBuffer.mapAsync(GPUMapMode.READ)
-      const smoothData = new Uint32Array(smoothReadBuffer.getMappedRange())
-      smooth = new Uint8ClampedArray(w * h)
-      for (let i = 0; i < w * h; i++) {
-        smooth[i] = smoothData[i] & 0xff
+      // One mapping for all channels. Pad each segment to the 8-byte typed-view alignment.
+      const { stride, byteSize } = resources
+      const outputs = [valuesBuffer, signsBuffer, zrealBuffer, zimagBuffer]
+      if (params.doSmooth) outputs.push(smoothBuffer)
+      outputs.forEach((buffer, i) => commandEncoder.copyBufferToBuffer(
+        buffer, 0, readBuffers.length === 1 ? readBuffers[0] : readBuffers[i],
+        readBuffers.length === 1 ? i * stride : 0, byteSize,
+      ))
+      timer?.encode(commandEncoder)
+      const submittedAt = performance.now()
+      device.queue.submit([commandEncoder.finish()])
+      const results = await Promise.allSettled([...readBuffers.map(buffer => buffer.mapAsync(GPUMapMode.READ)), timer?.result()])
+      const failure = results.find(result => result.status === 'rejected')
+      if (failure) throw failure.reason
+      const gpuMs = results[results.length - 1].value
+      const mappedAt = performance.now()
+      const mapped = readBuffers.map(buffer => buffer.getMappedRange())
+      const count = w * h
+      const channel = (Type, index) => new Type(
+        mapped.length === 1 ? mapped[0] : mapped[index], mapped.length === 1 ? index * stride : 0, count,
+      )
+      // Own the returned arrays: the staging buffer will be unmapped and reused.
+      const values = new Int32Array(channel(Int32Array, 0))
+      const signsData = channel(Uint32Array, 1)
+      const signs = new Int8Array(count)
+      for (let i = 0; i < count; i++) signs[i] = signsData[i] & 0xff
+      const zreal = new Float32Array(channel(Float32Array, 2))
+      const zimag = new Float32Array(channel(Float32Array, 3))
+      let smooth = null
+      if (params.doSmooth) {
+        const smoothData = channel(Uint32Array, 4)
+        smooth = new Uint8ClampedArray(count)
+        for (let i = 0; i < count; i++) smooth[i] = smoothData[i] & 0xff
       }
-      smoothReadBuffer.unmap()
+      endGpuProfile(profile, {
+        width: w, height: h, prepareMs: submittedAt - preparedAt,
+        computeAndReadbackMs: mappedAt - submittedAt, decodeMs: performance.now() - mappedAt,
+        gpuMs: gpuMs ?? null, readbackBytes: byteSize * outputs.length,
+      })
+      return { values, smooth, signs, zreal, zimag }
+    } catch (error) {
+      // A failed mapping/device must not leave a poisoned resource set in the cache.
+      this.disposeResources()
+      throw error
+    } finally {
+      for (const buffer of readBuffers) if (buffer.mapState === 'mapped') buffer.unmap()
+      timer?.destroy()
     }
+  }
 
-    await signsReadBuffer.mapAsync(GPUMapMode.READ)
-    const signsU32 = new Uint32Array(signsReadBuffer.getMappedRange().slice())
-    signsReadBuffer.unmap()
-    const signs = new Int8Array(w * h)
-    for (let i = 0; i < w * h; i++) {
-      signs[i] = signsU32[i] & 0xff
+  getResources(device, count, doSmooth) {
+    if (this.resources?.device === device && this.resources.count === count && this.resources.doSmooth === doSmooth) {
+      return this.resources
     }
+    this.disposeResources()
+    const byteSize = count * 4
+    const stride = Math.ceil(byteSize / 8) * 8
+    const resources = { device, count, doSmooth, byteSize, stride }
+    this.resources = resources
+    try {
+      resources.specBuffer = BufferHelpers.createBuffer(device, SHADER_CONSTANTS.SPEC_SIZE, GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST)
+      for (const name of ['valuesBuffer', 'signsBuffer', 'zrealBuffer', 'zimagBuffer']) {
+        resources[name] = BufferHelpers.createStorageBuffer(device, byteSize)
+      }
+      if (doSmooth) resources.smoothBuffer = BufferHelpers.createStorageBuffer(device, byteSize)
+      const channels = doSmooth ? 5 : 4
+      const combinedSize = stride * channels
+      // Preserve large-image support on devices whose per-buffer limit is smaller than all channels together.
+      resources.readBuffers = []
+      const combined = combinedSize <= device.limits.maxBufferSize
+      for (let i = 0; i < (combined ? 1 : channels); i++) {
+        resources.readBuffers.push(BufferHelpers.createReadBuffer(device, combined ? combinedSize : byteSize))
+      }
+      return resources
+    } catch (error) {
+      this.disposeResources()
+      throw error
+    }
+  }
 
-    await zrealReadBuffer.mapAsync(GPUMapMode.READ)
-    const zreal = new Float32Array(zrealReadBuffer.getMappedRange().slice())
-    zrealReadBuffer.unmap()
+  disposeResources() {
+    if (!this.resources) return
+    for (const name of ['specBuffer', 'valuesBuffer', 'signsBuffer', 'zrealBuffer', 'zimagBuffer', 'smoothBuffer']) {
+      BufferHelpers.destroyBuffer(this.resources[name])
+    }
+    for (const buffer of this.resources.readBuffers || []) BufferHelpers.destroyBuffer(buffer)
+    this.resources = null
+  }
 
-    await zimagReadBuffer.mapAsync(GPUMapMode.READ)
-    const zimag = new Float32Array(zimagReadBuffer.getMappedRange().slice())
-    zimagReadBuffer.unmap()
-
-    // Cleanup
-    BufferHelpers.destroyBuffer(specBuffer)
-    BufferHelpers.destroyBuffer(valuesBuffer)
-    BufferHelpers.destroyBuffer(valuesReadBuffer)
-    BufferHelpers.destroyBuffer(smoothBuffer)
-    BufferHelpers.destroyBuffer(smoothReadBuffer)
-    BufferHelpers.destroyBuffer(signsBuffer)
-    BufferHelpers.destroyBuffer(signsReadBuffer)
-    BufferHelpers.destroyBuffer(zrealBuffer)
-    BufferHelpers.destroyBuffer(zrealReadBuffer)
-    BufferHelpers.destroyBuffer(zimagBuffer)
-    BufferHelpers.destroyBuffer(zimagReadBuffer)
-
-    return { values, smooth, signs, zreal, zimag }
+  dispose() {
+    this.disposeResources()
+    this.pipelineCache.clear()
+    this.pipeline = null
+    this.pipelineKey = null
   }
 
   async finish() {

@@ -117,6 +117,34 @@ At very high resolutions, switching can happen at different zoom levels to reduc
 - `palette.js`, `buddhaPalettes.mjs`: color systems
 - `functionPresets.mjs`: built-in function presets
 
+## GPU Performance Diagnostics
+
+In the browser console, enable optional diagnostics before rendering:
+
+```js
+window.fractalGpuPerformance = { enabled: true, samples: [] }
+// After rendering:
+console.table(window.fractalGpuPerformance.samples)
+// Disable additional profiling work:
+window.fractalGpuPerformance.enabled = false
+```
+
+The latest 120 samples cover custom pipeline preparation, custom compute/readback,
+Mandelbrot result readback, and CPU coloring/canvas submission. Custom compute
+samples include `gpuMs` when the device supports `timestamp-query`; otherwise it
+is `null`. `computeAndReadbackMs` includes queueing, GPU work, copies and mapping,
+so do not interpret it as GPU compute time alone. Canvas submission time does
+not measure browser compositing or physical presentation. Display samples also
+include CPU-rendered frames. Disable diagnostics for throughput comparisons;
+GPU timestamps introduce extra buffers and readback work.
+
+Custom renderers reuse buffers for equal pixel counts and smooth settings,
+combine readbacks when the device buffer limit allows it, and retain up to four
+compiled pipeline variants. Shader output and all palette channels are preserved. Standard Mandelbrot
+also reuses equal-sized buffers across renders and supersampling changes. Output
+channels are cleared once at the start of a new render; intermediate perturbation
+passes keep their accumulated results. Resizing replaces only affected buffers.
+
 ## Testing
 
 Browser-based tests are available under the `test/` directory.
@@ -146,3 +174,12 @@ This project is based on [bertbaron/mandelbrot](https://github.com/bertbaron/man
 ## License
 
 GPL-3.0. See [LICENSE](LICENSE) for details.
+
+GPU resource regression tests require a WebGPU-capable browser and the local server:
+
+```text
+http://localhost:3030/test/gpuResourceTests.html
+```
+
+They cover buffer reuse, output stability after setting changes, odd image sizes,
+readback buffer limits, mapping failure recovery, and optional profiling.
