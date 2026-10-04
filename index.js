@@ -812,8 +812,9 @@ class Mandelbrot {
     this.paletteComponent = paletteComponent
     this.initPallete(false)
     this.paletteComponent.addListener(() => {
-      // Buddhabrot 表示中は通常フラクタルのパレット更新や再描画を行わない
-      if (typeof buddhaActive !== 'undefined' && buddhaActive) return
+      // メイン側に Buddhabrot を表示している場合だけ、通常描画による上書きを防ぐ。
+      // Julia 側の Buddhabrot はメイン側のパレット更新を妨げない。
+      if (isMainCanvasInteractionBlockedByBuddhabrot()) return
 
       this.initPallete(true)
     })
@@ -4465,6 +4466,8 @@ if (juliaCanvasElement) {
   // Julia 側のパレットもメイン側に追従させる。
   // 再計算はせず、既存 offscreen データへの再適用だけ行う。
   paletteComponent.addListener(() => {
+    // 実行中・完了後・Stop 後の Julia Buddhabrot 表示を保持する。
+    if (isBuddhabrotViewShownOnJulia()) return
     if (juliaState.active && juliaState.renderer) {
       juliaState.renderer.applyPalette()
     }
