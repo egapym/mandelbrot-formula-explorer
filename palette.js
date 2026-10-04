@@ -183,6 +183,13 @@ class SingleColorPalette extends NormalPalette {
   }
 }
 
+class InvertedSingleColorPalette extends SingleColorPalette {
+  constructor(id, name, color, inSetColor) {
+    super(id, name, color)
+    this.inSetColor = inSetColor
+  }
+}
+
 class IndexedPalette extends NormalPalette {
   constructor(id, name, colors, mirror, reverse, inSetColor = null) {
     super()
@@ -781,6 +788,7 @@ export const PALETTES = [
   JEWELLERY,
   new GrayScalePalette('gray_scale', 'Gray Scale', 0, 255),
   new SingleColorPalette('black_white', 'Pure B/W', [255, 255, 255]),
+  new InvertedSingleColorPalette('white_black', 'Pure W/B', [0, 0, 0], [255, 255, 255]),
   new StripePalette(),
   new GridPalette(),
   OT_CROSS_COSINE,
