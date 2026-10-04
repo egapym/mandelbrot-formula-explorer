@@ -165,7 +165,7 @@ async function adjustmentChecks(device) {
       assert(probes === 17, `${name}: incorrect analysis count`)
       assert(view.smooth && view.supersampling === 2, `${name}: probes changed final quality`)
       const first = adjusted.at(0)
-      assert(first.maxIter === 16 && first.paletteDensity === 0, `${name}: incorrect start settings`)
+      assert(first.maxIter === 16 && first.paletteDensity === 20, `${name}: incorrect start settings`)
       await session.render(first, controller.signal)
       const middle = adjusted.at(Math.floor(adjusted.count / 2))
       await session.render(middle, controller.signal)
@@ -266,7 +266,7 @@ try {
   await storageChecks()
   await gpuChecks()
   document.querySelector('#result').textContent =
-    'PASS: OPFS roundtrip, active lock protection, orphan cleanup, quota, direct/history, perturbation, Orbit Trap, supersampling, analysis, adaptive iterations/density, target/OFF image parity, intermediate metrics, cancellation, allocation preflight, pipeline failure, device loss'
+    'PASS: OPFS roundtrip, active lock protection, orphan cleanup, quota, direct/history, perturbation, Orbit Trap, supersampling, analysis, adaptive iterations with target density, target/OFF image parity, intermediate metrics, cancellation, allocation preflight, pipeline failure, device loss'
   document.documentElement.dataset.result = 'passed'
 } catch (error) {
   document.querySelector('#result').textContent = error.stack

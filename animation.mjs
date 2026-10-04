@@ -95,10 +95,7 @@ export function createAnimationAdjustmentProfile({
   const targetSettings = { maxIter: targetMaxIter, paletteDensity: targetDensity }
   if (delta === 0) return { atZoom: () => ({ ...targetSettings }) }
   if (!samples || samples.length < 2) throw new Error('Animation requires analysis samples')
-  const targetSpread = samples[samples.length - 1]?.spread
-  const direction = targetDensity < 0 ? -1 : 1
   const iterations = []
-  const densities = []
   samples.forEach((sample, i) => {
     const fraction = smoothstep(i / (samples.length - 1))
     iterations.push(
@@ -106,24 +103,17 @@ export function createAnimationAdjustmentProfile({
         ? clamp(Math.ceil(sample.high + sample.high / 10), minIter, targetMaxIter)
         : minIter + (targetMaxIter - minIter) * fraction,
     )
-    const density =
-      sample?.spread > 0 && targetSpread > 0
-        ? targetDensity + 10 * Math.log2(targetSpread / sample.spread)
-        : targetDensity * fraction
-    densities.push(clamp(density * direction, 0, Math.abs(targetDensity)))
   })
   iterations[0] = minIter
   iterations[iterations.length - 1] = targetMaxIter
-  densities[0] = 0
-  densities[densities.length - 1] = Math.abs(targetDensity)
   const iterationAt = monotoneCurve(iterations)
-  const densityAt = monotoneCurve(densities)
   return {
     atZoom(zoom) {
       const progress = clamp((Math.log(zoom.toNumber()) - startLog) / delta, 0, 1)
       if (progress >= 1) return { ...targetSettings }
-      const density = densityAt(progress)
-      return { maxIter: Math.ceil(iterationAt(progress)), paletteDensity: density === 0 ? 0 : direction * density }
+      // The first pan frame must have the same palette density as the target.
+      // Keeping it constant also avoids a density discontinuity when zoom begins.
+      return { maxIter: Math.ceil(iterationAt(progress)), paletteDensity: targetDensity }
     },
   }
 }

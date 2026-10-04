@@ -4453,10 +4453,19 @@ function animationUnavailableReason() {
   if (!animationGpuAvailable) return 'WebGPU is unavailable in this browser.'
   if (!AnimationStore.supported()) return 'Animation requires temporary storage (OPFS and Web Locks).'
   if (!fractal.useGpu) return 'Enable GPU to prepare an animation.'
-  if (juliaState.active || buddhaActive || buddhaPreservedDisplay)
-    return 'Animation is unavailable in Julia and Buddhabrot modes.'
+  if (juliaState.active) return 'Animation is unavailable in Julia mode.'
   if (!selectAnimationGpu(fractal)) return 'The current formula, palette or zoom cannot be rendered with WebGPU.'
   return ''
+}
+
+// Prepared animation frames are normal fractal frames. A Buddhabrot render may
+// continue during preparation, but must be fully stopped before it can write
+// over playback frames. This changes no fractal coordinates or animation data.
+function stopBuddhabrotForAnimationPlayback() {
+  if (!buddhaRenderPending && !buddhaActive && !buddhaPreservedDisplay && !BuddhabrotState.isViewEnabled()) return
+  buddhaRenderRequestGeneration++
+  buddhaRenderPending = false
+  stopAndClearBuddha()
 }
 
 function selectAnimationGpu(view, { analysis = false } = {}) {
@@ -4640,6 +4649,7 @@ async function prepareAnimation() {
 async function playAnimation() {
   if (animationInvalidation || animationUiPending || animationUnavailableReason()) return
   clearPendingInteractiveRedrawState()
+  stopBuddhabrotForAnimationPlayback()
   cancelActiveMainRender()
   _clearPinnedOrbits()
   await preparedAnimation.play((image, frame) => {
@@ -4731,7 +4741,8 @@ function initAnimationControls() {
         if (
           (type === 'input' || type === 'change') &&
           !target.id?.startsWith('anim-') &&
-          !['coordX', 'coordY', 'coordZoom'].includes(target.id)
+          !['coordX', 'coordY', 'coordZoom'].includes(target.id) &&
+          !target.closest?.('#buddhabrot-section')
         ) {
           invalidateAnimation()
           queueMicrotask(updateAnimationUi)
