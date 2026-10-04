@@ -5,7 +5,6 @@
  */
 
 import { getIterationHistoryRequirements, getParsedExpression } from './customFunctionParser.mjs'
-import { beginGpuProfile, createGpuTimer, endGpuProfile } from './gpuPerformance.mjs'
 import { BAILOUT_MIN, BAILOUT_SMOOTH } from './sharedCalculations.mjs'
 import { CUSTOM_FUNCTION_WGSL_HELPERS, jsExprToWGSL_safe } from './wgslCompiler.mjs'
 import { WorkerContext } from './workerContext.mjs'
@@ -137,9 +136,7 @@ export class MandelbrotCustomWebGPU {
     const adapter = await navigator.gpu?.requestAdapter({
       powerPreference: 'high-performance',
     })
-    const device = await adapter?.requestDevice({
-      requiredFeatures: adapter.features.has('timestamp-query') ? ['timestamp-query'] : [],
-    })
+    const device = await adapter?.requestDevice()
     if (!device) {
       // CPU へ安全にフォールバックできるよう利用不可にする
       this.available = false
@@ -321,7 +318,6 @@ export class MandelbrotCustomWebGPU {
   }
 
   async renderDirect(params) {
-    const profile = beginGpuProfile('custom.prepare')
     const device = await this.devicePromise
     const pipeline = await this.pipeline.getPipeline(
       device,
@@ -330,9 +326,6 @@ export class MandelbrotCustomWebGPU {
       params.supersampling,
       params.iterationFunction,
     )
-
-    endGpuProfile(profile)
-
     // パイプライン生成に失敗したらエラーを返す
     if (!pipeline) {
       const errorMsg = this.pipeline.lastError || 'Invalid iteration function - cannot compile to GPU shader'
@@ -731,8 +724,6 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     const w = params.w
     const h = params.h
 
-    const profile = beginGpuProfile('custom.compute-readback')
-    const preparedAt = performance.now()
     const resources = this.getResources(device, w * h, params.doSmooth)
     const { specBuffer, valuesBuffer, smoothBuffer, signsBuffer, zrealBuffer, zimagBuffer, readBuffers } = resources
     const specData = new ArrayBuffer(SHADER_CONSTANTS.SPEC_SIZE)
@@ -792,10 +783,9 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     }
     const bindGroup = resources.bindGroup
 
-    const timer = createGpuTimer(device, profile)
     try {
       const commandEncoder = device.createCommandEncoder()
-      const passEncoder = commandEncoder.beginComputePass(timer ? { timestampWrites: timer.timestampWrites } : {})
+      const passEncoder = commandEncoder.beginComputePass()
       passEncoder.setPipeline(this.pipeline)
       passEncoder.setBindGroup(0, bindGroup)
       passEncoder.dispatchWorkgroups(Math.ceil(w / this.workgroupSizeX), Math.ceil(h / this.workgroupSizeY), 1)
@@ -805,23 +795,23 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
       const { stride, byteSize } = resources
       const outputs = [valuesBuffer, signsBuffer, zrealBuffer, zimagBuffer]
       if (params.doSmooth) outputs.push(smoothBuffer)
-      outputs.forEach((buffer, i) => commandEncoder.copyBufferToBuffer(
-        buffer, 0, readBuffers.length === 1 ? readBuffers[0] : readBuffers[i],
-        readBuffers.length === 1 ? i * stride : 0, byteSize,
-      ))
-      timer?.encode(commandEncoder)
-      const submittedAt = performance.now()
-      device.queue.submit([commandEncoder.finish()])
-      const results = await Promise.allSettled([...readBuffers.map(buffer => buffer.mapAsync(GPUMapMode.READ)), timer?.result()])
-      const failure = results.find(result => result.status === 'rejected')
-      if (failure) throw failure.reason
-      const gpuMs = results[results.length - 1].value
-      const mappedAt = performance.now()
-      const mapped = readBuffers.map(buffer => buffer.getMappedRange())
-      const count = w * h
-      const channel = (Type, index) => new Type(
-        mapped.length === 1 ? mapped[0] : mapped[index], mapped.length === 1 ? index * stride : 0, count,
+      outputs.forEach((buffer, i) =>
+        commandEncoder.copyBufferToBuffer(
+          buffer,
+          0,
+          readBuffers.length === 1 ? readBuffers[0] : readBuffers[i],
+          readBuffers.length === 1 ? i * stride : 0,
+          byteSize,
+        ),
       )
+      device.queue.submit([commandEncoder.finish()])
+      const results = await Promise.allSettled(readBuffers.map((buffer) => buffer.mapAsync(GPUMapMode.READ)))
+      const failure = results.find((result) => result.status === 'rejected')
+      if (failure) throw failure.reason
+      const mapped = readBuffers.map((buffer) => buffer.getMappedRange())
+      const count = w * h
+      const channel = (Type, index) =>
+        new Type(mapped.length === 1 ? mapped[0] : mapped[index], mapped.length === 1 ? index * stride : 0, count)
       // Own the returned arrays: the staging buffer will be unmapped and reused.
       const values = new Int32Array(channel(Int32Array, 0))
       const signsData = channel(Uint32Array, 1)
@@ -835,11 +825,6 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         smooth = new Uint8ClampedArray(count)
         for (let i = 0; i < count; i++) smooth[i] = smoothData[i] & 0xff
       }
-      endGpuProfile(profile, {
-        width: w, height: h, prepareMs: submittedAt - preparedAt,
-        computeAndReadbackMs: mappedAt - submittedAt, decodeMs: performance.now() - mappedAt,
-        gpuMs: gpuMs ?? null, readbackBytes: byteSize * outputs.length,
-      })
       return { values, smooth, signs, zreal, zimag }
     } catch (error) {
       // A failed mapping/device must not leave a poisoned resource set in the cache.
@@ -847,7 +832,6 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
       throw error
     } finally {
       for (const buffer of readBuffers) if (buffer.mapState === 'mapped') buffer.unmap()
-      timer?.destroy()
     }
   }
 
@@ -861,7 +845,11 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     const resources = { device, count, doSmooth, byteSize, stride }
     this.resources = resources
     try {
-      resources.specBuffer = BufferHelpers.createBuffer(device, SHADER_CONSTANTS.SPEC_SIZE, GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST)
+      resources.specBuffer = BufferHelpers.createBuffer(
+        device,
+        SHADER_CONSTANTS.SPEC_SIZE,
+        GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+      )
       for (const name of ['valuesBuffer', 'signsBuffer', 'zrealBuffer', 'zimagBuffer']) {
         resources[name] = BufferHelpers.createStorageBuffer(device, byteSize)
       }

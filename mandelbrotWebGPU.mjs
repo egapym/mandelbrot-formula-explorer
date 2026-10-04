@@ -4,7 +4,6 @@
  */
 
 import * as fxp from './fxp.mjs'
-import { beginGpuProfile, endGpuProfile } from './gpuPerformance.mjs'
 import { BAILOUT_SMOOTH } from './sharedCalculations.mjs'
 import { smoothen, WorkerContext } from './workerContext.mjs'
 
@@ -167,7 +166,7 @@ export class MandelbrotWebGPU {
     // アニメーション中は更新間隔を短くして、見た目の追従性を上げる
     const animationQuick = !!task.animationQuick
     const updateIntervalMs = animationQuick ? 16 : 100
-    let lastUpdate = performance.now()
+    let lastUpdate = Date.now()
     while (!solved) {
       const ref = this.referencePoints[refIdx]
       const result = await this.perturbationPass({
@@ -278,7 +277,7 @@ export class MandelbrotWebGPU {
         // this.ctx.stats.numberOfLowPrecisionMisses += indices.length
       }
       solved = indices.length === 0
-      const now = performance.now()
+      const now = Date.now()
       if (!task.finalOnly && !solved && now - lastUpdate > updateIntervalMs) {
         this.intermediateUpdate(values, smooth, signs, zreal, zimag)
         lastUpdate = now
@@ -424,8 +423,6 @@ export class MandelbrotWebGPU {
     const lastPair = seq.length > 0 ? seq[seq.length - 1] : [0, 0, 0]
     const escZr = iter !== 2 ? lastPair[0] : 0
     const escZi = iter !== 2 ? lastPair[1] : 0
-    // console.log(`Calculated reference point in ${(end - start).toFixed(1)}ms`)
-    // this.ctx.stats.timeSpendInHighPrecision += end - start
     // this.ctx.stats.numberOfHighPrecisionPoints++
     return {
       rr,
@@ -741,7 +738,6 @@ class MandelbrotPipeline {
   }
 
   async readResults(data) {
-    const profile = beginGpuProfile('mandelbrot.readback')
     const device = await this.devicePromise
     const encoder = device.createCommandEncoder({ label: 'mandelbrot result encoder' })
     const pairs = [
@@ -759,18 +755,12 @@ class MandelbrotPipeline {
       const results = await Promise.allSettled(pairs.map(([, target]) => target.mapAsync(GPUMapMode.READ)))
       const failure = results.find((result) => result.status === 'rejected')
       if (failure) throw failure.reason
-      const mappedAt = performance.now()
       const values = new Int32Array(new Int32Array(this.resultValuesBuffer.getMappedRange()))
       const signs = new Int8Array(new Uint32Array(this.resultSignsBuffer.getMappedRange()))
       const smooth = new Uint8ClampedArray(this.resultSmoothBuffer.size / 4)
       if (data.doSmooth) smooth.set(new Int32Array(this.resultSmoothBuffer.getMappedRange()))
       const zreal = new Float32Array(new Float32Array(this.resultZrealBuffer.getMappedRange()))
       const zimag = new Float32Array(new Float32Array(this.resultZimagBuffer.getMappedRange()))
-      endGpuProfile(profile, {
-        waitAndCopyMs: profile ? mappedAt - profile.started : 0,
-        decodeMs: performance.now() - mappedAt,
-        readbackBytes: pairs.reduce((sum, [, target]) => sum + target.size, 0),
-      })
       return { values, smooth, signs, zreal, zimag }
     } finally {
       for (const [, target] of pairs) if (target.mapState === 'mapped') target.unmap()

@@ -4,8 +4,9 @@
  * Licensed under GPL-3.0.
  */
 
-import { compileIterationFunction } from './customFunctionParser.mjs'
+import { compileIterationFunction, usesIterationHistory } from './customFunctionParser.mjs'
 import { calculatePixelOrbitTrap } from './orbitTrap.mjs'
+import { OrbitReplay } from './orbitReplay.mjs'
 import { BAILOUT_MIN, BAILOUT_SMOOTH } from './sharedCalculations.mjs'
 import { WorkerContext } from './workerContext.mjs'
 
@@ -146,6 +147,17 @@ export class MandelbrotCustom {
     const signs = new Int8Array(w * h)
     const zreal = new Float32Array(w * h)
     const zimag = new Float32Array(w * h)
+    this._trapData = task.trapSpec ? new Float32Array(w * h) : null
+    this._trapSpec = task.trapSpec
+    // Recording costs more than repeating simple arithmetic. Reuse only
+    // expensive transcendental/history expressions, with supersampling OFF.
+    const replayWorthwhile =
+      /\b(?:sin|cos|tan|sinh|cosh|tanh|exp|log|log10|sqrt|atanSqrt|zAt|zDelay|delayZ)\s*\(/i.test(functionStr)
+    this._trapReplay =
+      task.trapSpec && !task.supersampling && replayWorthwhile
+        ? new OrbitReplay(this.compiledFunction, task.maxIter, usesIterationHistory(functionStr))
+        : null
+    this._trapSkipTopLeft = task.skipTopLeft
     this.calculate(
       values,
       smooth,
@@ -164,7 +176,7 @@ export class MandelbrotCustom {
     // trapSpec を持つパレットのときだけ Orbit trap を計算する
     let otData = null
     if (task.trapSpec) {
-      otData = new Float32Array(w * h)
+      otData = this._trapData
       this.calculateOrbitTraps(
         otData,
         w,
@@ -203,6 +215,7 @@ export class MandelbrotCustom {
    * @param {string} jobToken
    */
   calculateOrbitTraps(otData, w, h, topleft, bottomright, trapSpec, supersampling, jobToken) {
+    if (this._trapReplay && !this._trapSkipTopLeft) return
     const rmin = topleft[0]
     const rmax = bottomright[0]
     const imin = topleft[1]
@@ -222,6 +235,7 @@ export class MandelbrotCustom {
       if (this.ctx.shouldStop(jobToken)) return
       const im = imin + di * y
       for (let x = 0; x < w; x++) {
+        if (this._trapReplay && !(this._trapSkipTopLeft && y % 2 === 0 && x % 2 === 0)) continue
         const re = rmin + dr * x
         if (samples > 1) {
           // サブピクセルごとの値を平均する
@@ -297,21 +311,130 @@ export class MandelbrotCustom {
   calculatePixel(y, w, x, rmin, dr, di, im, values, smooth, signs, zreal, zimag, supersampling) {
     const offset = y * w + x
     const re = rmin + dr * x
+    const fn = this.compiledFunction
+    const replay = this._trapReplay
+    if (replay) {
+      replay.reset()
+      this.compiledFunction = replay.record
+    }
+    try {
+      // Julia 集合ではピクセル座標を z0 とし、c は固定値を使う
+      if (this.fractalType === 'julia-custom') {
+        if (supersampling > 0) {
+          const samples = supersampling
+          let totalIter = 0
+          let totalNu = 0
+          let sampleCount = 0
+          let capturedSign = 0
+          for (let sy = 0; sy < samples; sy++) {
+            for (let sx = 0; sx < samples; sx++) {
+              const sampleRe = re + (dr * (sx + 0.5)) / samples
+              const sampleIm = im + (di * (sy + 0.5)) / samples
+              if (smooth) {
+                let [iter, zq, zrE, ziE] = this.juliaIterate(
+                  sampleRe,
+                  sampleIm,
+                  this.max_iter,
+                  ITERATION_CONFIG.DEFAULT_BAILOUT_SMOOTH,
+                )
+                let nu = 1
+                if (iter > ITERATION_CONFIG.MIN_ITER_FOR_SMOOTH) {
+                  const log_zn = Math.log(zq) / 2
+                  nu = Math.log(log_zn / Math.log(2)) / Math.log(2)
+                  iter = Math.floor(iter + 1 - nu)
+                  nu = nu - Math.floor(nu)
+                }
+                totalIter += iter
+                totalNu += nu
+                if (sy === 0 && sx === 0)
+                  capturedSign =
+                    iter >= ITERATION_CONFIG.ESCAPE_OFFSET
+                      ? zrE >= 0 === ziE >= 0
+                        ? ITERATION_CONFIG.SIGN_SAME_QUADRANT
+                        : ITERATION_CONFIG.SIGN_DIFF_QUADRANT
+                      : ITERATION_CONFIG.SIGN_NOT_ESCAPED
+              } else {
+                const [si, , sr, si2] = this.juliaIterate(
+                  sampleRe,
+                  sampleIm,
+                  this.max_iter,
+                  this.escapeRadius * this.escapeRadius,
+                )
+                totalIter += si
+                if (sy === 0 && sx === 0)
+                  capturedSign =
+                    si >= ITERATION_CONFIG.ESCAPE_OFFSET
+                      ? sr >= 0 === si2 >= 0
+                        ? ITERATION_CONFIG.SIGN_SAME_QUADRANT
+                        : ITERATION_CONFIG.SIGN_DIFF_QUADRANT
+                      : ITERATION_CONFIG.SIGN_NOT_ESCAPED
+              }
+              sampleCount++
+            }
+          }
+          values[offset] = Math.floor(totalIter / sampleCount)
+          signs[offset] = capturedSign
+          if (smooth)
+            smooth[offset] = Math.floor(
+              ITERATION_CONFIG.SMOOTH_SCALE - ITERATION_CONFIG.SMOOTH_SCALE * (totalNu / sampleCount),
+            )
+        } else {
+          if (smooth) {
+            let [iter, zq, zrE, ziE] = this.juliaIterate(re, im, this.max_iter, ITERATION_CONFIG.DEFAULT_BAILOUT_SMOOTH)
+            let nu = 1
+            if (iter > ITERATION_CONFIG.MIN_ITER_FOR_SMOOTH) {
+              const log_zn = Math.log(zq) / 2
+              nu = Math.log(log_zn / Math.log(2)) / Math.log(2)
+              iter = Math.floor(iter + 1 - nu)
+              nu = nu - Math.floor(nu)
+            }
+            smooth[offset] = Math.floor(ITERATION_CONFIG.SMOOTH_SCALE - ITERATION_CONFIG.SMOOTH_SCALE * nu)
+            values[offset] = iter
+            signs[offset] =
+              iter >= ITERATION_CONFIG.ESCAPE_OFFSET
+                ? zrE >= 0 === ziE >= 0
+                  ? ITERATION_CONFIG.SIGN_SAME_QUADRANT
+                  : ITERATION_CONFIG.SIGN_DIFF_QUADRANT
+                : ITERATION_CONFIG.SIGN_NOT_ESCAPED
+            zreal[offset] = zrE
+            zimag[offset] = ziE
+          } else {
+            const [rawIter, _zqE, zrE, ziE] = this.juliaIterate(
+              re,
+              im,
+              this.max_iter,
+              this.escapeRadius * this.escapeRadius,
+            )
+            values[offset] = rawIter
+            signs[offset] =
+              rawIter >= ITERATION_CONFIG.ESCAPE_OFFSET
+                ? zrE >= 0 === ziE >= 0
+                  ? ITERATION_CONFIG.SIGN_SAME_QUADRANT
+                  : ITERATION_CONFIG.SIGN_DIFF_QUADRANT
+                : ITERATION_CONFIG.SIGN_NOT_ESCAPED
+            zreal[offset] = zrE
+            zimag[offset] = ziE
+          }
+        }
+        return
+      }
 
-    // Julia 集合ではピクセル座標を z0 とし、c は固定値を使う
-    if (this.fractalType === 'julia-custom') {
       if (supersampling > 0) {
         const samples = supersampling
         let totalIter = 0
         let totalNu = 0
         let sampleCount = 0
         let capturedSign = 0
+
         for (let sy = 0; sy < samples; sy++) {
           for (let sx = 0; sx < samples; sx++) {
-            const sampleRe = re + (dr * (sx + 0.5)) / samples
-            const sampleIm = im + (di * (sy + 0.5)) / samples
+            const offsetX = (sx + 0.5) / samples
+            const offsetY = (sy + 0.5) / samples
+            const sampleRe = re + dr * offsetX
+            const sampleIm = im + di * offsetY
+
             if (smooth) {
-              let [iter, zq, zrE, ziE] = this.juliaIterate(
+              let [iter, zq, zrE, ziE] = this.iterate(
                 sampleRe,
                 sampleIm,
                 this.max_iter,
@@ -334,7 +457,7 @@ export class MandelbrotCustom {
                       : ITERATION_CONFIG.SIGN_DIFF_QUADRANT
                     : ITERATION_CONFIG.SIGN_NOT_ESCAPED
             } else {
-              const [si, , sr, si2] = this.juliaIterate(
+              const [si, , sr, si2] = this.iterate(
                 sampleRe,
                 sampleIm,
                 this.max_iter,
@@ -352,15 +475,18 @@ export class MandelbrotCustom {
             sampleCount++
           }
         }
+
         values[offset] = Math.floor(totalIter / sampleCount)
         signs[offset] = capturedSign
-        if (smooth)
+        if (smooth) {
           smooth[offset] = Math.floor(
             ITERATION_CONFIG.SMOOTH_SCALE - ITERATION_CONFIG.SMOOTH_SCALE * (totalNu / sampleCount),
           )
+        }
       } else {
+        // Normal single sample
         if (smooth) {
-          let [iter, zq, zrE, ziE] = this.juliaIterate(re, im, this.max_iter, ITERATION_CONFIG.DEFAULT_BAILOUT_SMOOTH)
+          let [iter, zq, zrE, ziE] = this.iterate(re, im, this.max_iter, ITERATION_CONFIG.DEFAULT_BAILOUT_SMOOTH)
           let nu = 1
           if (iter > ITERATION_CONFIG.MIN_ITER_FOR_SMOOTH) {
             const log_zn = Math.log(zq) / 2
@@ -379,12 +505,7 @@ export class MandelbrotCustom {
           zreal[offset] = zrE
           zimag[offset] = ziE
         } else {
-          const [rawIter, _zqE, zrE, ziE] = this.juliaIterate(
-            re,
-            im,
-            this.max_iter,
-            this.escapeRadius * this.escapeRadius,
-          )
+          const [rawIter, _zqE, zrE, ziE] = this.iterate(re, im, this.max_iter, this.escapeRadius * this.escapeRadius)
           values[offset] = rawIter
           signs[offset] =
             rawIter >= ITERATION_CONFIG.ESCAPE_OFFSET
@@ -396,105 +517,20 @@ export class MandelbrotCustom {
           zimag[offset] = ziE
         }
       }
-      return
-    }
-
-    if (supersampling > 0) {
-      const samples = supersampling
-      let totalIter = 0
-      let totalNu = 0
-      let sampleCount = 0
-      let capturedSign = 0
-
-      for (let sy = 0; sy < samples; sy++) {
-        for (let sx = 0; sx < samples; sx++) {
-          const offsetX = (sx + 0.5) / samples
-          const offsetY = (sy + 0.5) / samples
-          const sampleRe = re + dr * offsetX
-          const sampleIm = im + di * offsetY
-
-          if (smooth) {
-            let [iter, zq, zrE, ziE] = this.iterate(
-              sampleRe,
-              sampleIm,
-              this.max_iter,
-              ITERATION_CONFIG.DEFAULT_BAILOUT_SMOOTH,
-            )
-            let nu = 1
-            if (iter > ITERATION_CONFIG.MIN_ITER_FOR_SMOOTH) {
-              const log_zn = Math.log(zq) / 2
-              nu = Math.log(log_zn / Math.log(2)) / Math.log(2)
-              iter = Math.floor(iter + 1 - nu)
-              nu = nu - Math.floor(nu)
-            }
-            totalIter += iter
-            totalNu += nu
-            if (sy === 0 && sx === 0)
-              capturedSign =
-                iter >= ITERATION_CONFIG.ESCAPE_OFFSET
-                  ? zrE >= 0 === ziE >= 0
-                    ? ITERATION_CONFIG.SIGN_SAME_QUADRANT
-                    : ITERATION_CONFIG.SIGN_DIFF_QUADRANT
-                  : ITERATION_CONFIG.SIGN_NOT_ESCAPED
-          } else {
-            const [si, , sr, si2] = this.iterate(
-              sampleRe,
-              sampleIm,
-              this.max_iter,
-              this.escapeRadius * this.escapeRadius,
-            )
-            totalIter += si
-            if (sy === 0 && sx === 0)
-              capturedSign =
-                si >= ITERATION_CONFIG.ESCAPE_OFFSET
-                  ? sr >= 0 === si2 >= 0
-                    ? ITERATION_CONFIG.SIGN_SAME_QUADRANT
-                    : ITERATION_CONFIG.SIGN_DIFF_QUADRANT
-                  : ITERATION_CONFIG.SIGN_NOT_ESCAPED
-          }
-          sampleCount++
-        }
-      }
-
-      values[offset] = Math.floor(totalIter / sampleCount)
-      signs[offset] = capturedSign
-      if (smooth) {
-        smooth[offset] = Math.floor(
-          ITERATION_CONFIG.SMOOTH_SCALE - ITERATION_CONFIG.SMOOTH_SCALE * (totalNu / sampleCount),
+    } finally {
+      this.compiledFunction = fn
+      if (replay) {
+        const isJulia = this.fractalType === 'julia-custom'
+        this._trapData[offset] = calculatePixelOrbitTrap(
+          isJulia ? this.juliaRe : re,
+          isJulia ? this.juliaIm : im,
+          isJulia ? re : (this.z0Real ?? 0),
+          isJulia ? im : (this.z0Imag ?? 0),
+          replay.play,
+          this.max_iter,
+          this._trapSpec,
+          this.escapeRadius,
         )
-      }
-    } else {
-      // Normal single sample
-      if (smooth) {
-        let [iter, zq, zrE, ziE] = this.iterate(re, im, this.max_iter, ITERATION_CONFIG.DEFAULT_BAILOUT_SMOOTH)
-        let nu = 1
-        if (iter > ITERATION_CONFIG.MIN_ITER_FOR_SMOOTH) {
-          const log_zn = Math.log(zq) / 2
-          nu = Math.log(log_zn / Math.log(2)) / Math.log(2)
-          iter = Math.floor(iter + 1 - nu)
-          nu = nu - Math.floor(nu)
-        }
-        smooth[offset] = Math.floor(ITERATION_CONFIG.SMOOTH_SCALE - ITERATION_CONFIG.SMOOTH_SCALE * nu)
-        values[offset] = iter
-        signs[offset] =
-          iter >= ITERATION_CONFIG.ESCAPE_OFFSET
-            ? zrE >= 0 === ziE >= 0
-              ? ITERATION_CONFIG.SIGN_SAME_QUADRANT
-              : ITERATION_CONFIG.SIGN_DIFF_QUADRANT
-            : ITERATION_CONFIG.SIGN_NOT_ESCAPED
-        zreal[offset] = zrE
-        zimag[offset] = ziE
-      } else {
-        const [rawIter, _zqE, zrE, ziE] = this.iterate(re, im, this.max_iter, this.escapeRadius * this.escapeRadius)
-        values[offset] = rawIter
-        signs[offset] =
-          rawIter >= ITERATION_CONFIG.ESCAPE_OFFSET
-            ? zrE >= 0 === ziE >= 0
-              ? ITERATION_CONFIG.SIGN_SAME_QUADRANT
-              : ITERATION_CONFIG.SIGN_DIFF_QUADRANT
-            : ITERATION_CONFIG.SIGN_NOT_ESCAPED
-        zreal[offset] = zrE
-        zimag[offset] = ziE
       }
     }
   }

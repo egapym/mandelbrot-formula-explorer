@@ -13,7 +13,6 @@ import { compileIterationFunction, getIterationHistoryRequirements, getParsedExp
 import * as favorites from './favorites.js'
 import { functionPresets } from './functionPresets.mjs'
 import * as fxp from './fxp.mjs'
-import { beginGpuProfile, endGpuProfile } from './gpuPerformance.mjs'
 import * as mcgpu from './mandelbrotCustomWebGPU.mjs'
 import * as mgpu from './mandelbrotWebGPU.mjs'
 import { OrbitTrapWebGPU } from './orbitTrapBitmapWebGPU.mjs'
@@ -320,11 +319,12 @@ function _applyOrbitTrapSpecToUI(spec, colorPatternId) {
 // ============================================================================
 
 const SQUARE_SIZE = 16 // 偶数である必要がある。全画面タスク時は -1
+const CPU_BATCH_SIZE = 4
 const DEFAULT_ITERATIONS = 1000
 const DEFAULT_FRACTAL_TYPE = 'mandelbrot'
 const DEFAULT_ITERATION_FUNCTION = 'z*z + c'
 const DEFAULT_FRACTAL_PRESET_VALUE = 'preset:0'
-const DEFAULT_WORKER_COUNT = navigator.hardwareConcurrency * 4 || 4
+const DEFAULT_WORKER_COUNT = Math.max(1, navigator.hardwareConcurrency || 4)
 
 const MIN_PIXEL_SIZE = 1
 const MAX_PIXEL_SIZE = 16
@@ -717,7 +717,36 @@ class MyWorker {
   pickTask() {
     if (!this.busy && this.taskqueue.length > 0) {
       this.busy = true
-      const msg = this.taskqueue.pop()
+      const first = this.taskqueue.pop()
+      this._activeTrapSpec = first.trapSpec
+      const tasks = [first]
+      // Preserve each tile's coordinate arithmetic; batch messages, not pixels.
+      // Keep expensive tiles separate so results and cancellation stay responsive.
+      const batchSize =
+        (first.fractalType === 'mandelbrot' && first.requiredPrecision > 58) ||
+        first.maxIter > 4000 ||
+        first.supersampling > 2
+          ? 1
+          : CPU_BATCH_SIZE
+      while (tasks.length < batchSize && this.taskqueue.length > 0) {
+        const next = this.taskqueue[this.taskqueue.length - 1]
+        if (next.jobToken !== first.jobToken) break
+        tasks.push(this.taskqueue.pop())
+      }
+      let trapSpec
+      if (first.trapSpec) {
+        const key = _trapSpecKey(first.trapSpec)
+        if (key !== this._trapKey || first.trapSpec.bitmapData !== this._trapBitmap) {
+          trapSpec = first.trapSpec
+          this._trapKey = key
+          this._trapBitmap = first.trapSpec.bitmapData
+        }
+      }
+      const msg = {
+        type: 'batch',
+        trapSpec,
+        tasks: tasks.map((task) => ({ ...task, trapSpec: undefined, useTrap: !!task.trapSpec })),
+      }
       if (this.workerReady && this.worker) {
         this.worker.postMessage(msg)
       } else {
@@ -728,8 +757,15 @@ class MyWorker {
   }
 
   onAnswer(answer) {
+    if (answer.type === 'batch-answer') {
+      for (const result of answer.answers) {
+        result.task.trapSpec = this._activeTrapSpec
+        this.resulthandler(result)
+      }
+    } else {
+      this.resulthandler(answer)
+    }
     this.busy = false
-    this.resulthandler(answer)
     this.pickTask()
   }
 }
@@ -858,8 +894,6 @@ class Mandelbrot {
 
   resetStats() {
     this.stats = {
-      time: 0,
-      timeHighPrecision: 0,
       highPrecisionCalculations: 0,
       lowPrecisionMisses: 0,
     }
@@ -1087,7 +1121,7 @@ class Mandelbrot {
     if (
       !this.permalinkUpdated &&
       (this.jobLevel === this.offscreens.length ||
-        performance.now() > this.jobStartTime + ANIMATION_CONSTANTS.REDRAW_COOLDOWN)
+        Date.now() > this.jobStartTime + ANIMATION_CONSTANTS.REDRAW_COOLDOWN)
     ) {
       this.permalinkUpdated = true
       updatePermalink()
@@ -1223,8 +1257,6 @@ class Mandelbrot {
     }
     this.progress.update()
     if (answer.stats) {
-      this.stats.time += answer.stats.time
-      this.stats.timeHighPrecision += answer.stats.timeHighPrecision
       this.stats.highPrecisionCalculations += answer.stats.highPrecisionCalculations
       this.stats.lowPrecisionMisses += answer.stats.lowPrecisionMisses
     }
@@ -1506,7 +1538,7 @@ class Mandelbrot {
       screen.renderRgba(answer.rgba)
       if (
         !this.permalinkUpdated &&
-        (answer.isFinished || performance.now() > this.jobStartTime + ANIMATION_CONSTANTS.REDRAW_COOLDOWN)
+        (answer.isFinished || Date.now() > this.jobStartTime + ANIMATION_CONSTANTS.REDRAW_COOLDOWN)
       ) {
         this.permalinkUpdated = true
         updatePermalink()
@@ -1545,7 +1577,7 @@ class Mandelbrot {
 
     if (
       !this.permalinkUpdated &&
-      (answer.isFinished || performance.now() > this.jobStartTime + ANIMATION_CONSTANTS.REDRAW_COOLDOWN)
+      (answer.isFinished || Date.now() > this.jobStartTime + ANIMATION_CONSTANTS.REDRAW_COOLDOWN)
     ) {
       this.permalinkUpdated = true
       updatePermalink()
@@ -1568,7 +1600,7 @@ class Mandelbrot {
     this.taskqueue.length = 0
     this.jobId++
     this.jobLevel = -1
-    this.jobStartTime = performance.now()
+    this.jobStartTime = Date.now()
     this.permalinkUpdated = false
     this.currentInteractionGpuRedraw = !!this.interactiveGpuRedraw
     this.interactiveGpuRedraw = false
@@ -2179,7 +2211,6 @@ class Offscreen {
   }
 
   render(palette, _max_iter, withSmooth, paletteObj = null) {
-    const profile = beginGpuProfile('display.color-and-canvas')
     const bufferData = this.buffer.data // Uint8ClampedArray
     const smoothData = this.smoothbuffer.data // Uint8ClampedArray
     const values = this.values // Int32Array
@@ -2211,7 +2242,6 @@ class Offscreen {
       }
     }
 
-    const coloredAt = performance.now()
     this.offscreencontext.putImageData(this.buffer, 0, 0)
     this.maincontext.imageSmoothingEnabled = false
     this.maincontext.drawImage(
@@ -2231,11 +2261,7 @@ class Offscreen {
         this.smoothscreen.height * this.scale,
       )
     }
-    endGpuProfile(profile, {
-      colorMs: profile ? coloredAt - profile.started : 0,
-      canvasSubmitMs: performance.now() - coloredAt,
-      width: this.buffer.width, height: this.buffer.height,
-    })
+
   }
 }
 
@@ -2262,7 +2288,7 @@ class ProgressMonitor {
     this.tasks = tasks
     this.done = 0
     this.completed = false
-    this.lastUpdate = performance.now()
+    this.lastUpdate = Date.now()
     this.startTime = this.lastUpdate
     this.finishedAt = null
     this._cancelPendingShow()
@@ -2277,7 +2303,7 @@ class ProgressMonitor {
 
   update(amount = 1) {
     this.done = Math.min(this.done + amount, this.tasks)
-    const now = performance.now()
+    const now = Date.now()
     if (now - this.lastUpdate > PROGRESS_INDICATOR_CONSTANTS.UPDATE_INTERVAL_MS) {
       const percent = (this.done / this.tasks) * 100
       // console.log(`Rendering ${percent.toFixed(0)}%`)
@@ -2300,7 +2326,7 @@ class ProgressMonitor {
     }
     // 完了時刻は最初の finish() で固定する。Buddhabrot View の切り替えや
     // 停止処理から finish() が重ねて呼ばれても、Render time を再計算しない。
-    if (this.finishedAt === null) this.finishedAt = performance.now()
+    if (this.finishedAt === null) this.finishedAt = Date.now()
     // 完了後に描画時間を表示し、進捗表示を隠す
     const jobTime = this.finishedAt - this.startTime
     if (showRenderTime && this.timeElementId) {
@@ -2339,7 +2365,7 @@ class ProgressMonitor {
       return
     }
 
-    const elapsedSinceHide = performance.now() - this.lastHiddenAt
+    const elapsedSinceHide = Date.now() - this.lastHiddenAt
     if (elapsedSinceHide >= PROGRESS_INDICATOR_CONSTANTS.MIN_HIDDEN_INTERVAL_MS) {
       this._show()
       return
@@ -2363,7 +2389,7 @@ class ProgressMonitor {
   _hide() {
     this.canvas.style.display = 'none'
     this.visible = false
-    this.lastHiddenAt = performance.now()
+    this.lastHiddenAt = Date.now()
   }
 
   _cancelPendingShow() {
@@ -5541,7 +5567,7 @@ function stopRenderingForJuliaToggleDuringBuddhabrot() {
   // startBuddhaRender() が runner 生成前の await 中でも、続きで描画を始めないようにする。
   buddhaRenderRequestGeneration++
   buddhaRenderPending = false
-  suppressResizeRedrawUntil = performance.now() + 500
+  suppressResizeRedrawUntil = Date.now() + 500
 
   cancelActiveMainRender()
   cancelActiveJuliaRender()
@@ -5794,7 +5820,7 @@ function startGpuInteractiveRedrawNow(options = {}) {
     commitPendingInteractivePan()
   }
   resetPendingInteractiveTransform()
-  lastGpuInteractiveRedrawAt = performance.now()
+  lastGpuInteractiveRedrawAt = Date.now()
   fractal.interactiveGpuRedraw = !finalRedraw
   gpuInteractiveNeedsFinalRedraw = !finalRedraw
   cancelActiveMainRender()
@@ -5813,7 +5839,7 @@ function scheduleGpuInteractiveRedraw() {
   // previous frame responsive, but defer that expensive GPU recomputation until
   // the drag/pinch ends or wheel input becomes idle.
   if (!shouldRedrawMainGpuDuringInteraction()) return
-  const now = performance.now()
+  const now = Date.now()
   const wait = Math.max(0, GPU_INTERACTIVE_REDRAW_INTERVAL_MS - (now - lastGpuInteractiveRedrawAt))
   if (gpuInteractiveRedrawTimer != null) return
   gpuInteractiveRedrawTimer = setTimeout(() => {
@@ -7560,13 +7586,13 @@ let suppressResizeRedrawUntil = 0
 const SCROLL_RESIZE_SUPPRESSION_MS = 350
 
 function shouldSuppressResizeRedraw() {
-  return performance.now() < suppressResizeRedrawUntil
+  return Date.now() < suppressResizeRedrawUntil
 }
 
 function noteViewportScroll() {
   lastKnownScrollX = window.scrollX || 0
   lastKnownScrollY = window.scrollY || 0
-  lastViewportScrollAt = performance.now()
+  lastViewportScrollAt = Date.now()
 }
 
 function didViewportScrollRecently() {
@@ -7575,10 +7601,10 @@ function didViewportScrollRecently() {
   if (scrollX !== lastKnownScrollX || scrollY !== lastKnownScrollY) {
     lastKnownScrollX = scrollX
     lastKnownScrollY = scrollY
-    lastViewportScrollAt = performance.now()
+    lastViewportScrollAt = Date.now()
     return true
   }
-  return performance.now() - lastViewportScrollAt < SCROLL_RESIZE_SUPPRESSION_MS
+  return Date.now() - lastViewportScrollAt < SCROLL_RESIZE_SUPPRESSION_MS
 }
 
 function shouldIgnoreScrollOnlyResize(entries) {
@@ -8240,7 +8266,7 @@ function initListeners() {
     }
   })
   canvasElement.addEventListener('click', (evt) => {
-    if (performance.now() < suppressOrbitClickUntil) return
+    if (Date.now() < suppressOrbitClickUntil) return
     if (!orbitDrawEnabled || _orbitPinDragged) return
     _togglePinnedOrbitAtClient(evt.clientX, evt.clientY)
   })
@@ -8272,7 +8298,7 @@ function initListeners() {
       }
     })
     juliaCanvasElement.addEventListener('click', (evt) => {
-      if (performance.now() < suppressJuliaOrbitClickUntil) return
+      if (Date.now() < suppressJuliaOrbitClickUntil) return
       if (isJuliaCanvasInteractionBlockedByBuddhabrot()) return
       if (!orbitDrawEnabled || _juliaPinDragged || !juliaState.active) return
       _togglePinnedJuliaOrbitAtClient(evt.clientX, evt.clientY)
@@ -8435,7 +8461,7 @@ function initListeners() {
       juliaLastTouchCenter = null
       juliaOrbitTouchTapCandidate = false
       if (orbitDrawEnabled && touch && !_juliaPinDragged && juliaState.active) {
-        suppressJuliaOrbitClickUntil = performance.now() + TOUCH_CLICK_SUPPRESS_MS
+        suppressJuliaOrbitClickUntil = Date.now() + TOUCH_CLICK_SUPPRESS_MS
         _togglePinnedJuliaOrbitAtClient(touch.clientX, touch.clientY)
       }
       if (detailEnabled) _renderDetailIndicator()
@@ -8588,7 +8614,7 @@ function initListeners() {
     orbitTouchTapCandidate = false
     orbitTouchStart = null
     if (orbitDrawEnabled && touch && !_orbitPinDragged) {
-      suppressOrbitClickUntil = performance.now() + TOUCH_CLICK_SUPPRESS_MS
+      suppressOrbitClickUntil = Date.now() + TOUCH_CLICK_SUPPRESS_MS
       _togglePinnedOrbitAtClient(touch.clientX, touch.clientY)
     }
     if (detailEnabled) _renderDetailIndicator()
@@ -9907,7 +9933,7 @@ function _schedulePendingPermalinkUpdate(delay) {
 function _flushPendingPermalinkUpdate() {
   if (!pendingPermalinkHref) return
 
-  const now = performance.now()
+  const now = Date.now()
   if (now < permalinkBackoffUntil) {
     _schedulePendingPermalinkUpdate(permalinkBackoffUntil - now)
     return
@@ -9928,20 +9954,20 @@ function _flushPendingPermalinkUpdate() {
   try {
     window.history.replaceState({}, '', href)
     lastPermalinkHref = href
-    lastPermalinkUpdateAt = performance.now()
+    lastPermalinkUpdateAt = Date.now()
     if (pendingPermalinkHref === href) {
       pendingPermalinkHref = null
     }
   } catch (error) {
     const message = error?.message ? error.message : String(error)
     if (error?.name === 'SecurityError') {
-      permalinkBackoffUntil = performance.now() + PERMALINK_SECURITY_ERROR_BACKOFF_MS
+      permalinkBackoffUntil = Date.now() + PERMALINK_SECURITY_ERROR_BACKOFF_MS
     }
     console.warn('Error updating permalink:', message)
     _schedulePendingPermalinkUpdate(
       Math.max(
         PERMALINK_UPDATE_MIN_INTERVAL_MS,
-        permalinkBackoffUntil > 0 ? permalinkBackoffUntil - performance.now() : 0,
+        permalinkBackoffUntil > 0 ? permalinkBackoffUntil - Date.now() : 0,
       ),
     )
   }

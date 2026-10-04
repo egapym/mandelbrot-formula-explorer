@@ -77,6 +77,17 @@ export function usesIterationHistory(functionStr) {
   return /\b(?:zAt|zDelay|delayZ)\s*\(/i.test(functionStr || '')
 }
 
+function historySource(expr) {
+  if (!usesIterationHistory(expr)) return ''
+  return `
+    const zHistory = history?.z || [];
+    zHistory[iterIndex] = [zReal, zImag];
+    const historyIndex = (step) => Math.max(0, Math.trunc(complexScalar(step)));
+    const complexZAt = (step) => zHistory[historyIndex(step)] || [0, 0];
+    const complexZDelay = (step) => zHistory[iterIndex - historyIndex(step)] || [0, 0];
+  `
+}
+
 /** GPU で確保する軌道履歴を抽出する。GPU は静的な非負整数の添字だけを扱う。 */
 export function getIterationHistoryRequirements(functionStr) {
   const requirements = { zAt: [], zDelay: [], supportedOnGpu: true }
@@ -332,13 +343,7 @@ export function compileIterationFunction(functionStr) {
             const z = [zReal, zImag];
             const c = [cReal, cImag];
             const iterIndex = Number.isFinite(n) ? n : 0;
-            const zHistory = history?.z || [];
-            zHistory[iterIndex] = [zReal, zImag];
-            const historyIndex = (step) => Math.max(0, Math.trunc(complexScalar(step)));
-            // zAt(k): k 回目の z。まだ到達していなければ 0。
-            const complexZAt = (step) => zHistory[historyIndex(step)] || [0, 0];
-            // zDelay(k): k 回前の z。履歴不足なら 0。
-            const complexZDelay = (step) => zHistory[iterIndex - historyIndex(step)] || [0, 0];
+            ${historySource(expr)}
 
             ${jsCode}
         `
@@ -566,13 +571,7 @@ function createOptimizedFunction(expr) {
             const z = [zReal, zImag];
             const c = [cReal, cImag];
             const iterIndex = Number.isFinite(n) ? n : 0;
-            const zHistory = history?.z || [];
-            zHistory[iterIndex] = [zReal, zImag];
-            const historyIndex = (step) => Math.max(0, Math.trunc(complexScalar(step)));
-            // zAt(k): k 回目の z。まだ到達していなければ 0。
-            const complexZAt = (step) => zHistory[historyIndex(step)] || [0, 0];
-            // zDelay(k): k 回前の z。履歴不足なら 0。
-            const complexZDelay = (step) => zHistory[iterIndex - historyIndex(step)] || [0, 0];
+            ${historySource(expr)}
 
             ${optimizedCode}
         `

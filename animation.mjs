@@ -461,13 +461,13 @@ export class PreparedAnimation {
       let failed = false
       try {
         for (let i = 0; i < this.path.count; i++) {
-          const started = performance.now()
+          const started = Date.now()
           const next = await this.decode(await this.store.get(i))
           if (controller.signal.aborted || generation !== this.generation) {
             next.close()
             break
           }
-          if (i) await this.wait(Math.max(0, 1000 / this.path.fps - (performance.now() - started)))
+          if (i) await this.wait(Math.max(0, 1000 / this.path.fps - (Date.now() - started)))
           if (controller.signal.aborted) {
             next.close()
             break

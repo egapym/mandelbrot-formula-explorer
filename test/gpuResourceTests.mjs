@@ -120,12 +120,11 @@ async function checkReferenceBoundaryAndFinalReadback() {
       let baseline
       for (const finalOnly of [false, true]) {
         reads = 0
-        const started = performance.now()
         await renderer.process({ ...task, finalOnly, jobToken: crypto.randomUUID(), jobId: crypto.randomUUID() })
         assert(output?.isFinished && !output.error, 'Deep zoom render failed')
         if (!finalOnly) baseline = output
         else { equal(baseline, output); assert(reads === 1, 'Preparation must read full channels only once') }
-        stats.push({ zoom, finalOnly, reads, ms: Math.round(performance.now() - started) })
+        stats.push({ zoom, finalOnly, reads })
       }
     }
     console.info('Preparation readback comparison', stats)
@@ -185,11 +184,7 @@ async function run() {
     assert(rejected && renderer.pipeline.resources === null, 'Failed mapping retained cached resources')
     equal(reference, await renderer.renderDirect(params))
 
-    globalThis.fractalGpuPerformance = { enabled: true, samples: [] }
     equal(reference, await renderer.renderDirect(params))
-    const sample = fractalGpuPerformance.samples.find(sample => sample.renderer === 'custom.compute-readback')
-    assert(sample?.readbackBytes === params.w * params.h * 20, 'Incorrect profile byte count')
-    assert(device.features.has('timestamp-query') ? sample.gpuMs >= 0 : sample.gpuMs === null, 'Incorrect timestamp fallback')
     await checkMandelbrotReadback()
     await checkMandelbrotReuse()
     await checkReferenceBoundaryAndFinalReadback()
@@ -197,10 +192,9 @@ async function run() {
     await checkCustomShaderParity(device)
     await device.queue.onSubmittedWorkDone()
     assert(errors.length === 0, errors.join('\n'))
-    return 'PASS: repeated renders, odd dimensions, resize, smooth, supersampling, history, bailout, device limit, map failure recovery, profiling, Mandelbrot channel readback, buffer reuse, 8016-byte reference boundary, deep-zoom final-only readback parity, optimized shader parity (SS OFF/2/4/8/16/32), custom iteration-limit parity (160 cases)'
+    return 'PASS: repeated renders, odd dimensions, resize, smooth, supersampling, history, bailout, device limit, map failure recovery, Mandelbrot channel readback, buffer reuse, 8016-byte reference boundary, deep-zoom final-only readback parity, optimized shader parity (SS OFF/2/4/8/16/32), custom iteration-limit parity (160 cases)'
   } finally {
     renderer.pipeline.dispose()
-    delete globalThis.fractalGpuPerformance
   }
 }
 

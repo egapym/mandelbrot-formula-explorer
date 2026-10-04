@@ -31,9 +31,7 @@ export class MandelbrotPerturbation {
     const signs = new Int8Array(w * h)
     const zreal = new Float32Array(w * h)
     const zimag = new Float32Array(w * h)
-    const start = performance.now()
     this.calculate(values, smooth, signs, zreal, zimag, w, h, task.skipTopLeft, task.supersampling, task)
-    const end = performance.now()
 
     return {
       type: 'answer',
@@ -44,8 +42,6 @@ export class MandelbrotPerturbation {
       zreal: zreal,
       zimag: zimag,
       stats: {
-        time: end - start,
-        timeHighPrecision: this.ctx.stats.timeSpendInHighPrecision,
         highPrecisionCalculations: this.ctx.stats.numberOfHighPrecisionPoints,
         lowPrecisionMisses: this.ctx.stats.numberOfLowPrecisionMisses,
       },
@@ -120,7 +116,6 @@ export class MandelbrotPerturbation {
             const dr = ((task.xOffset + x) / task.frameWidth) * cWidth
 
             let found = false
-            const start = performance.now()
 
             let refIndex = head
             for (const _ignored of this.referencePoints) {
@@ -158,9 +153,6 @@ export class MandelbrotPerturbation {
               stats.numberOfLowPrecisionMisses++
               refIndex = (refIndex + 1) % this.referencePoints.length
             }
-
-            const end = performance.now()
-            this.ctx.stats.timeSpendInLowPrecision += end - start
             if (!found) {
               const newRef = this.calculate_reference(refr, refi, dr, di, bigScale, scaleFactor, bigBailout)
               values[offset] = smoothen(smooth, offset, newRef[1], Number(newRef[2]) / scaleFactor)
@@ -214,7 +206,6 @@ export class MandelbrotPerturbation {
         const di = ((task.yOffset + sampleY) / task.frameHeight) * cHeight
 
         let found = false
-        const start = performance.now()
 
         let refIndex = head
         for (const _ignored of this.referencePoints) {
@@ -242,9 +233,6 @@ export class MandelbrotPerturbation {
           stats.numberOfLowPrecisionMisses++
           refIndex = (refIndex + 1) % this.referencePoints.length
         }
-
-        const end = performance.now()
-        this.ctx.stats.timeSpendInLowPrecision += end - start
         if (!found) {
           const scale = task.precision
           const scaleFactor = 2 ** Number(scale)
@@ -369,7 +357,6 @@ export class MandelbrotPerturbation {
    * @returns {[[number, number], number, BigInt, [number, number, number, number, number][]]} [rr, ri], iter, zq, sequence where sequence is a list of [zr, zi, errorbound, zr_sign, zi_sign] tuples
    */
   calculate_reference(refr, refi, dr, di, bigScale, scaleFactor, bailout) {
-    const start = performance.now()
     const rr = refr + BigInt(Math.round(dr * scaleFactor))
     const ri = refi + BigInt(Math.round(di * scaleFactor))
 
@@ -383,8 +370,6 @@ export class MandelbrotPerturbation {
     const refSign = iter === 2 ? 0 : lastPair[0] >= 0n === lastPair[1] >= 0n ? 1 : 2
     const escZr = iter !== 2 ? Number(lastPair[0]) / scaleFactor : 0
     const escZi = iter !== 2 ? Number(lastPair[1]) / scaleFactor : 0
-    const end = performance.now()
-    this.ctx.stats.timeSpendInHighPrecision += end - start
     this.ctx.stats.numberOfHighPrecisionPoints++
     return [[dr, di], iter, zq, zs, refSign, escZr, escZi]
   }

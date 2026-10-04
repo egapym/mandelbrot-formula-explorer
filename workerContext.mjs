@@ -11,24 +11,19 @@ export class WorkerContext {
     this.currentJob = null
     this.lastStoppedJob = null
     this.nextStopCheck = 0
-    this.timeSpendInStopCheck = 0
     this.resetStats()
   }
 
   initTask(jobToken) {
-    this.timeSpendInStopCheck = 0
     this.currentJob = jobToken
-    this.nextStopCheck = performance.now() + STOP_CHECK_INTERVAL
+    this.nextStopCheck = Date.now() + STOP_CHECK_INTERVAL
   }
 
   resetStats() {
     this.stats = {
-      timeSpendInHighPrecision: 0,
-      timeSpendInLowPrecision: 0,
       numberOfHighPrecisionPoints: 0,
       numberOfLowPrecisionPoints: 0,
       numberOfLowPrecisionMisses: 0,
-      timeLostOnLowPrecisionMisses: 0,
       errorOffsetsPos: [],
       errorOffsetsNeg: [],
     }
@@ -36,13 +31,12 @@ export class WorkerContext {
 
   shouldStop() {
     const currentJobToken = this.currentJob
-    const ts = performance.now()
+    const ts = Date.now()
     let shouldStop = false
     if (ts > this.nextStopCheck) {
       shouldStop = this._shouldStop(currentJobToken)
-      this.nextStopCheck = performance.now() + STOP_CHECK_INTERVAL
+      this.nextStopCheck = ts + STOP_CHECK_INTERVAL
     }
-    this.timeSpendInStopCheck += performance.now() - ts
     return shouldStop
   }
 

@@ -168,26 +168,19 @@ in a WebGPU-capable browser for GPU and storage integration tests.
 - `palette.js`, `buddhaPalettes.mjs`: color systems
 - `functionPresets.mjs`: built-in function presets
 
-## GPU Performance Diagnostics
+## Rendering resources
 
-In the browser console, enable optional diagnostics before rendering:
+CPU Workers match the browser's reported logical core count and send up to four
+16×16 tiles per message. Expensive deep-zoom, high-iteration and supersampled
+tasks remain separate to keep progressive rendering responsive. Orbit Trap
+configuration and bitmap data are sent only when changed; angle and bitmap-size
+calculations are cached. Custom expressions allocate iteration history only when
+they use `zAt`, `zDelay` or `delayZ`. With supersampling OFF, expensive custom
+expressions reuse matching iteration steps for Orbit Trap; divergent trajectories
+fall back to the original evaluator, and cached steps are limited to 4096.
 
-```js
-window.fractalGpuPerformance = { enabled: true, samples: [] }
-// After rendering:
-console.table(window.fractalGpuPerformance.samples)
-// Disable additional profiling work:
-window.fractalGpuPerformance.enabled = false
-```
-
-The latest 120 samples cover custom pipeline preparation, custom compute/readback,
-Mandelbrot result readback, and CPU coloring/canvas submission. Custom compute
-samples include `gpuMs` when the device supports `timestamp-query`; otherwise it
-is `null`. `computeAndReadbackMs` includes queueing, GPU work, copies and mapping,
-so do not interpret it as GPU compute time alone. Canvas submission time does
-not measure browser compositing or physical presentation. Display samples also
-include CPU-rendered frames. Disable diagnostics for throughput comparisons;
-GPU timestamps introduce extra buffers and readback work.
+Detailed CPU/GPU timing diagnostics are removed. Rendering duration display,
+animation pacing, stop polling and UI throttling use `Date.now()`.
 
 Custom renderers reuse buffers for equal pixel counts and smooth settings,
 combine readbacks when the device buffer limit allows it, and retain up to four
@@ -197,6 +190,10 @@ channels are cleared once at the start of a new render; intermediate perturbatio
 passes keep their accumulated results. Resizing replaces only affected buffers.
 
 ## Testing
+
+CPU rendering regressions: `node --test test/cpuRenderingTests.mjs`.
+With the local server running, open `test/cpuWorkerTests.html` for Worker batch,
+bitmap-cache update, cancellation and subsequent-job checks.
 
 Browser-based tests are available under the `test/` directory.
 
@@ -233,7 +230,7 @@ http://localhost:3030/test/gpuResourceTests.html
 ```
 
 They cover buffer reuse, output stability after setting changes, odd image sizes,
-readback buffer limits, mapping failure recovery, and optional profiling. Shader
+readback buffer limits, mapping failure recovery, and repeated rendering. Shader
 outputs are also compared with frozen pre-optimization generators, including
 reference-limit ties, custom formulas using iteration numbers and orbit history,
 smooth coloring, and supersampling.

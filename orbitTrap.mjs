@@ -82,6 +82,37 @@ export const TRAP_MODE = {
  * @property {string}  [bitmapBackgroundColor="#002580"] - bitmap の背景色
  */
 
+const preparedTraps = new WeakMap()
+
+function prepareTrap(spec) {
+  const angle = spec.angle ?? 0
+  const size = Math.abs(spec.size ?? 1)
+  const width = spec.bitmapWidth ?? 0
+  const height = spec.bitmapHeight ?? 0
+  const cached = preparedTraps.get(spec)
+  if (cached && cached.angle === angle && cached.size === size && cached.width === width && cached.height === height)
+    return cached
+  let bitmapTrapWidth = size
+  let bitmapTrapHeight = size
+  if (width > 0 && height > 0 && size > 0) {
+    const aspect = width / height
+    if (aspect >= 1) bitmapTrapHeight = size / aspect
+    else bitmapTrapWidth = size * aspect
+  }
+  const prepared = {
+    angle,
+    size,
+    width,
+    height,
+    cosA: Math.cos(angle),
+    sinA: Math.sin(angle),
+    bitmapTrapWidth,
+    bitmapTrapHeight,
+  }
+  preparedTraps.set(spec, prepared)
+  return prepared
+}
+
 /**
  * 1ピクセル分のOrbit trap値を計算して返す。
  *
@@ -125,19 +156,7 @@ export function calculatePixelOrbitTrap(cr, ci, z0r, z0i, iterFn, maxIter, trapS
   const startIter = trapSpec.startIter ?? 0
   const bitmapW = trapSpec.bitmapWidth ?? 0
   const bitmapH = trapSpec.bitmapHeight ?? 0
-  const bitmapSize = Math.abs(sz)
-  let bitmapTrapWidth = bitmapSize
-  let bitmapTrapHeight = bitmapSize
-  if (shape === TRAP_SHAPE.BITMAP && bitmapW > 0 && bitmapH > 0 && bitmapSize > 0) {
-    const bitmapAspect = bitmapW / bitmapH
-    if (bitmapAspect >= 1) {
-      bitmapTrapWidth = bitmapSize
-      bitmapTrapHeight = bitmapSize / bitmapAspect
-    } else {
-      bitmapTrapWidth = bitmapSize * bitmapAspect
-      bitmapTrapHeight = bitmapSize
-    }
-  }
+  const { cosA, sinA, bitmapTrapWidth, bitmapTrapHeight } = prepareTrap(trapSpec)
 
   let zr = z0r
   let zi = z0i
@@ -178,7 +197,6 @@ export function calculatePixelOrbitTrap(cr, ci, z0r, z0i, iterFn, maxIter, trapS
     // 形状への距離計算
     const dx = zr - tx
     const dy = zi - ty
-    const ang = trapSpec.angle ?? 0
     let d
     // bitmap は後続のモードロジックでも u/v を使うため事前計算
     let u = 0,
@@ -186,8 +204,6 @@ export function calculatePixelOrbitTrap(cr, ci, z0r, z0i, iterFn, maxIter, trapS
     let bitmapSampleInBounds = false
     let bitmapSampleVisible = false
     if (shape === TRAP_SHAPE.BITMAP && bitmapTrapWidth > 0 && bitmapTrapHeight > 0) {
-      const cosA = Math.cos(ang)
-      const sinA = Math.sin(ang)
       const bitmapX = dx * cosA + dy * sinA
       const bitmapY = -dx * sinA + dy * cosA
       u = bitmapX / bitmapTrapWidth + 0.5
@@ -218,8 +234,6 @@ export function calculatePixelOrbitTrap(cr, ci, z0r, z0i, iterFn, maxIter, trapS
         // 回転座標系 (angle) で (px,py) を計算し、px は線方向、py は
         // 法線方向の座標。px を [-size,size] にクランプした点との距離を返す。
         // size=0 では点トラップと同等になる。
-        const cosA = Math.cos(ang)
-        const sinA = Math.sin(ang)
         const px = dx * cosA + dy * sinA
         const py = -dx * sinA + dy * cosA
         let clamped = px
@@ -235,8 +249,6 @@ export function calculatePixelOrbitTrap(cr, ci, z0r, z0i, iterFn, maxIter, trapS
       }
       case TRAP_SHAPE.PARABOLA: {
         // 放物線近似: angle 回転座標系での ly = lx^2 / sz
-        const cosA = Math.cos(ang),
-          sinA = Math.sin(ang)
         const lx = dx * cosA + dy * sinA
         const ly = -dx * sinA + dy * cosA
         d = Math.abs(ly - (lx * lx) / (sz !== 0 ? sz : 1.0))
@@ -249,8 +261,6 @@ export function calculatePixelOrbitTrap(cr, ci, z0r, z0i, iterFn, maxIter, trapS
           d = Math.sqrt(dx * dx + dy * dy)
           break
         }
-        const cosA = Math.cos(ang),
-          sinA = Math.sin(ang)
         let px = (dx * cosA + dy * sinA) / sz
         let py = (-dx * sinA + dy * cosA) / sz
         const k = Math.sqrt(3)
@@ -268,8 +278,6 @@ export function calculatePixelOrbitTrap(cr, ci, z0r, z0i, iterFn, maxIter, trapS
       }
       case TRAP_SHAPE.SQUARE: {
         // 正方形のSDF: 半幅 sz, 回転 angle
-        const cosA = Math.cos(ang),
-          sinA = Math.sin(ang)
         const qx = Math.abs(dx * cosA + dy * sinA) - sz
         const qy = Math.abs(-dx * sinA + dy * cosA) - sz
         d = Math.sqrt(Math.max(qx, 0) ** 2 + Math.max(qy, 0) ** 2) + Math.min(Math.max(qx, qy), 0)
