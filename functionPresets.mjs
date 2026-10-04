@@ -103,4 +103,5 @@ export const functionPresets = [
   { expr: 'z/i*Re(|c|) + c' },
   { expr: '((1/z)/c)*(z+1/z)', z0Real: 1, z0Imag: 0 },
   { expr: 'conj(c/z)^2 + z', z0Real: 1, z0Imag: 0 },
+  { expr: 'rotate(c,n)*(z+1/z)', label: 'Nebula Dragon', z0Real: 1, z0Imag: 0 },
 ]
