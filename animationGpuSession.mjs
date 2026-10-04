@@ -1,7 +1,8 @@
-import { checkSignal, IMAGE_BUDGET, validateAnimationSize } from './animation.mjs'
+import { ANALYSIS_LONG_EDGE, checkSignal, IMAGE_BUDGET, validateAnimationSize } from './animation.mjs'
 import { MandelbrotCustomWebGPU } from './mandelbrotCustomWebGPU.mjs'
 import { MandelbrotWebGPU } from './mandelbrotWebGPU.mjs'
 import { OrbitTrapWebGPU } from './orbitTrapBitmapWebGPU.mjs'
+import { initPallet } from './palette.js'
 import { WorkerContext } from './workerContext.mjs'
 
 // Dedicated buffers and callbacks, shared devices. The main renderer cannot
@@ -9,6 +10,10 @@ import { WorkerContext } from './workerContext.mjs'
 export class AnimationGpuSession {
   constructor({ view, sources, select, createScreen, z0, colorPatternId }) {
     Object.assign(this, { view, sources, select, createScreen, z0, colorPatternId })
+    view.paletteComponent = { ...view.paletteComponent }
+    this.targetMaxIter = view.max_iter
+    this.targetDensity = Number(view.paletteComponent.density)
+    this.paletteKey = `${view.max_iter}:${this.targetDensity}`
     this.renderers = new Map()
     this.listeners = []
     this.closed = false
@@ -66,38 +71,41 @@ export class AnimationGpuSession {
     return entry
   }
 
-  async render(frame, signal) {
+  async compute(frame, signal, { analysis = false } = {}) {
     checkSignal(signal)
     const view = this.view
     view.setZoom(frame.zoom)
     view.setCenter([...frame.center])
-    const kind = this.select(view)
+    view.max_iter = analysis ? this.targetMaxIter : frame.maxIter ?? this.targetMaxIter
+    const kind = this.select(view, { analysis })
     if (!kind) throw new Error('This frame cannot be rendered with WebGPU')
     const { renderer, device, onGpuUpdate } = await this.rendererFor(kind)
     checkSignal(signal)
     if (this.error) throw this.error
-    const trapSpec = view.paletteComponent.palette.trapSpec ?? null
+    const trapSpec = analysis ? null : view.paletteComponent.palette.trapSpec ?? null
+    const scale = analysis ? Math.min(1, ANALYSIS_LONG_EDGE / Math.max(view.width, view.height)) : 1
+    const width = Math.max(1, Math.round(view.width * scale))
+    const height = Math.max(1, Math.round(view.height * scale))
     validateAnimationSize(
       {
-        width: view.width,
-        height: view.height,
+        width,
+        height,
         maxIter: view.max_iter,
         bitmapBytes: trapSpec?.bitmapData?.byteLength || 4,
         perturbation: kind === 'perturbation',
       },
       device.limits,
     )
-    if (!this.screen) this.screen = this.createScreen()
     this.result = null
     this.token = crypto.randomUUID()
     const task = {
       jobToken: this.token,
       jobId: this.token,
       viewRevision: 0,
-      w: view.width,
-      h: view.height,
-      frameWidth: view.width,
-      frameHeight: view.height,
+      w: width,
+      h: height,
+      frameWidth: width,
+      frameHeight: height,
       xOffset: 0,
       yOffset: 0,
       pixelSize: 1,
@@ -105,8 +113,8 @@ export class AnimationGpuSession {
       frameTopLeft: view.canvas2complex(0, 0),
       frameBottomRight: view.canvas2complex(view.width, view.height),
       maxIter: view.max_iter,
-      smooth: view.smooth,
-      supersampling: view.supersampling,
+      smooth: analysis ? false : view.smooth,
+      supersampling: analysis ? 0 : view.supersampling,
       precision: view.precision,
       requiredPrecision: view.requiredPrecision,
       fractalType: view.fractalType,
@@ -146,6 +154,29 @@ export class AnimationGpuSession {
     if (failure || this.error) throw failure || this.error
     const result = this.result
     if (!result?.isFinished || result.error) throw new Error(result?.error || 'GPU did not finish the animation frame')
+    this.result = null
+    return result
+  }
+
+  async probe(frame, signal) {
+    const result = await this.compute(frame, signal, { analysis: true })
+    if (!result.values) throw new Error('GPU did not return animation analysis data')
+    return result
+  }
+
+  async render(frame, signal) {
+    const result = await this.compute(frame, signal)
+    const view = this.view
+    const density = frame.paletteDensity ?? this.targetDensity
+    const paletteKey = `${view.max_iter}:${density}`
+    if (paletteKey !== this.paletteKey) {
+      view.paletteComponent.density = String(density)
+      view.palette = initPallet(
+        view.paletteComponent.palette, density, view.paletteComponent.rotate, view.paletteComponent.exp, view.max_iter,
+      )
+      this.paletteKey = paletteKey
+    }
+    if (!this.screen) this.screen = this.createScreen()
     const screen = this.screen
     if (result.rgba) screen.renderRgba(result.rgba)
     else {
@@ -154,7 +185,6 @@ export class AnimationGpuSession {
       }
       screen.render(view.palette, view.max_iter, view.smooth, view.paletteComponent.palette)
     }
-    this.result = null
     return new Promise((resolve, reject) =>
       screen.canvas.toBlob((blob) => {
         if (blob) resolve(blob)

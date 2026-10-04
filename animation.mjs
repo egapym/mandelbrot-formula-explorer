@@ -15,6 +15,153 @@ export function checkSignal(signal) {
   if (signal?.aborted) throw signal.reason || aborted()
 }
 
+export const ANALYSIS_SAMPLES = 17
+export const ANALYSIS_LONG_EDGE = 192
+const clamp = (value, min, max) => Math.max(min, Math.min(max, value))
+const smoothstep = (t) => t * t * (3 - 2 * t)
+
+export function resolveAnimationMinimum(value, targetMaxIter) {
+  const minimum = String(value ?? '').trim() === '' ? 1000 : Number(value)
+  if (![minimum, targetMaxIter].every((v) => Number.isSafeInteger(v) && v > 0))
+    throw new Error('Minimum iterations must be a positive safe integer')
+  return Math.min(minimum, targetMaxIter)
+}
+
+// Probe shaders run without smoothing or supersampling. Values 0..3 are
+// skipped/in-set markers; an escaped value stores the zero-based iteration + 4.
+export function analyzeAnimationIterations(values) {
+  const escaped = Array.from(values)
+    .filter((v) => Number.isFinite(v) && v >= 4)
+    .map((v) => v - 3)
+  if (escaped.length < 32) return null
+  escaped.sort((a, b) => a - b)
+  const quantile = (p) => {
+    const position = p * (escaped.length - 1)
+    const lower = Math.floor(position)
+    return escaped[lower] + (escaped[Math.ceil(position)] - escaped[lower]) * (position - lower)
+  }
+  return { count: escaped.length, high: quantile(0.999), spread: quantile(0.95) - quantile(0.05) }
+}
+
+// Equal-weight isotonic regression. All candidates are bounded by the fixed
+// endpoints, so pooling adjacent violations cannot move either endpoint.
+function monotoneCurve(candidates) {
+  const blocks = []
+  for (const value of candidates) {
+    blocks.push({ sum: value, count: 1 })
+    while (blocks.length > 1) {
+      const b = blocks[blocks.length - 1]
+      const a = blocks[blocks.length - 2]
+      if (a.sum / a.count <= b.sum / b.count) break
+      blocks.splice(-2, 2, { sum: a.sum + b.sum, count: a.count + b.count })
+    }
+  }
+  const values = blocks.flatMap(({ sum, count }) => Array(count).fill(sum / count))
+  const differences = values.slice(1).map((value, i) => value - values[i])
+  // Harmonic-mean interior tangents (uniform-grid PCHIP), with stationary
+  // endpoints to enter/leave the zoom without a sudden parameter change.
+  const slopes = values.map((_, i) => {
+    if (!i || i === values.length - 1) return 0
+    const a = differences[i - 1]
+    const b = differences[i]
+    return a > 0 && b > 0 ? (2 * a * b) / (a + b) : 0
+  })
+  return (progress) => {
+    if (progress <= 0) return values[0]
+    if (progress >= 1) return values[values.length - 1]
+    const position = progress * (values.length - 1)
+    const i = Math.floor(position)
+    const t = position - i
+    const t2 = t * t
+    const t3 = t2 * t
+    const value =
+      (2 * t3 - 3 * t2 + 1) * values[i] +
+      (t3 - 2 * t2 + t) * slopes[i] +
+      (-2 * t3 + 3 * t2) * values[i + 1] +
+      (t3 - t2) * slopes[i + 1]
+    return clamp(value, values[i], values[i + 1])
+  }
+}
+
+export function createAnimationAdjustmentProfile({
+  minimum = '', targetMaxIter, targetDensity, startZoom, targetZoom, samples,
+}) {
+  const minIter = resolveAnimationMinimum(minimum, targetMaxIter)
+  if (!Number.isFinite(targetDensity)) throw new Error('Animation requires finite palette density')
+  const startLog = Math.log(startZoom.toNumber())
+  const targetLog = Math.log(targetZoom.toNumber())
+  const delta = targetLog - startLog
+  if (![startLog, targetLog].every(Number.isFinite)) throw new Error('Animation requires finite positive zoom')
+  const targetSettings = { maxIter: targetMaxIter, paletteDensity: targetDensity }
+  if (delta === 0) return { atZoom: () => ({ ...targetSettings }) }
+  if (!samples || samples.length < 2) throw new Error('Animation requires analysis samples')
+  const targetSpread = samples[samples.length - 1]?.spread
+  const direction = targetDensity < 0 ? -1 : 1
+  const iterations = []
+  const densities = []
+  samples.forEach((sample, i) => {
+    const fraction = smoothstep(i / (samples.length - 1))
+    iterations.push(
+      sample && sample.spread > 0
+        ? clamp(Math.ceil(sample.high + sample.high / 10), minIter, targetMaxIter)
+        : minIter + (targetMaxIter - minIter) * fraction,
+    )
+    const density =
+      sample?.spread > 0 && targetSpread > 0
+        ? targetDensity + 10 * Math.log2(targetSpread / sample.spread)
+        : targetDensity * fraction
+    densities.push(clamp(density * direction, 0, Math.abs(targetDensity)))
+  })
+  iterations[0] = minIter
+  iterations[iterations.length - 1] = targetMaxIter
+  densities[0] = 0
+  densities[densities.length - 1] = Math.abs(targetDensity)
+  const iterationAt = monotoneCurve(iterations)
+  const densityAt = monotoneCurve(densities)
+  return {
+    atZoom(zoom) {
+      const progress = clamp((Math.log(zoom.toNumber()) - startLog) / delta, 0, 1)
+      if (progress >= 1) return { ...targetSettings }
+      const density = densityAt(progress)
+      return { maxIter: Math.ceil(iterationAt(progress)), paletteDensity: density === 0 ? 0 : direction * density }
+    },
+  }
+}
+
+export function withAnimationAdjustment(path, profile) {
+  return {
+    ...path,
+    at(index) {
+      const frame = path.at(index)
+      return { ...frame, ...profile.atZoom(frame.zoom) }
+    },
+  }
+}
+
+export async function analyzeAnimationPath(
+  { path, startZoom, targetZoom, targetCenter, minimum, targetMaxIter, targetDensity },
+  probe, signal, report,
+) {
+  const samples = []
+  const startLog = Math.log(startZoom.toNumber())
+  const delta = Math.log(targetZoom.toNumber()) - startLog
+  if (delta !== 0) {
+    for (let i = 0; i < ANALYSIS_SAMPLES; i++) {
+      checkSignal(signal)
+      const zoom = i === 0 ? startZoom : i === ANALYSIS_SAMPLES - 1 ? targetZoom : fxp.fromNumber(
+        Math.exp(startLog + delta * i / (ANALYSIS_SAMPLES - 1)),
+        Math.max(startZoom.scale, targetZoom.scale),
+      )
+      const result = await probe({ center: [...targetCenter], zoom }, signal)
+      checkSignal(signal)
+      samples.push(analyzeAnimationIterations(result.values))
+      report((i + 1) / ANALYSIS_SAMPLES)
+    }
+  }
+  const profile = createAnimationAdjustmentProfile({ minimum, targetMaxIter, targetDensity, startZoom, targetZoom, samples })
+  return withAnimationAdjustment(path, profile)
+}
+
 export function animationErrorMessage(error, phase = 'prepare') {
   const detail = `${error?.name || ''} ${error?.message || error || ''}`
   if (/quota|storage.*(limit|space)|disk full/i.test(detail))
@@ -208,6 +355,7 @@ export class PreparedAnimation {
     Object.assign(this, { changed, createStore, decode, wait })
     this.state = 'idle'
     this.progress = 0
+    this.phase = ''
     this.generation = 0
     this.operation = Promise.resolve()
   }
@@ -229,6 +377,7 @@ export class PreparedAnimation {
     this.path = null
     this.state = 'idle'
     this.progress = 0
+    this.phase = ''
     if (store) await store.dispose()
     this.notify()
   }
@@ -242,13 +391,14 @@ export class PreparedAnimation {
     this.stopping = false
     this.notify()
   }
-  async prepare(path, render) {
+  async prepare(path, render, { analyze } = {}) {
     await this.discard()
     const generation = ++this.generation
     const controller = new AbortController()
     this.controller = controller
     this.state = 'preparing'
     this.progress = 0
+    this.phase = analyze ? 'analysis' : 'frames'
     this.error = ''
     this.notify()
     this.operation = (async () => {
@@ -256,12 +406,23 @@ export class PreparedAnimation {
       try {
         store = await this.createStore()
         checkSignal(controller.signal)
+        if (analyze) {
+          path = await analyze(controller.signal, (progress) => {
+            checkSignal(controller.signal)
+            this.progress = clamp(progress, 0, 1) * 10
+            this.notify()
+          })
+          checkSignal(controller.signal)
+          this.phase = 'frames'
+          this.progress = 10
+          this.notify()
+        }
         for (let i = 0; i < path.count; i++) {
           const blob = await render(path.at(i), controller.signal)
           checkSignal(controller.signal)
           await store.put(i, blob)
           checkSignal(controller.signal)
-          this.progress = ((i + 1) / path.count) * 100
+          this.progress = (analyze ? 10 : 0) + ((i + 1) / path.count) * (analyze ? 90 : 100)
           this.notify()
           // GPU readback, PNG encoding and OPFS writes already yield to the
           // browser. Avoid an additional timer delay on every prepared frame.
@@ -276,6 +437,7 @@ export class PreparedAnimation {
         this.progress = 0
         this.reportError(error)
       } finally {
+        this.phase = ''
         if (store)
           await store.dispose().catch((error) => {
             this.reportError(error, 'cleanup')

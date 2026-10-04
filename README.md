@@ -111,6 +111,33 @@ zooms in. Playback uses the saved images without recalculating the fractal.
 rate, coordinates, or canvas resolution requires preparation again. Unapplied
 coordinate text is not used as the target. Animation OFF hides its settings and Stop.
 
+**Auto adjust iterations & density** is OFF by default. When enabled, **Minimum
+iterations** defaults to 1000 if left empty; the maximum is the applied target's
+Max iterations. A minimum at or above the target makes iterations constant, even
+when the target is below 1000. Palette density starts at 0 and ends at the target
+value (including negative values). Iterations increase monotonically and density
+moves in one direction; the final frame uses the exact target settings. The initial
+pan holds the starting settings. Equal start/target zoom uses the target settings
+throughout; zoom-out paths use the same start-to-end adjustment rules.
+
+Preparation first analyzes 17 evenly spaced logarithmic zoom depths at the target
+center, with a probe image of at most 192 pixels on its long edge and smoothing and
+supersampling disabled only for analysis. Escaped-iteration quantiles estimate an
+iteration budget with 10% headroom and palette frequency matching. At least 32
+escaped samples and a nonzero distribution width are needed; insufficient data
+uses a smooth depth-based fallback. Fixed endpoints, monotonic regression and
+cubic interpolation prevent parameter reversals and overshoot. This approximates
+detail and color-band density within the allowed ranges; it cannot guarantee
+identical appearance or preserve every tiny feature. Stripe, Grid and Orbit Trap
+keep their existing density-independent coloring. Full frames keep the configured
+resolution, smoothing and supersampling. Analysis occupies the first 10% of
+progress and can be stopped; 100% still requires every frame to be saved.
+
+Changing automatic adjustment or its minimum invalidates preparation. Animation
+Settings reset restores automatic adjustment to OFF and clears the minimum.
+Target iteration/density controls retain their configured values during analysis
+and playback.
+
 Animation requires WebGPU and browser temporary storage (OPFS and Web Locks).
 It turns GPU on automatically and does not fall back to CPU rendering. Julia,
 Buddhabrot, and settings unsupported by the GPU cannot be prepared. Lossless PNG

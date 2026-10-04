@@ -3,7 +3,9 @@
  * @modified
  */
 
-import { AnimationStore, PreparedAnimation, createAnimationPath } from './animation.mjs'
+import {
+  AnimationStore, PreparedAnimation, analyzeAnimationPath, createAnimationPath, resolveAnimationMinimum,
+} from './animation.mjs'
 import { AnimationGpuSession } from './animationGpuSession.mjs'
 import { BuddhabrotRunner } from './buddhabrot.mjs'
 import { BUDDHA_PALETTES, buildBuddhaStops, getBuddhaPalette } from './buddhaPalettes.mjs'
@@ -4457,14 +4459,29 @@ function animationUnavailableReason() {
   return ''
 }
 
-function selectAnimationGpu(view) {
+function selectAnimationGpu(view, { analysis = false } = {}) {
   if (!view.useGpu || !supportsGpuIterationFunction(view.iterationFunction)) return null
-  if (view._canUseOrbitTrapGpu()) return 'orbit'
-  if (view.paletteComponent.palette.requiresCpu) return null
+  if (!analysis && view._canUseOrbitTrapGpu()) return 'orbit'
+  if (!analysis && view.paletteComponent.palette.requiresCpu) return null
   if (view.fractalType === 'mandelbrot') {
     return shouldUseDirectMandelbrotGpu(view) ? 'direct' : view.mandelbrotGpu.available ? 'perturbation' : null
   }
   return view.fractalType === 'custom' && view.mandelbrotCustomGpu.available ? 'direct' : null
+}
+
+function animationAdjustmentError() {
+  const input = document.getElementById('anim-min-iterations')
+  let message = ''
+  if (document.getElementById('anim-auto-adjust').checked) {
+    try {
+      if (input.validity.badInput) throw new Error('Invalid minimum')
+      resolveAnimationMinimum(input.value, fractal.max_iter)
+    } catch {
+      message = 'Minimum iterations must be a positive safe integer.'
+    }
+  }
+  input.setCustomValidity(message)
+  return message
 }
 
 function updateAnimationUi() {
@@ -4491,8 +4508,12 @@ function updateAnimationUi() {
     animationLockedControls.clear()
   }
   const reason = animationUnavailableReason()
+  const adjustmentError = animationAdjustmentError()
+  document.getElementById('anim-iteration-settings').classList.toggle(
+    'd-none', !document.getElementById('anim-auto-adjust').checked,
+  )
   document.getElementById('anim-prepare').disabled =
-    busy || !enabled || !!reason || preparedAnimation.state === 'ready'
+    busy || !enabled || !!reason || !!adjustmentError || preparedAnimation.state === 'ready'
   const playButton = document.getElementById('anim-play')
   const canStop = preparedAnimation.busy || animationUiPending
   playButton.textContent = canStop ? 'Stop' : 'Play'
@@ -4509,9 +4530,10 @@ function updateAnimationUi() {
   document.getElementById('anim-status').textContent =
     preparedAnimation.error ||
     reason ||
+    adjustmentError ||
     {
       idle: 'Apply coordinates, then prepare.',
-      preparing: 'Preparing frames…',
+      preparing: preparedAnimation.phase === 'analysis' ? 'Analyzing zoom depths…' : 'Preparing frames…',
       ready: 'Ready to play from the beginning.',
       playing: 'Playing…',
     }[preparedAnimation.state]
@@ -4536,7 +4558,10 @@ function invalidateAnimation() {
 }
 
 async function prepareAnimation() {
-  if (preparedAnimation.busy || preparedAnimation.state === 'ready' || animationUiPending || animationUnavailableReason())
+  if (
+    preparedAnimation.busy || preparedAnimation.state === 'ready' || animationUiPending ||
+    animationUnavailableReason() || animationAdjustmentError()
+  )
     return
   animationUiPending = true
   const setupGeneration = ++animationSetupGeneration
@@ -4562,9 +4587,14 @@ async function prepareAnimation() {
       return
     const targetCenter = [...fractal.center]
     const targetZoom = fractal.zoom
+    const targetMaxIter = fractal.max_iter
+    const targetDensity = Number(fractal.paletteComponent.density)
+    const minimum = document.getElementById('anim-min-iterations').value
+    const autoAdjust = document.getElementById('anim-auto-adjust').checked
+    const startZoom = getInitialFractalZoom(fractal.precision)
     const path = createAnimationPath({
       startCenter: [fxp.fromNumber(-0.5, fractal.precision), fxp.fromNumber(0, fractal.precision)],
-      startZoom: getInitialFractalZoom(fractal.precision),
+      startZoom,
       targetCenter,
       targetZoom,
       speed: Number(document.getElementById('anim-speed').value),
@@ -4592,7 +4622,12 @@ async function prepareAnimation() {
         return new Offscreen(canvas, 1, true, true)
       },
     })
-    await preparedAnimation.prepare(path, (frame, signal) => session.render(frame, signal))
+    await preparedAnimation.prepare(path, (frame, signal) => session.render(frame, signal), {
+      analyze: autoAdjust ? (signal, report) => analyzeAnimationPath(
+        { path, startZoom, targetZoom, targetCenter, minimum, targetMaxIter, targetDensity },
+        (frame, probeSignal) => session.probe(frame, probeSignal), signal, report,
+      ) : undefined,
+    })
   } catch (error) {
     preparedAnimation.reportError(error)
   } finally {
@@ -4640,6 +4675,8 @@ function initAnimationControls() {
     const fps = document.getElementById('anim-fps')
     speed.value = speed.defaultValue
     fps.value = fps.defaultValue
+    document.getElementById('anim-auto-adjust').checked = false
+    document.getElementById('anim-min-iterations').value = ''
     invalidateAnimation()
     updateAnimationUi()
   })
@@ -4652,7 +4689,7 @@ function initAnimationControls() {
     } else invalidateAnimation()
     updateAnimationUi()
   })
-  for (const id of ['anim-speed', 'anim-fps'])
+  for (const id of ['anim-speed', 'anim-fps', 'anim-auto-adjust', 'anim-min-iterations'])
     document.getElementById(id).addEventListener('input', () => {
       invalidateAnimation()
       updateAnimationUi()
