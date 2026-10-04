@@ -514,6 +514,7 @@ footer {
   }
 
   #main:not(:fullscreen):not(.fullscreen-fallback) #settings {
+    --settings-content-edge-padding: 0.5rem;
     flex: 0 0 auto;
     align-self: stretch;
     width: 100%;
@@ -526,7 +527,8 @@ footer {
     overflow-y: auto;
     overscroll-behavior: contain;
     -webkit-overflow-scrolling: touch;
-    padding-bottom: env(safe-area-inset-bottom);
+    padding-top: var(--settings-content-edge-padding);
+    padding-bottom: max(var(--settings-content-edge-padding), env(safe-area-inset-bottom));
   }
 
   #main:not(:fullscreen):not(.fullscreen-fallback) #mandelbrot.julia-mode {
@@ -535,6 +537,7 @@ footer {
   }
 
   #settings.fullscreen {
+    --settings-content-edge-padding: 0.5rem;
     top: auto;
     right: 0;
     bottom: 0;
@@ -548,7 +551,8 @@ footer {
     max-height: 50vh;
     max-height: 50dvh;
     border-radius: 5px 5px 0 0;
-    padding-bottom: env(safe-area-inset-bottom);
+    padding-top: var(--settings-content-edge-padding);
+    padding-bottom: max(var(--settings-content-edge-padding), env(safe-area-inset-bottom));
     touch-action: pan-y;
   }
 
@@ -679,6 +683,18 @@ footer {
 
 .settings-outline-panel-animation {
   border-color: rgba(124, 252, 0, 0.72) !important;
+}
+
+#animation-panel .animation-range-label {
+  display: flex;
+  align-items: baseline;
+  gap: 0.25rem;
+}
+
+#animation-panel .animation-range-value {
+  display: inline-block;
+  min-inline-size: 4ch;
+  font-variant-numeric: tabular-nums;
 }
 
 /* フルスクリーン時は入力欄を半透明背景でも読みやすくする */
@@ -972,6 +988,7 @@ footer {
   }
 
   #settings .settings-action-row--buddha .action-col--render,
+  #settings .settings-action-row--buddha .action-col--stop,
   #settings .settings-action-row--buddha .action-col--download,
   #settings .settings-action-row--primary>* {
     grid-column: 1 / -1;
@@ -1000,11 +1017,17 @@ footer {
   }
 
   #settings .settings-coordinate-control-grid {
-    grid-template-columns: minmax(0, 1fr) auto minmax(3.75rem, auto);
+    grid-template-columns: minmax(0, 1fr) auto;
   }
 
-  #settings .settings-coordinate-control-grid #applyCoords {
-    font-size: 0.72rem;
+  #settings .settings-coordinate-row>.col-sm-2 {
+    flex: 0 0 auto;
+    width: 16.66666667%;
+  }
+
+  #settings .settings-coordinate-row>.col-sm-10 {
+    flex: 0 0 auto;
+    width: 83.33333333%;
   }
 
   #settings .settings-inline-stop {
