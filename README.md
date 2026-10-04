@@ -114,10 +114,11 @@ coordinate text is not used as the target. Animation OFF hides its settings and 
 **Auto adjust iterations & density** is OFF by default. When enabled, **Minimum
 iterations** defaults to 1000 if left empty; the maximum is the applied target's
 Max iterations. A minimum at or above the target makes iterations constant, even
-when the target is below 1000. Palette density starts at 0 and ends at the target
-value (including negative values). Iterations increase monotonically and density
-moves in one direction; the final frame uses the exact target settings. The initial
-pan holds the starting settings. Equal start/target zoom uses the target settings
+when the target is below 1000. Palette density uses the analyzed starting-depth
+value during the initial pan and ends at the target value (including negative
+values). Iterations increase monotonically and density moves in one direction
+within the range between 0 and the target; the final frame uses the exact target
+settings. Equal start/target zoom uses the target settings
 throughout; zoom-out paths use the same start-to-end adjustment rules.
 
 Preparation first analyzes 17 evenly spaced logarithmic zoom depths at the target

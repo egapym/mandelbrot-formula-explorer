@@ -328,12 +328,14 @@ const profileOptions = {
   samples: [{ high: 100, spread: 160 }, { high: 400, spread: 80 }, { high: 800, spread: 40 }],
 }
 
-test('measured iteration quantiles retain target palette density from the first frame', () => {
+test('measured iteration quantiles and exponential palette coefficients set nonlinear anchor values', () => {
   const profile = createAnimationAdjustmentProfile(profileOptions)
-  assert.deepEqual(profile.atZoom(fxp.fromNumber(1)), { maxIter: 100, paletteDensity: 20 })
+  assert.deepEqual(profile.atZoom(fxp.fromNumber(1)), { maxIter: 100, paletteDensity: 0 })
   const middle = profile.atZoom(fxp.fromNumber(100))
   assert.equal(middle.maxIter, 440)
-  assert.equal(middle.paletteDensity, 20)
+  assert.equal(middle.paletteDensity, 10)
+  // At the middle anchor, frequency * spread agrees with the target.
+  assert.equal(2 ** (middle.paletteDensity / 10) * 80, 2 ** (20 / 10) * 40)
   assert.deepEqual(profile.atZoom(fxp.fromNumber(10000)), { maxIter: 1000, paletteDensity: 20 })
 })
 
@@ -349,7 +351,8 @@ test('fixed-endpoint regression pools reversals and the cubic interpolation neve
     for (let i = 1; i <= 1000; i++) {
       const current = profile.atZoom(fxp.fromNumber(10000 ** (i / 1000)))
       assert.ok(Number.isInteger(current.maxIter) && current.maxIter >= previous.maxIter && current.maxIter <= 1000)
-      assert.equal(current.paletteDensity, targetDensity)
+      assert.ok(current.paletteDensity >= Math.min(0, targetDensity) && current.paletteDensity <= Math.max(0, targetDensity))
+      assert.ok(targetDensity >= 0 ? current.paletteDensity >= previous.paletteDensity : current.paletteDensity <= previous.paletteDensity)
       previous = current
     }
     assert.deepEqual(previous, { maxIter: 1000, paletteDensity: targetDensity })
@@ -359,7 +362,7 @@ test('fixed-endpoint regression pools reversals and the cubic interpolation neve
 test('missing or zero-spread samples use depth smoothstep; equal/higher minima stay fixed', () => {
   for (const samples of [[null, null, null], Array(3).fill({ high: 100, spread: 0 })]) {
     const profile = createAnimationAdjustmentProfile({ ...profileOptions, samples })
-    assert.deepEqual(profile.atZoom(fxp.fromNumber(100)), { maxIter: 550, paletteDensity: 20 })
+    assert.deepEqual(profile.atZoom(fxp.fromNumber(100)), { maxIter: 550, paletteDensity: 10 })
   }
   for (const [minimum, targetMaxIter] of [['1000', 1000], ['2000', 1000], ['', 64]]) {
     const profile = createAnimationAdjustmentProfile({ ...profileOptions, minimum, targetMaxIter })
@@ -373,16 +376,41 @@ test('adjusted paths retain geometry and pan settings, handle zoom out and equal
   for (let i = 0; i < path.count; i++) {
     const { maxIter, paletteDensity, ...geometry } = path.at(i)
     assert.deepEqual(geometry, original.at(i))
-    if (i * 1000 / path.fps <= path.panMs) assert.deepEqual({ maxIter, paletteDensity }, { maxIter: 100, paletteDensity: 20 })
+    if (i * 1000 / path.fps <= path.panMs) assert.deepEqual({ maxIter, paletteDensity }, { maxIter: 100, paletteDensity: 0 })
   }
   assert.equal(path.at(path.count - 1).maxIter, 1000)
   assert.equal(path.at(path.count - 1).paletteDensity, 20)
   const out = createAnimationAdjustmentProfile({ ...profileOptions, startZoom: profileOptions.targetZoom, targetZoom: profileOptions.startZoom })
-  assert.deepEqual(out.atZoom(fxp.fromNumber(10000)), { maxIter: 100, paletteDensity: 20 })
+  assert.deepEqual(out.atZoom(fxp.fromNumber(10000)), { maxIter: 100, paletteDensity: 0 })
   assert.equal(out.atZoom(fxp.fromNumber(100)).maxIter, 440)
   assert.deepEqual(out.atZoom(fxp.fromNumber(1)), { maxIter: 1000, paletteDensity: 20 })
   const equal = createAnimationAdjustmentProfile({ ...profileOptions, targetZoom: profileOptions.startZoom, samples: [] })
   assert.deepEqual(equal.atZoom(fxp.fromNumber(1)), { maxIter: 1000, paletteDensity: 20 })
+})
+
+test('pan uses analyzed starting density rather than forcing zero, and joins zoom continuously', () => {
+  for (const [targetDensity, spread, expectedDensity] of [[20, 80, 10], [-20, 20, -10], [0, 80, 0]]) {
+    const profile = createAnimationAdjustmentProfile({
+      ...profileOptions, targetDensity,
+      samples: [{ high: 100, spread }, { high: 400, spread }, { high: 800, spread: 40 }],
+    })
+    const original = createAnimationPath({ ...options, targetZoom: profileOptions.targetZoom })
+    const path = withAnimationAdjustment(original, profile)
+    let previousDensity = expectedDensity
+    for (let i = 0; i < path.count; i++) {
+      const frame = path.at(i)
+      const time = i * 1000 / path.fps
+      if (time <= path.panMs) {
+        assert.equal(frame.maxIter, 100)
+        assert.equal(frame.paletteDensity, expectedDensity)
+      }
+      assert.ok(targetDensity >= 0 ? frame.paletteDensity >= previousDensity : frame.paletteDensity <= previousDensity)
+      previousDensity = frame.paletteDensity
+    }
+    assert.equal(previousDensity, targetDensity)
+    const firstZoomIndex = Math.floor(path.panMs * path.fps / 1000) + 1
+    assert.ok(Math.abs(path.at(firstZoomIndex).paletteDensity - expectedDensity) < 0.01)
+  }
 })
 
 test('path analysis probes 17 equal log-depth samples at the target center, with exact endpoints', async () => {
