@@ -146,6 +146,7 @@ export class BuddhabrotRunner {
     // 描画セッション管理用の ID。古い worker メッセージを除外する
     this._runnerId = ++nextRunnerId
     this._currentJobId = null
+    this._startToken = 0
     this._initWorkers()
   }
 
@@ -186,6 +187,7 @@ export class BuddhabrotRunner {
    * すべてのワーカーを終了する
    */
   terminate() {
+    this._startToken++
     for (const w of this.workers) {
       releaseWorker(w)
     }
@@ -230,6 +232,7 @@ export class BuddhabrotRunner {
 
   async start(params = {}) {
     if (this.running) return
+    const startToken = ++this._startToken
     this._terminated = false
     this.resetDensity()
     this.maxIter = params.maxIter ?? this.maxIter
@@ -243,6 +246,7 @@ export class BuddhabrotRunner {
     // この描画用の新しい job ID を発行し、古いメッセージを除外する
     this._jobSequence = (this._jobSequence || 0) + 1
     this._currentJobId = `${this._runnerId}:${this._jobSequence}`
+    this._pendingWorkers = 0
 
     // 内部バッファを現在の描画サイズに合わせて作り直す
     // これにより前回と異なるサイズのデータが混ざって
@@ -269,12 +273,26 @@ export class BuddhabrotRunner {
     // samples が workerCount より少ない場合でも、先頭から順に 1 件ずつ割り当てる
     const base = Math.floor(this.samples / this.workerCount)
     let rem = this.samples % this.workerCount
-    this._pendingWorkers = this.workerCount
+    this._pendingWorkers = 0
     this._sent = 0
     // 進捗差分計算用に、各ワーカーの処理済みサンプル数を保持する
     this._workerSamplesDone = new Array(this.workers.length).fill(0)
     // メッセージ送信前にワーカー生成完了を待つ
     if (this._workersReady) await this._workersReady
+    // stop()/terminate()/別の start() が Worker 初期化待ちの間に呼ばれたら、
+    // 古い開始処理からジョブを送らない。
+    if (startToken !== this._startToken || this._terminated || this._currentJobId == null) return
+    this._pendingWorkers = this.workers.length
+    if (this._pendingWorkers === 0) {
+      this.running = false
+      this.onComplete({
+        densityMap: this.densityMap,
+        width: this.width,
+        height: this.height,
+        error: new Error('No Buddhabrot workers are available'),
+      })
+      return
+    }
     for (let i = 0; i < this.workers.length; i++) {
       const assign = base + (rem > 0 ? 1 : 0)
       if (rem > 0) rem--
@@ -323,6 +341,7 @@ export class BuddhabrotRunner {
    * すべてのワーカーを停止し、描画を終了する
    */
   stop() {
+    this._startToken++
     this.running = false
     // 現在の job ID を無効化して、残っているメッセージを無視する
     this._jobSequence = (this._jobSequence || 0) + 1
