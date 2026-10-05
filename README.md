@@ -92,6 +92,7 @@ At very high resolutions, switching can happen at different zoom levels to reduc
 - Anti-Buddhabrot Coloring toggle (off by default; uses per-point color distribution when enabled)
 - Brightness and gamma controls with reset buttons
 - CPU render speed delay slider with reset button
+- CPU points-per-batch slider (default 64, maximum adapts to sample count up to 1024) for concurrent trajectories; each advances one step per render delay, with reset button
 - Render and Stop actions
 
 ### Navigation, Export, and Session Flow

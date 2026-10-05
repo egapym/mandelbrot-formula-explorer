@@ -4,6 +4,7 @@
  * Licensed under GPL-3.0.
  */
 
+import { getRenderPointBatchLimit, normalizeRenderPointBatchSize } from './buddhabrotRenderConfig.mjs'
 import { createWorkerFrom } from './workerLoader.mjs'
 
 // CPU Buddhabrot is recreated when its view is rerendered, but a Worker does
@@ -141,8 +142,9 @@ export class BuddhabrotRunner {
     this.densityB = buffers.densityB
 
     this.running = false
-    // レンダリング速度の制御値（ミリ秒）。サンプル生成の間隔に使う
+    // 各軌道を 1 ステップずつ進める間隔（ミリ秒）。
     this.renderDelay = options.renderDelay ?? 0
+    this.renderPointBatchSize = normalizeRenderPointBatchSize(options.renderPointBatchSize, this.maxRenderPointBatchSize)
     // 描画セッション管理用の ID。古い worker メッセージを除外する
     this._runnerId = ++nextRunnerId
     this._currentJobId = null
@@ -200,6 +202,7 @@ export class BuddhabrotRunner {
    */
   terminate() {
     this._startToken++
+    this._clearPresentationQueue()
     for (const w of this.workers) {
       releaseWorker(w)
     }
@@ -222,17 +225,38 @@ export class BuddhabrotRunner {
   }
 
   /**
-   * サンプル生成速度を制御する待ち時間を設定する
-   * @param {number} delay - サンプルバッチごとの待ち時間（ミリ秒）
+   * 各軌道の描画速度を制御する待ち時間を設定する
+   * @param {number} delay - 軌道ステップごとの待ち時間（ミリ秒）
    */
   setRenderSpeed(delay) {
     this.renderDelay = Math.max(0, delay)
+    if (this.renderDelay === 0) {
+      this._activePresentationWorker = null
+      this._schedulePresentation()
+    }
     // 速度設定をすべてのワーカーへ通知する
     for (const w of this.workers) {
       try {
         w.postMessage({ cmd: 'setSpeed', renderDelay: this.renderDelay })
       } catch (e) {
         ErrorHelpers.warn('Worker SetSpeed', e)
+      }
+    }
+  }
+
+  /** 1 ワーカーへ割り当てられるサンプル数から同時描画数の上限を求める。 */
+  get maxRenderPointBatchSize() {
+    return getRenderPointBatchLimit(this.samples, this.workerCount)
+  }
+
+  /** CPU で同時に描画を進める座標（軌道）の数を更新する。 */
+  setRenderPointBatchSize(size) {
+    this.renderPointBatchSize = normalizeRenderPointBatchSize(size, this.maxRenderPointBatchSize)
+    for (const w of this.workers) {
+      try {
+        w.postMessage({ cmd: 'setPointBatchSize', renderPointBatchSize: this.renderPointBatchSize })
+      } catch (e) {
+        ErrorHelpers.warn('Worker SetPointBatchSize', e)
       }
     }
   }
@@ -244,6 +268,7 @@ export class BuddhabrotRunner {
 
   async start(params = {}) {
     if (this.running) return
+    this._clearPresentationQueue()
     // Do not let an earlier async start() send its job after a newer request
     // has already started on this runner.
     if (this._currentJobId !== null) this._startToken++
@@ -258,6 +283,10 @@ export class BuddhabrotRunner {
     if (params.renderDelay !== undefined) {
       this.renderDelay = params.renderDelay
     }
+    this.renderPointBatchSize = normalizeRenderPointBatchSize(
+      params.renderPointBatchSize ?? this.renderPointBatchSize,
+      this.maxRenderPointBatchSize,
+    )
     // この描画用の新しい job ID を発行し、古いメッセージを除外する
     this._jobSequence = (this._jobSequence || 0) + 1
     this._currentJobId = `${this._runnerId}:${this._jobSequence}`
@@ -328,6 +357,8 @@ export class BuddhabrotRunner {
         gamma: params.gamma ?? DEFAULT_CONFIG.GAMMA,
         buddhaBandMode: params.buddhaBandMode || DEFAULT_CONFIG.BAND_MODE,
         renderDelay: this.renderDelay, // 速度設定をワーカーへ渡す
+        renderPointBatchSize: this.renderPointBatchSize,
+        waitForPresentation: true,
         fractalType: params.fractalType || null,
         juliaRe: params.juliaRe,
         juliaIm: params.juliaIm,
@@ -357,6 +388,7 @@ export class BuddhabrotRunner {
    */
   stop() {
     this._startToken++
+    this._clearPresentationQueue()
     this.running = false
     // 現在の job ID を無効化して、残っているメッセージを無視する
     this._jobSequence = (this._jobSequence || 0) + 1
@@ -366,6 +398,46 @@ export class BuddhabrotRunner {
       this._workerSamplesDone.fill(0)
     }
     for (const w of this.workers) w.postMessage({ cmd: 'stop' })
+  }
+
+  _clearPresentationQueue() {
+    if (this._presentationFrame != null) cancelAnimationFrame(this._presentationFrame)
+    this._presentationFrame = null
+    this._presentationQueue = []
+    this._lastPresentationTime = null
+    this._activePresentationWorker = null
+  }
+
+  // Delayed workers each hold at most one batch until it has been shown.
+  // Keep the same concurrent trajectories active until they finish, so adding
+  // trajectories never advances an individual orbit faster or interleaves worker pools.
+  _schedulePresentation() {
+    if (this._presentationFrame != null || this._presentationQueue.length === 0) return
+    if (this._activePresentationWorker && !this._presentationQueue.some(
+      (entry) => entry.worker === this._activePresentationWorker,
+    )) return
+    this._presentationFrame = requestAnimationFrame(() => {
+      this._presentationFrame = null
+      if (this._lastPresentationTime !== null && Date.now() - this._lastPresentationTime < this.renderDelay) {
+        this._schedulePresentation()
+        return
+      }
+      const index = this._activePresentationWorker
+        ? this._presentationQueue.findIndex((entry) => entry.worker === this._activePresentationWorker)
+        : 0
+      if (index < 0) return
+      const { data, worker } = this._presentationQueue.splice(index, 1)[0]
+      if (!this.running || data.jobId !== this._currentJobId) return
+      this._activePresentationWorker = worker
+      try {
+        this._mergeChunk(data.chunk)
+        this.onChunk(data.chunk)
+        this._lastPresentationTime = Date.now()
+      } finally {
+        worker.postMessage({ cmd: 'presented', jobId: data.jobId, presentationId: data.chunk.presentationId })
+        this._schedulePresentation()
+      }
+    })
   }
 
   _onWorkerMessage(e) {
@@ -399,11 +471,23 @@ export class BuddhabrotRunner {
         this.onProgress(data)
       }
     } else if (data.type === 'chunk') {
+      if (data.chunk.presentationId !== undefined) {
+        this._presentationQueue.push({ data, worker: e.target })
+        this._schedulePresentation()
+        return
+      }
       // data.chunk は { x, y, w, h, r, g, b } 形式
       this._mergeChunk(data.chunk)
       this.onChunk(data.chunk)
+    } else if (data.type === 'trajectoryBatchDone') {
+      if (this._activePresentationWorker === e.target) this._activePresentationWorker = null
+      this._schedulePresentation()
     } else if (data.type === 'compile') {
     } else if (data.type === 'done') {
+      if (this._activePresentationWorker === e.target) {
+        this._activePresentationWorker = null
+        this._schedulePresentation()
+      }
       this._pendingWorkers--
       if (this._pendingWorkers <= 0) {
         this.running = false

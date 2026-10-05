@@ -4,6 +4,7 @@
  * Licensed under GPL-3.0.
  */
 
+import { DEFAULT_RENDER_POINT_BATCH_SIZE, normalizeRenderPointBatchSize } from './buddhabrotRenderConfig.mjs'
 import { compileIterationFunction } from './customFunctionParser.mjs'
 
 // ============================================================================
@@ -21,6 +22,7 @@ const SAMPLING_CONFIG = {
   FLUSH_INTERVAL_DIVISOR: 2000,
   MIN_FLUSH_INTERVAL: 1000,
   FLUSH_DIRTY_THRESHOLD: 2000,
+  COOPERATIVE_SAMPLE_INTERVAL: 100,
   VIEW_SPAN: 2.0,
   MAX_ITER_FLOAT32_THRESHOLD: 5000,
   // 早期終了の最適化。安全側の緩めな設定にしている
@@ -141,14 +143,24 @@ class JobContext {
 }
 
 let running = false
-let renderDelay = 0 // サンプルバッチごとの待ち時間（ミリ秒）
+let renderDelay = 0 // 描画点のバッチごとの待ち時間（ミリ秒）
+let renderPointBatchSize = DEFAULT_RENDER_POINT_BATCH_SIZE
 let currentJobId = 0 // メッセージ検証用の現在の job ID
+let nextPresentationId = 0
+const pendingPresentations = new Map()
+
+function releasePresentations() {
+  for (const resolve of pendingPresentations.values()) resolve()
+  pendingPresentations.clear()
+}
 
 self.onmessage = (e) => {
   const data = e.data
   if (data.cmd === 'start') {
+    releasePresentations()
     running = true
     renderDelay = data.renderDelay ?? 0 // start 時に待ち時間を初期化する
+    renderPointBatchSize = normalizeRenderPointBatchSize(data.renderPointBatchSize)
     currentJobId = data.jobId ?? 0 // この描画セッションの job ID を保持する
     const jobId = currentJobId
     const iterFnStr = data.iterationFunction || null
@@ -172,6 +184,7 @@ self.onmessage = (e) => {
       }
     })
   } else if (data.cmd === 'stop') {
+    releasePresentations()
     running = false
     // 古いメッセージを無視できるよう job ID を無効化する
     currentJobId = -1
@@ -179,6 +192,11 @@ self.onmessage = (e) => {
   } else if (data.cmd === 'setSpeed') {
     // 実行中に待ち時間を更新する
     renderDelay = data.renderDelay ?? 0
+  } else if (data.cmd === 'setPointBatchSize') {
+    renderPointBatchSize = normalizeRenderPointBatchSize(data.renderPointBatchSize)
+  } else if (data.cmd === 'presented' && data.jobId === currentJobId) {
+    pendingPresentations.get(data.presentationId)?.()
+    pendingPresentations.delete(data.presentationId)
   }
 }
 
@@ -248,6 +266,7 @@ async function runSampling(opts) {
   let dirtyList = []
   // 非ゼロセル数を追跡し、毎回バッファ全体を走査しないようにする
   let pendingNonzeroCount = 0
+  let presentationWait = null
   // 再利用可能な軌道バッファ。通常は Float32 を使い、
   // 反復回数が非常に大きいときだけ Float64 に切り替える。
   const trajBuf =
@@ -305,6 +324,11 @@ async function runSampling(opts) {
 
     if (!hasVisibleDensity) return false
 
+    const presentationId = opts.waitForPresentation && renderDelay > 0 ? ++nextPresentationId : undefined
+    presentationWait = presentationId === undefined ? null : new Promise((resolve) => {
+      pendingPresentations.set(presentationId, resolve)
+    })
+
     jobCtx.sendChunk(
       {
         x: 0,
@@ -315,6 +339,7 @@ async function runSampling(opts) {
         r: rvals,
         g: gvals,
         b: bvals,
+        presentationId,
       },
       [indices.buffer, rvals.buffer, gvals.buffer, bvals.buffer],
     )
@@ -381,7 +406,7 @@ async function runSampling(opts) {
     }
   }
 
-  for (let s = 0; s < samples && jobCtx.isActive(); s++) {
+  function* drawTrajectory(stepped = false) {
     // 表示領域内のランダム点を選ぶ（PRNG を使用）
     const sampleRe = left + randf() * (right - left)
     const sampleIm = top + randf() * (bottom - top)
@@ -434,14 +459,7 @@ async function runSampling(opts) {
     }
 
     const keep = (mode === 'buddha' && escaped) || (mode === 'antibuddha' && !escaped)
-    if (!keep) {
-      if (s % 100 === 0) {
-        await new Promise((r) => setTimeout(r, 0))
-        if (jobCtx.shouldStop()) break
-      }
-      if (s % 500 === 0) jobCtx.sendProgress(s, samples)
-      continue
-    }
+    if (!keep || trajLen === 0) return
 
     // 軌道をピクセル貢献にマッピングする
     const band1 = Math.max(1, Math.floor(maxIter * 0.01))
@@ -464,16 +482,18 @@ async function runSampling(opts) {
     recentPixels.fill(-1) // 無効なインデックスで初期化
     let recentPixelIndex = 0
 
+    const points = stepped ? trajBuf.slice(0, trajLen * 2) : trajBuf
+    // Prime the trajectory without drawing: every active orbit starts at step zero.
+    if (stepped) yield true
+
     // Buddhabrot worker ではスーパーサンプリングを省略し、
     // 1 サンプルマッピングのみを使う
     for (let k = 0; k < trajLen; k++) {
       // 軌道点の描画ごとにジョブ停止を確認する
-      if (jobCtx.shouldStop()) {
-        break
-      }
+      if (jobCtx.shouldStop()) return
 
-      const pr = trajBuf[k * 2]
-      const pi = trajBuf[k * 2 + 1]
+      const pr = points[k * 2]
+      const pi = points[k * 2 + 1]
       const fx = (pr - left) * invWSpan
       const fy = (pi - top) * invHSpan
       const px = Math.floor(fx * width_local)
@@ -564,41 +584,87 @@ async function runSampling(opts) {
         if (uniqueCount <= SAMPLING_CONFIG.CONVERGENCE_UNIQUE_THRESHOLD) {
           // 軌道が狭い領域に収束していると判断したら早期終了する
           // 早期終了 - 軌道は収束している
-          break
+          if (stepped) yield false
+          return
         }
       }
 
-      // renderDelay は、表示を更新した後だけ適用する。黒 band のように
-      // 密度へ寄与しない点まで待機すると、最初の可視描画が大幅に遅れる。
-      if (renderDelay > 0) {
-        if (flushSparse(jobCtx)) {
-          await new Promise((r) => setTimeout(r, renderDelay))
-          if (jobCtx.shouldStop()) break
-          jobCtx.sendProgress(s, samples)
-        }
+      if (stepped) yield k + 1 < trajLen
+    }
+  }
+
+  const trajectories = []
+  let nextSample = 0
+  let completedSamples = 0
+  let invisibleSteps = 0
+
+  while (jobCtx.isActive() && (nextSample < samples || trajectories.length > 0)) {
+    if (renderDelay === 0) {
+      // Keep immediate rendering on the original full-trajectory mapping path.
+      if (trajectories.length > 0) {
+        const trajectory = trajectories.shift()
+        while (!trajectory.next().done && jobCtx.isActive()) {}
+      } else {
+        nextSample++
+        drawTrajectory().next()
+      }
+      completedSamples++
+      const shouldFlush = dirtyList.length >= flushWhenDirtyCount ||
+        (completedSamples > 0 && completedSamples % flushIntervalSamples === 0)
+      if (shouldFlush) flushSparse(jobCtx)
+      if (shouldFlush || completedSamples % SAMPLING_CONFIG.COOPERATIVE_SAMPLE_INTERVAL === 0) {
+        await new Promise((resolve) => setTimeout(resolve, 0))
+        if (jobCtx.shouldStop()) break
+        jobCtx.sendProgress(completedSamples, samples)
+      }
+      continue
+    }
+
+    // Batch size controls concurrent sampled coordinates, never steps along one orbit.
+    // On a decrease, extra trajectories wait; on an increase, new slots start at step zero.
+    while (trajectories.length < renderPointBatchSize && nextSample < samples && jobCtx.isActive()) {
+      nextSample++
+      const trajectory = drawTrajectory(true)
+      if (trajectory.next().done) completedSamples++
+      else trajectories.push(trajectory)
+      if (nextSample % SAMPLING_CONFIG.COOPERATIVE_SAMPLE_INTERVAL === 0) {
+        await new Promise((resolve) => setTimeout(resolve, 0))
+        if (jobCtx.shouldStop()) break
+        jobCtx.sendProgress(completedSamples, samples)
       }
     }
+    if (jobCtx.shouldStop()) break
+    if (renderDelay === 0) continue
 
-    // renderDelay が 0 より大きい場合、この軌道の残り点をフラッシュする
-    if (renderDelay > 0 && dirtyList.length > 0) {
-      flushSparse(jobCtx)
+    const activeCount = Math.min(trajectories.length, renderPointBatchSize)
+    const finished = []
+    for (let i = 0; i < activeCount; i++) {
+      const step = trajectories[i].next()
+      if (step.done || step.value === false) finished.push(i)
     }
+    for (let i = finished.length - 1; i >= 0; i--) trajectories.splice(finished[i], 1)
+    completedSamples += finished.length
 
-    // フラッシュのヒューリスティック：サンプル数または dirty 数で判断する（renderDelay が 0 のときのみ）
-    if (renderDelay === 0 && (dirtyList.length >= flushWhenDirtyCount || (s > 0 && s % flushIntervalSamples === 0))) {
-      // 疎なフラッシュを使う
-      flushSparse(jobCtx)
-      // 定期的にイベントループを解放する
-      await new Promise((r) => setTimeout(r, 0))
+    if (flushSparse(jobCtx)) {
+      if (presentationWait) await presentationWait
       if (jobCtx.shouldStop()) break
-      // 定期的な進捗概要を送る
-      // 本番ではこの統計は抑制される
-      jobCtx.sendProgress(s, samples)
+      if (!opts.waitForPresentation) await new Promise((resolve) => setTimeout(resolve, renderDelay))
+      if (jobCtx.shouldStop()) break
+      jobCtx.sendProgress(completedSamples, samples)
+    } else if (++invisibleSteps % SAMPLING_CONFIG.COOPERATIVE_SAMPLE_INTERVAL === 0) {
+      // Invisible or black-band trajectories still accept Stop and live settings.
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      if (jobCtx.shouldStop()) break
+      jobCtx.sendProgress(completedSamples, samples)
+    }
+
+    if (trajectories.length === 0 && opts.waitForPresentation && jobCtx.isActive()) {
+      postMessage({ type: 'trajectoryBatchDone', jobId: jobCtx.jobId })
     }
   }
 
   // 最終フラッシュ
-  flushSparse(jobCtx)
+  if (flushSparse(jobCtx) && presentationWait) await presentationWait
   if (pendingNonzeroCount > 0)
     // 残っているフルバッファも送る（疎なフラッシュで空になっているはず）
     flushFull(jobCtx)

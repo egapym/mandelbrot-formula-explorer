@@ -731,7 +731,32 @@
                 </div>
               </div>
               <div class="mb-2 row">
-                <div class="col col-sm-12">
+                <div class="col-6">
+                  <div class="d-flex align-items-center">
+                    <label for="buddha-point-batch-size" class="col-form-label py-0"
+                      >Points per Batch (CPU): <span id="buddha-point-batch-size-value">64</span></label
+                    >
+                    <button
+                      type="button"
+                      id="reset-buddha-point-batch-size"
+                      class="btn btn-sm btn-outline-secondary rounded-pill slider-reset ms-2"
+                      title="Reset points per batch"
+                    >
+                      ↺
+                    </button>
+                  </div>
+                  <input
+                    id="buddha-point-batch-size"
+                    type="range"
+                    class="form-range"
+                    min="1"
+                    max="1024"
+                    step="1"
+                    value="64"
+                    title="Number of sampled coordinates whose trajectories are drawn concurrently. Each trajectory advances one step per Render Speed Delay. Applies to CPU delayed rendering."
+                  />
+                </div>
+                <div class="col-6">
                   <div class="d-flex align-items-center">
                     <label for="buddha-draw-speed" class="col-form-label py-0"
                       >Render Speed Delay (CPU): <span id="buddha-draw-speed-value">0</span>ms</label

@@ -8,6 +8,7 @@ import {
 } from './animation.mjs'
 import { AnimationGpuSession } from './animationGpuSession.mjs'
 import { BuddhabrotRunner } from './buddhabrot.mjs'
+import { DEFAULT_RENDER_POINT_BATCH_SIZE, getRenderPointBatchLimit, normalizeRenderPointBatchSize } from './buddhabrotRenderConfig.mjs'
 import { BUDDHA_PALETTES, buildBuddhaStops, getBuddhaPalette } from './buddhaPalettes.mjs'
 import { compileIterationFunction, getIterationHistoryRequirements, getParsedExpression, usesIterationHistory } from './customFunctionParser.mjs'
 import * as favorites from './favorites.js'
@@ -365,6 +366,7 @@ const UI_DEFAULTS = {
   buddhaBrightness: 1.2,
   buddhaGamma: 4.8,
   buddhaRenderSpeed: 0,
+  buddhaPointBatchSize: DEFAULT_RENDER_POINT_BATCH_SIZE,
 }
 
 const EMBEDDED_MODE = document.documentElement.classList.contains('embedded-mode')
@@ -531,6 +533,7 @@ const DOM = {
     brightness: document.getElementById('buddha-brightness'),
     gamma: document.getElementById('buddha-gamma'),
     renderSpeed: document.getElementById('buddha-draw-speed'),
+    pointBatchSize: document.getElementById('buddha-point-batch-size'),
     render: document.getElementById('buddha-render'),
     stop: document.getElementById('buddha-stop'),
     mode: document.getElementById('buddhaMode'),
@@ -2990,6 +2993,29 @@ let buddhaActive = false
 let buddhaPreservedDisplay = false
 let buddhaLockedByFractalChange = false
 
+function syncBuddhaPointBatchSize(samplesOverride = null) {
+  const slider = DOM.buddha.pointBatchSize
+  if (!slider) return DEFAULT_RENDER_POINT_BATCH_SIZE
+  const runningCpu = buddhaRunner instanceof BuddhabrotRunner && buddhaRunner.running
+  let samples = samplesOverride
+  if (samples === null) {
+    samples = parseInt(DOM.buddha.iterations?.value, 10)
+    if (Number.isNaN(samples)) samples = 100000
+    const ss = parseInt(DOM.supersamplingToggle?.value, 10) || 0
+    if (ss > 1) samples = Math.floor(samples * ss * ss)
+  }
+  const maximum = runningCpu && samplesOverride === null
+    ? buddhaRunner.maxRenderPointBatchSize
+    : getRenderPointBatchLimit(samples, DEFAULT_WORKER_COUNT)
+  const size = normalizeRenderPointBatchSize(slider.value, maximum)
+  slider.max = String(maximum)
+  slider.value = String(size)
+  const valueDisplay = document.getElementById('buddha-point-batch-size-value')
+  if (valueDisplay) valueDisplay.textContent = String(size)
+  if (runningCpu) buddhaRunner.setRenderPointBatchSize(size)
+  return size
+}
+
 // 旧グローバル変数と BuddhabrotState を同期する
 Object.defineProperty(window, 'buddhaRunner', {
   get: () => BuddhabrotState.runner,
@@ -3527,6 +3553,7 @@ async function startBuddhaRender() {
   const gamma = parseFloat(document.getElementById('buddha-gamma')?.value) || 0.8
   const _rawRenderDelay = parseFloat(document.getElementById('buddha-draw-speed')?.value) || 0
   const renderDelay = _rawRenderDelay === 1 ? 0.01 : _rawRenderDelay
+  const renderPointBatchSize = syncBuddhaPointBatchSize(samples)
 
   BuddhabrotState.targetKind = target.kind
   if (target.kind === 'julia') {
@@ -3657,6 +3684,7 @@ async function startBuddhaRender() {
         maxIter: targetRenderer.max_iter,
         samples: samples,
         renderDelay: renderDelay,
+        renderPointBatchSize,
         onProgress: (data) => {
           // delta が来る場合はその差分で進捗を進める
           try {
@@ -3671,11 +3699,27 @@ async function startBuddhaRender() {
             console.warn('Error updating progress from BuddhabrotRunner onProgress:', e?.message ? e.message : e)
           }
         },
-        onChunk: (_chunk) => {
+        onChunk: (chunk) => {
           // 進捗更新は別で行うので、ここでは描画予約だけ行う
           try {
             if (buddhaRunnerGeneration !== runnerGeneration) return
-            scheduleDraw()
+            if (chunk.presentationId !== undefined) {
+              // The CPU runner already schedules one delayed batch per frame.
+              // Draw it synchronously before acknowledging it to the worker.
+              drawBuddhaDensityChannels(
+                buddhaRunner.densityR,
+                buddhaRunner.densityG,
+                buddhaRunner.densityB,
+                buddhaRunner.width,
+                buddhaRunner.height,
+                buddhaRunner.palette || pal,
+                buddhaRunner.brightness,
+                buddhaRunner.gamma,
+                true,
+              )
+            } else {
+              scheduleDraw()
+            }
           } catch (e) {
             console.warn('Error scheduling buddha draw:', e?.message ? e.message : e)
           }
@@ -3685,6 +3729,7 @@ async function startBuddhaRender() {
           // 部分密度の完了通知が届く。表示保持中はこれを描画し、完全消去または
           // 再実行で世代が変わった場合だけ無視する。
           if (buddhaRunnerGeneration !== runnerGeneration) return
+          queueMicrotask(() => syncBuddhaPointBatchSize())
           try {
             finishBuddhabrotProgress()
             hideInactiveBuddhabrotProgress()
@@ -3797,6 +3842,7 @@ async function startBuddhaRender() {
               maxIter: targetRenderer.max_iter,
               samples: samples,
               renderDelay: buddhaRunner.renderDelay,
+              renderPointBatchSize: buddhaRunner.renderPointBatchSize,
               onProgress: buddhaRunner.onProgress,
               onChunk: buddhaRunner.onChunk,
               onComplete: buddhaRunner.onComplete,
@@ -3916,6 +3962,8 @@ async function startBuddhaRender() {
           maxIter: targetRenderer.max_iter,
           samples: samples,
           onProgress: buddhaRunner?.onProgress,
+          renderDelay,
+          renderPointBatchSize,
           onChunk: buddhaRunner?.onChunk,
           onComplete: buddhaRunner?.onComplete,
           brightness: buddhaRunner?.brightness,
@@ -3942,6 +3990,7 @@ async function startBuddhaRender() {
   }
   await runnerToStart.start({
     samples: samples,
+    renderPointBatchSize: syncBuddhaPointBatchSize(samples),
     maxIter: targetRenderer.max_iter,
     width: buddhaRunner.width,
     height: buddhaRunner.height,
@@ -4058,6 +4107,7 @@ function stopBuddhaPreserveDisplay() {
   }
 
   buddhaActive = false
+  syncBuddhaPointBatchSize()
 
   // 最終描画を残したまま停止し、後から brightness/gamma だけ再適用できるようにする
   buddhaPreservedDisplay = true
@@ -4202,7 +4252,9 @@ function stopBuddhaPreserveDisplay() {
   }
 }
 
-function drawBuddhaDensityChannels(rBuf, gBuf, bBuf, width, height, _pal, brightness = 1.8, gamma = 0.8) {
+function drawBuddhaDensityChannels(
+  rBuf, gBuf, bBuf, width, height, _pal, brightness = 1.8, gamma = 0.8, synchronous = false,
+) {
   // Buddhabrot が非アクティブなら早めに抜ける
   // ただし保持表示モード中は、既存 density バッファの再マッピングだけ許可する
   if (!buddhaActive && !buddhaPreservedDisplay) return
@@ -4227,7 +4279,7 @@ function drawBuddhaDensityChannels(rBuf, gBuf, bBuf, width, height, _pal, bright
   // 使える場合は GPU 側のカラーマッピングを試す
   let usedGpu = false
   try {
-    if (typeof colorMapDensity === 'function') {
+    if (!synchronous && typeof colorMapDensity === 'function') {
       usedGpu = true
       colorMapDensity({
         rBuf,
@@ -4307,7 +4359,7 @@ function drawBuddhaDensityChannels(rBuf, gBuf, bBuf, width, height, _pal, bright
       mainCtx.save()
       mainCtx.clearRect(0, 0, dstW, dstH)
       mainCtx.imageSmoothingEnabled = true
-      if (typeof createImageBitmap === 'function') {
+      if (!synchronous && typeof createImageBitmap === 'function') {
         createImageBitmap(off).then((bitmap) => {
           if (lastHighResBuddhaBitmap && typeof lastHighResBuddhaBitmap.close === 'function') {
             lastHighResBuddhaBitmap.close()
@@ -9073,6 +9125,26 @@ function initListeners() {
     console.warn('Error wiring buddha-gamma input handler:', e)
   }
 
+  // 同時に描画する座標数を、実行中の CPU worker にも反映する。
+  try {
+    const pointBatchSizeEl = DOM.buddha.pointBatchSize
+    const updatePointBatchSize = () => syncBuddhaPointBatchSize()
+    if (pointBatchSizeEl) {
+      pointBatchSizeEl.addEventListener('input', updatePointBatchSize)
+      DOM.buddha.iterations?.addEventListener('input', updatePointBatchSize)
+      DOM.buddha.iterations?.addEventListener('change', updatePointBatchSize)
+      DOM.supersamplingToggle?.addEventListener('change', updatePointBatchSize)
+      document.getElementById('reset-buddha-point-batch-size')?.addEventListener('click', () => {
+        applyDefaultAndRefresh('buddha-point-batch-size', UI_DEFAULTS.buddhaPointBatchSize, {
+          onApply: updatePointBatchSize,
+        })
+      })
+      updatePointBatchSize()
+    }
+  } catch (e) {
+    console.warn('Error wiring buddha-point-batch-size controls:', e)
+  }
+
   // Buddhabrot 描画速度のリセットボタン
   try {
     const resetBuddhaDrawSpeed = document.getElementById('reset-buddha-draw-speed')
@@ -9683,6 +9755,12 @@ function reset() {
   } catch (e) {
     console.warn('Error resetting buddha-gamma in reset():', e?.message ? e.message : e)
   }
+
+  // Update the range before assigning 64, otherwise the old maximum clamps it.
+  syncBuddhaPointBatchSize()
+  applyDefaultAndRefresh('buddha-point-batch-size', UI_DEFAULTS.buddhaPointBatchSize, {
+    onApply: () => syncBuddhaPointBatchSize(),
+  })
 
   // Render Speed Delay（buddha-draw-speed）を既定値へ戻す
   try {
