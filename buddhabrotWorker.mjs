@@ -145,6 +145,13 @@ class JobContext {
 let running = false
 let renderDelay = 0 // 描画点のバッチごとの待ち時間（ミリ秒）
 let renderPointBatchSize = DEFAULT_RENDER_POINT_BATCH_SIZE
+let trajectorySlots = null
+let wakeSlots = null
+function releaseSlotWait() {
+  wakeSlots?.()
+  wakeSlots = null
+}
+const activeSlotCount = () => trajectorySlots ?? renderPointBatchSize
 let currentJobId = 0 // メッセージ検証用の現在の job ID
 let nextPresentationId = 0
 const pendingPresentations = new Map()
@@ -158,9 +165,11 @@ self.onmessage = (e) => {
   const data = e.data
   if (data.cmd === 'start') {
     releasePresentations()
+    releaseSlotWait()
     running = true
     renderDelay = data.renderDelay ?? 0 // start 時に待ち時間を初期化する
     renderPointBatchSize = normalizeRenderPointBatchSize(data.renderPointBatchSize)
+    trajectorySlots = data.trajectorySlots ?? null
     currentJobId = data.jobId ?? 0 // この描画セッションの job ID を保持する
     const jobId = currentJobId
     const iterFnStr = data.iterationFunction || null
@@ -185,6 +194,7 @@ self.onmessage = (e) => {
     })
   } else if (data.cmd === 'stop') {
     releasePresentations()
+    releaseSlotWait()
     running = false
     // 古いメッセージを無視できるよう job ID を無効化する
     currentJobId = -1
@@ -192,8 +202,11 @@ self.onmessage = (e) => {
   } else if (data.cmd === 'setSpeed') {
     // 実行中に待ち時間を更新する
     renderDelay = data.renderDelay ?? 0
+    releaseSlotWait()
   } else if (data.cmd === 'setPointBatchSize') {
     renderPointBatchSize = normalizeRenderPointBatchSize(data.renderPointBatchSize)
+    trajectorySlots = data.trajectorySlots ?? null
+    releaseSlotWait()
   } else if (data.cmd === 'presented' && data.jobId === currentJobId) {
     pendingPresentations.get(data.presentationId)?.()
     pendingPresentations.delete(data.presentationId)
@@ -620,9 +633,14 @@ async function runSampling(opts) {
       continue
     }
 
+    if (activeSlotCount() === 0) {
+      await new Promise((resolve) => { wakeSlots = resolve })
+      continue
+    }
+
     // Batch size controls concurrent sampled coordinates, never steps along one orbit.
     // On a decrease, extra trajectories wait; on an increase, new slots start at step zero.
-    while (trajectories.length < renderPointBatchSize && nextSample < samples && jobCtx.isActive()) {
+    while (trajectories.length < activeSlotCount() && nextSample < samples && jobCtx.isActive()) {
       nextSample++
       const trajectory = drawTrajectory(true)
       if (trajectory.next().done) completedSamples++
@@ -636,7 +654,7 @@ async function runSampling(opts) {
     if (jobCtx.shouldStop()) break
     if (renderDelay === 0) continue
 
-    const activeCount = Math.min(trajectories.length, renderPointBatchSize)
+    const activeCount = Math.min(trajectories.length, activeSlotCount())
     const finished = []
     for (let i = 0; i < activeCount; i++) {
       const step = trajectories[i].next()
@@ -656,10 +674,6 @@ async function runSampling(opts) {
       await new Promise((resolve) => setTimeout(resolve, 0))
       if (jobCtx.shouldStop()) break
       jobCtx.sendProgress(completedSamples, samples)
-    }
-
-    if (trajectories.length === 0 && opts.waitForPresentation && jobCtx.isActive()) {
-      postMessage({ type: 'trajectoryBatchDone', jobId: jobCtx.jobId })
     }
   }
 

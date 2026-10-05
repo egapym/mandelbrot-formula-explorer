@@ -93,74 +93,73 @@ const nextFrame = (time) => {
   for (const callback of callbacks) callback()
 }
 const displayed = []
+const coalesced = []
+const aggregate = new BuddhabrotRunner({
+  workerCount: 2,
+  width: 2,
+  height: 2,
+  onChunk: () => coalesced.push(Array.from(aggregate.densityR).reduce((sum, value) => sum + value, 0)),
+})
+await aggregate._workersReady
+await aggregate.start({ samples: 10, renderDelay: 100, renderPointBatchSize: 2 })
+for (const [i, aggregateWorker] of aggregate.workers.entries()) {
+  aggregateWorker.onmessage({ data: { type: 'chunk', jobId: aggregate._currentJobId, chunk: {
+    x: 0, y: 0, w: 2, h: 2, indices: [i], r: [1], presentationId: i + 1,
+  } }, target: aggregateWorker })
+}
+nextFrame(0)
+assert.deepEqual(coalesced, [2], 'Ready workers recolored the canvas more than once')
+assert.equal(aggregate.workers.flatMap((w) => w.messages).filter((m) => m.cmd === 'presented').length, 2)
+aggregate.terminate()
+
 const parallel = new BuddhabrotRunner({
   workerCount: 5, width: 2, height: 2,
   onChunk: () => displayed.push(Array.from(parallel.densityR).reduce((sum, value) => sum + value, 0)),
 })
 await parallel._workersReady
 await parallel.start({ samples: 10, renderDelay: 100, renderPointBatchSize: 1 })
-for (const [i, worker] of parallel.workers.entries()) {
-  assert.equal(worker.messages.at(-1).waitForPresentation, true)
-  worker.onmessage({ data: { type: 'chunk', jobId: parallel._currentJobId, chunk: {
-    x: 0, y: 0, w: 2, h: 2, indices: [i % 4], r: [1], g: [0], b: [0], presentationId: i + 1,
-  } }, target: worker })
-}
-assert.deepEqual(displayed, [], 'Batches merged before the display frame')
+assert.deepEqual(parallel.workers.map((w) => w.messages.at(-1).trajectorySlots), [1, 0, 0, 0, 0])
+const emit = (runner, worker, type, chunk) => worker.onmessage({
+  data: { type, jobId: runner._currentJobId, chunk }, target: worker,
+})
+const chunk = (id, index = 0) => ({
+  x: 0, y: 0, w: 2, h: 2, indices: [index], r: [1], presentationId: id,
+})
+emit(parallel, parallel.workers[0], 'chunk', chunk(1))
 nextFrame(0)
-assert.deepEqual(displayed, [1], 'First frame combined multiple workers')
+assert.deepEqual(displayed, [1], 'Batch 1 must initially draw exactly one point')
+emit(parallel, parallel.workers[0], 'done')
+assert.deepEqual(parallel._trajectorySlots, [0, 1, 0, 0, 0], 'Finished worker did not immediately release its slot')
+parallel.setRenderPointBatchSize(2)
+assert.deepEqual(parallel._trajectorySlots, [0, 1, 1, 0, 0])
+const [, workerA, workerB] = parallel.workers
+emit(parallel, workerA, 'chunk', chunk(1))
+nextFrame(10)
+emit(parallel, workerB, 'chunk', chunk(1))
 nextFrame(50)
-assert.deepEqual(displayed, [1], 'Render Speed Delay was skipped')
-for (const [i, worker] of parallel.workers.entries()) {
-  worker.onmessage({ data: { type: 'trajectoryBatchDone', jobId: parallel._currentJobId }, target: worker })
-  if (i < 4) nextFrame((i + 1) * 100)
-}
-assert.deepEqual(displayed, [1, 2, 3, 4, 5])
-assert.equal(parallel.workers.flatMap((w) => w.messages).filter((m) => m.cmd === 'presented').length, 5)
-const pendingWorker = parallel.workers[0]
-pendingWorker.onmessage({ data: { type: 'chunk', jobId: parallel._currentJobId, chunk: {
-  x: 0, y: 0, w: 2, h: 2, indices: [0], r: [1], presentationId: 6,
-} }, target: pendingWorker })
-nextFrame(450)
-assert.deepEqual(displayed, [1, 2, 3, 4, 5])
+emit(parallel, workerA, 'chunk', chunk(2))
+emit(parallel, workerB, 'chunk', chunk(2))
+nextFrame(109)
+assert.deepEqual(displayed, [1, 2, 3])
+nextFrame(110)
+assert.deepEqual(displayed, [1, 2, 3, 4], 'Worker A waited for worker B')
+nextFrame(150)
+assert.deepEqual(displayed, [1, 2, 3, 4, 5], 'Worker B did not use its independent Delay clock')
+emit(parallel, workerA, 'chunk', chunk(3))
+nextFrame(210)
+assert.equal(displayed.at(-1), 6, 'Worker A stalled when B had no ready chunk')
+emit(parallel, workerA, 'chunk', chunk(4))
 parallel.setRenderSpeed(10)
-nextFrame(450)
-assert.deepEqual(displayed, [1, 2, 3, 4, 5, 6], 'Live Delay change did not update presentation pacing')
-pendingWorker.onmessage({ data: { type: 'chunk', jobId: parallel._currentJobId, chunk: {
-  x: 0, y: 0, w: 2, h: 2, indices: [0], r: [1], presentationId: 7,
-} }, target: pendingWorker })
+nextFrame(220)
+assert.equal(displayed.at(-1), 7)
+emit(parallel, workerA, 'chunk', chunk(5))
 parallel.stop()
-nextFrame(500)
-assert.deepEqual(displayed, [1, 2, 3, 4, 5, 6], 'Stop displayed a queued batch')
+nextFrame(300)
+assert.equal(displayed.at(-1), 7, 'Stop displayed a queued batch')
 assert.equal(frames.size, 0)
 await parallel.start({ samples: 10, renderDelay: 0 })
-pendingWorker.onmessage({ data: { type: 'chunk', jobId: parallel._currentJobId, chunk: {
-  x: 0, y: 0, w: 2, h: 2, indices: [3], r: [2],
-} }, target: pendingWorker })
-assert.equal(displayed.at(-1), 2, 'Zero Delay did not retain immediate chunk merging')
-assert.equal(frames.size, 0, 'Zero Delay used the paced presentation queue')
+emit(parallel, parallel.workers[0], 'chunk', { ...chunk(undefined), r: [2] })
+assert.equal(displayed.at(-1), 2, 'Zero Delay did not merge immediately')
 parallel.terminate()
-const order = []
-const ordered = new BuddhabrotRunner({ workerCount: 2, width: 3, height: 1, onChunk: (chunk) => order.push(chunk.indices[0]) })
-await ordered._workersReady
-await ordered.start({ samples: 10, renderDelay: 100, renderPointBatchSize: 4 })
-const [workerA, workerB] = ordered.workers
-const enqueue = (worker, index, presentationId) => worker.onmessage({ data: {
-  type: 'chunk', jobId: ordered._currentJobId,
-  chunk: { x: 0, y: 0, w: 3, h: 1, indices: [index], r: [1], presentationId },
-}, target: worker })
-enqueue(workerA, 0, 1)
-enqueue(workerB, 1, 1)
-nextFrame(500)
-enqueue(workerA, 2, 2)
-nextFrame(600)
-assert.deepEqual(order, [0, 2], 'A trajectory was delayed by switching workers mid-orbit')
-workerA.onmessage({ data: { type: 'trajectoryBatchDone', jobId: ordered._currentJobId }, target: workerA })
-nextFrame(700)
-assert.deepEqual(order, [0, 2, 1])
-enqueue(workerA, 0, 3)
-ordered.setRenderSpeed(0)
-nextFrame(701)
-assert.deepEqual(order, [0, 2, 1, 0], 'Zero Delay left another worker waiting for presentation')
-ordered.terminate()
 Date.now = originalNow
-console.log('PASS: five workers show one batch per frame/Delay, acknowledge each display and discard queued batches on Stop')
+console.log('PASS: global trajectory slots, independent worker clocks, immediate slot reuse, live Delay and Stop')

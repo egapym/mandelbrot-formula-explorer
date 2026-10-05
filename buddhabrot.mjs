@@ -231,7 +231,6 @@ export class BuddhabrotRunner {
   setRenderSpeed(delay) {
     this.renderDelay = Math.max(0, delay)
     if (this.renderDelay === 0) {
-      this._activePresentationWorker = null
       this._schedulePresentation()
     }
     // 速度設定をすべてのワーカーへ通知する
@@ -252,12 +251,34 @@ export class BuddhabrotRunner {
   /** CPU で同時に描画を進める座標（軌道）の数を更新する。 */
   setRenderPointBatchSize(size) {
     this.renderPointBatchSize = normalizeRenderPointBatchSize(size, this.maxRenderPointBatchSize)
-    for (const w of this.workers) {
-      try {
-        w.postMessage({ cmd: 'setPointBatchSize', renderPointBatchSize: this.renderPointBatchSize })
-      } catch (e) {
-        ErrorHelpers.warn('Worker SetPointBatchSize', e)
+    this._assignTrajectorySlots()
+  }
+
+  // Divide the global concurrency budget; completed workers release their slots
+  // immediately instead of holding up the remaining workers.
+  _assignTrajectorySlots(notify = true) {
+    const slots = this.workers.map(() => 0)
+    let remaining = this.renderPointBatchSize
+    while (remaining > 0) {
+      let assigned = false
+      for (let i = 0; i < slots.length && remaining > 0; i++) {
+        if (this._finishedWorkers?.has(this.workers[i])) continue
+        const capacity = this._assignedSamples?.[i] ?? this.samples
+        if (slots[i] >= capacity) continue
+        slots[i]++
+        remaining--
+        assigned = true
       }
+      if (!assigned) break
+    }
+    this._trajectorySlots = slots
+    if (notify) {
+      this.workers.forEach((worker, i) => {
+        worker.postMessage({
+          cmd: 'setPointBatchSize', renderPointBatchSize: this.renderPointBatchSize,
+          trajectorySlots: slots[i],
+        })
+      })
     }
   }
 
@@ -337,6 +358,9 @@ export class BuddhabrotRunner {
       })
       return
     }
+    this._finishedWorkers = new Set()
+    this._assignedSamples = this.workers.map((_, i) => base + (i < rem ? 1 : 0))
+    this._assignTrajectorySlots(false)
     for (let i = 0; i < this.workers.length; i++) {
       const assign = base + (rem > 0 ? 1 : 0)
       if (rem > 0) rem--
@@ -358,6 +382,7 @@ export class BuddhabrotRunner {
         buddhaBandMode: params.buddhaBandMode || DEFAULT_CONFIG.BAND_MODE,
         renderDelay: this.renderDelay, // 速度設定をワーカーへ渡す
         renderPointBatchSize: this.renderPointBatchSize,
+        trajectorySlots: this._trajectorySlots[i],
         waitForPresentation: true,
         fractalType: params.fractalType || null,
         juliaRe: params.juliaRe,
@@ -402,42 +427,67 @@ export class BuddhabrotRunner {
 
   _clearPresentationQueue() {
     if (this._presentationFrame != null) cancelAnimationFrame(this._presentationFrame)
+    if (this._presentationTimer != null) clearTimeout(this._presentationTimer)
     this._presentationFrame = null
+    this._presentationTimer = null
     this._presentationQueue = []
-    this._lastPresentationTime = null
-    this._activePresentationWorker = null
+    this._lastPresentationTimes = new Map()
   }
 
-  // Delayed workers each hold at most one batch until it has been shown.
-  // Keep the same concurrent trajectories active until they finish, so adding
-  // trajectories never advances an individual orbit faster or interleaves worker pools.
+  // Every worker has its own presentation clock. A missing/long-running worker
+  // must never prevent another ready worker from advancing its trajectories.
   _schedulePresentation() {
-    if (this._presentationFrame != null || this._presentationQueue.length === 0) return
-    if (this._activePresentationWorker && !this._presentationQueue.some(
-      (entry) => entry.worker === this._activePresentationWorker,
-    )) return
-    this._presentationFrame = requestAnimationFrame(() => {
+    if (this._presentationFrame != null || this._presentationTimer != null || this._presentationQueue.length === 0) return
+    const present = () => {
       this._presentationFrame = null
-      if (this._lastPresentationTime !== null && Date.now() - this._lastPresentationTime < this.renderDelay) {
-        this._schedulePresentation()
-        return
-      }
-      const index = this._activePresentationWorker
-        ? this._presentationQueue.findIndex((entry) => entry.worker === this._activePresentationWorker)
-        : 0
-      if (index < 0) return
-      const { data, worker } = this._presentationQueue.splice(index, 1)[0]
-      if (!this.running || data.jobId !== this._currentJobId) return
-      this._activePresentationWorker = worker
-      try {
+      this._presentationTimer = null
+      const now = Date.now()
+      const ready = []
+      this._presentationQueue = this._presentationQueue.filter((entry) => {
+        const last = this._lastPresentationTimes.get(entry.worker)
+        if (last !== undefined && now - last < this.renderDelay) return true
+        ready.push(entry)
+        return false
+      })
+      const presented = []
+      for (const { data, worker } of ready) {
+        if (!this.running || data.jobId !== this._currentJobId) continue
         this._mergeChunk(data.chunk)
-        this.onChunk(data.chunk)
-        this._lastPresentationTime = Date.now()
-      } finally {
-        worker.postMessage({ cmd: 'presented', jobId: data.jobId, presentationId: data.chunk.presentationId })
-        this._schedulePresentation()
+        this._lastPresentationTimes.set(worker, Date.now())
+        presented.push({ data, worker })
       }
-    })
+      if (presented.length > 0) {
+        try {
+          // Every ready worker has already contributed to the density buffers.
+          // Recolor the full canvas once, then release all of them together.
+          // Calling onChunk once per worker made a larger Points per Batch value
+          // spend most of its time repeatedly recoloring the same canvas.
+          this.onChunk(presented[0].data.chunk)
+        } finally {
+          for (const { data, worker } of presented) {
+            worker.postMessage({ cmd: 'presented', jobId: data.jobId, presentationId: data.chunk.presentationId })
+          }
+        }
+      }
+      this._schedulePresentation()
+    }
+    // requestAnimationFrame has a practical minimum interval of one display
+    // frame.  Short delays must use a timer so that lowering the slider really
+    // accelerates an orbit instead of being capped at roughly 60 steps/sec.
+    if (this.renderDelay > 0 && this.renderDelay < 16) {
+      let wait = this.renderDelay
+      for (const entry of this._presentationQueue) {
+        const last = this._lastPresentationTimes.get(entry.worker)
+        if (last === undefined) {
+          wait = 0
+          break
+        }
+        wait = Math.min(wait, Math.max(0, last + this.renderDelay - Date.now()))
+      }
+      this._presentationTimer = setTimeout(present, wait)
+      return
+    }
+    this._presentationFrame = requestAnimationFrame(present)
   }
 
   _onWorkerMessage(e) {
@@ -479,15 +529,11 @@ export class BuddhabrotRunner {
       // data.chunk は { x, y, w, h, r, g, b } 形式
       this._mergeChunk(data.chunk)
       this.onChunk(data.chunk)
-    } else if (data.type === 'trajectoryBatchDone') {
-      if (this._activePresentationWorker === e.target) this._activePresentationWorker = null
-      this._schedulePresentation()
     } else if (data.type === 'compile') {
     } else if (data.type === 'done') {
-      if (this._activePresentationWorker === e.target) {
-        this._activePresentationWorker = null
-        this._schedulePresentation()
-      }
+      if (this._finishedWorkers.has(e.target)) return
+      this._finishedWorkers.add(e.target)
+      this._assignTrajectorySlots()
       this._pendingWorkers--
       if (this._pendingWorkers <= 0) {
         this.running = false

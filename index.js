@@ -369,6 +369,13 @@ const UI_DEFAULTS = {
   buddhaPointBatchSize: DEFAULT_RENDER_POINT_BATCH_SIZE,
 }
 
+// The delayed CPU path presents one orbit step at a time.  Keep the control's
+// range, while making every non-zero setting ten times more responsive.
+function getCpuBuddhabrotRenderDelay(value) {
+  const delay = Number(value)
+  return Number.isFinite(delay) && delay > 0 ? delay / 10 : 0
+}
+
 const EMBEDDED_MODE = document.documentElement.classList.contains('embedded-mode')
 const EMBEDDED_INITIAL_ZOOM_CORRECTION = {
   standardAspect: 4 / 3,
@@ -538,7 +545,6 @@ const DOM = {
     stop: document.getElementById('buddha-stop'),
     mode: document.getElementById('buddhaMode'),
     bandMode: document.getElementById('buddha-bandmode'),
-    antiColoring: document.getElementById('buddha-anti-coloring'),
   },
   palette: {
     dropdown: document.getElementById('palette-dropdown'),
@@ -3552,7 +3558,7 @@ async function startBuddhaRender() {
   const brightness = parseFloat(document.getElementById('buddha-brightness')?.value) || 1.8
   const gamma = parseFloat(document.getElementById('buddha-gamma')?.value) || 0.8
   const _rawRenderDelay = parseFloat(document.getElementById('buddha-draw-speed')?.value) || 0
-  const renderDelay = _rawRenderDelay === 1 ? 0.01 : _rawRenderDelay
+  const renderDelay = getCpuBuddhabrotRenderDelay(_rawRenderDelay)
   const renderPointBatchSize = syncBuddhaPointBatchSize(samples)
 
   BuddhabrotState.targetKind = target.kind
@@ -4023,15 +4029,8 @@ async function startBuddhaRender() {
         return false
       }
     })(),
-    // Anti-Buddhabrot Coloring は Anti-Buddhabrot のときだけ perPoint を選ぶ。
-    // 通常は画面の Band Mode をそのまま使う。
-    buddhaBandMode: (() => {
-      const uiEl = document.getElementById('buddha-bandmode')
-      const bandMode = uiEl?.value === 'perPoint' ? 'perPoint' : 'perTrajectory'
-      const antiColoring = document.getElementById('buddha-anti-coloring')
-      if ((mode === 'antibuddha' || mode === 'anti') && antiColoring?.checked) return 'perPoint'
-      return bandMode
-    })(),
+    // 両モードとも画面で選択された Band Mode を使用する。
+    buddhaBandMode: DOM.buddha.bandMode?.value === 'perPoint' ? 'perPoint' : 'perTrajectory',
   })
 }
 
@@ -9160,8 +9159,7 @@ function initListeners() {
               }
 
               if (buddhaRunner && typeof buddhaRunner.setRenderSpeed === 'function') {
-                const _v = parseFloat(val)
-                buddhaRunner.setRenderSpeed(_v === 1 ? 0.01 : _v)
+                buddhaRunner.setRenderSpeed(getCpuBuddhabrotRenderDelay(val))
               }
             } catch (e) {
               console.warn('Error setting buddha render speed in onApply:', e)
@@ -9191,7 +9189,7 @@ function initListeners() {
           const val = parseFloat(buddhaDrawSpeedEl.value)
           updateValueDisplay()
           if (buddhaRunner && typeof buddhaRunner.setRenderSpeed === 'function') {
-            buddhaRunner.setRenderSpeed(val === 1 ? 0.01 : val)
+            buddhaRunner.setRenderSpeed(getCpuBuddhabrotRenderDelay(val))
           }
         } catch (e) {
           console.warn('Error handling buddha-draw-speed input:', e)
@@ -9706,8 +9704,6 @@ function reset() {
   if (buddhaModeEl) buddhaModeEl.value = 'buddha'
   const buddhaBandModeEl = document.getElementById('buddha-bandmode')
   if (buddhaBandModeEl) buddhaBandModeEl.value = 'perTrajectory'
-  const antiColoringEl = document.getElementById('buddha-anti-coloring')
-  if (antiColoringEl) antiColoringEl.checked = false
 
   const buddhaIterEl = document.getElementById('buddha-iterations')
   if (buddhaIterEl) buddhaIterEl.value = '3000000'
