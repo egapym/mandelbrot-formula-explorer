@@ -534,6 +534,8 @@ const DOM = {
     render: document.getElementById('buddha-render'),
     stop: document.getElementById('buddha-stop'),
     mode: document.getElementById('buddhaMode'),
+    bandMode: document.getElementById('buddha-bandmode'),
+    antiColoring: document.getElementById('buddha-anti-coloring'),
   },
   palette: {
     dropdown: document.getElementById('palette-dropdown'),
@@ -3519,20 +3521,7 @@ async function startBuddhaRender() {
   // Buddhabrot 専用パレットがあればそのまま渡し、なければ通常パレットから組み立てる
   // GPU と CPU で同じ累積バンド値になるよう、正規化済み stops は常に作る
   const rawPal = buildPaletteFromId(palId)
-  // Buddhabrot パレットなら buddhaBandMode も保ったまま object 形式へそろえる
-  const bp = (() => {
-    try {
-      return getBuddhaPalette(palId)
-    } catch (_e) {
-      return null
-    }
-  })()
-  const pal = Array.isArray(rawPal)
-    ? {
-        bands: rawPal,
-        buddhaBandMode: bp?.buddhaBandMode ? bp.buddhaBandMode : undefined,
-      }
-    : rawPal
+  const pal = Array.isArray(rawPal) ? { bands: rawPal } : rawPal
 
   const brightness = parseFloat(document.getElementById('buddha-brightness')?.value) || 1.8
   const gamma = parseFloat(document.getElementById('buddha-gamma')?.value) || 0.8
@@ -3985,13 +3974,14 @@ async function startBuddhaRender() {
         return false
       }
     })(),
-    // buddhaBandMode は UI 指定を最優先し、なければパレット設定、最後に既定値を使う
+    // Anti-Buddhabrot Coloring は Anti-Buddhabrot のときだけ perPoint を選ぶ。
+    // 通常は画面の Band Mode をそのまま使う。
     buddhaBandMode: (() => {
       const uiEl = document.getElementById('buddha-bandmode')
-      const uiVal = uiEl?.value ? uiEl.value : null
-      if (uiVal) return uiVal
-      if (pal?.buddhaBandMode) return pal.buddhaBandMode
-      return 'perPoint'
+      const bandMode = uiEl?.value === 'perPoint' ? 'perPoint' : 'perTrajectory'
+      const antiColoring = document.getElementById('buddha-anti-coloring')
+      if ((mode === 'antibuddha' || mode === 'anti') && antiColoring?.checked) return 'perPoint'
+      return bandMode
     })(),
   })
 }
@@ -9642,6 +9632,10 @@ function reset() {
   // Buddhabrot の UI も既定値へ戻す
   const buddhaModeEl = document.getElementById('buddhaMode')
   if (buddhaModeEl) buddhaModeEl.value = 'buddha'
+  const buddhaBandModeEl = document.getElementById('buddha-bandmode')
+  if (buddhaBandModeEl) buddhaBandModeEl.value = 'perTrajectory'
+  const antiColoringEl = document.getElementById('buddha-anti-coloring')
+  if (antiColoringEl) antiColoringEl.checked = false
 
   const buddhaIterEl = document.getElementById('buddha-iterations')
   if (buddhaIterEl) buddhaIterEl.value = '3000000'

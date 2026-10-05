@@ -372,6 +372,18 @@ ${historyReset}
         atomicAdd(&bAcc[idx0], contribVec0.z);
       }
     }
+    // CPU worker と同じ収束判定を適用する。Anti-Buddhabrot の非発散軌道は
+    // 最大反復まで同じ数ピクセルに留まりやすく、ここを省くと GPU だけが
+    // 後半 band（Preset-01 では橙）を過剰に蓄積してしまう。
+    // 直近の異なる 3 ピクセルの最終出現時刻だけで、50 点内に 3 種類あるか
+    // 判定できる。3 番目の ID は不要（上位 2 種類以外の再出現は同じ更新）。
+    // convergence state begin
+    var newestPixel: i32 = -1;
+    var secondPixel: i32 = -1;
+    var newestAt: i32 = -1;
+    var secondAt: i32 = -1;
+    var thirdAt: i32 = -1;
+    // convergence state end
     for (var oi: u32 = 0u; oi < iter; oi = oi + 1u) {
       // 一時変数へ評価してから妥当性を確認する
       let n = f32(oi);
@@ -388,43 +400,56 @@ ${historyAfter('oi')}
       let pcoords = coordToIndex(z.x, z.y);
       let fx_px = pcoords.x;
       let fy_py = pcoords.y;
-      if (fx_px < 0.0 || fy_py < 0.0 || fx_px >= f32(u.width) || fy_py >= f32(u.height)) { continue; }
-      let px = u32(fx_px);
-      let py = u32(fy_py);
-      let idx = py * u.width + px;
-      // CPU worker と同様に、軌道位置を [0..1] に正規化する
-      var denom: u32 = 1u;
-      if (iter > 1u) { denom = iter - 1u; }
-      var frac: f32 = 0.0;
-      if (u.bandMode == 1u) {
-        // perTrajectory では frac は点ごとの選択に使わない
-        frac = 0.0;
-      } else if (u.bandMode == 2u) {
-  // perPoint（旧 perIteration）では軌道インデックスを maxIter 比率へ変換する
-        frac = f32(oi) / iterationDenominator;
-      } else {
-        // 既定の perPoint でも maxIter に対する比率を使う
-        frac = f32(oi) / iterationDenominator;
+      var currentPixelIdx: i32 = -1;
+      if (!(fx_px < 0.0 || fy_py < 0.0 || fx_px >= f32(u.width) || fy_py >= f32(u.height))) {
+        let px = u32(fx_px);
+        let py = u32(fy_py);
+        let idx = py * u.width + px;
+        currentPixelIdx = i32(idx);
+        // CPU worker と同様に、軌道位置を [0..1] に正規化する
+        var frac: f32 = 0.0;
+        if (u.bandMode == 1u) {
+          // perTrajectory では frac は点ごとの選択に使わない
+          frac = 0.0;
+        } else {
+          // perPoint（旧 perIteration）では軌道インデックスを maxIter 比率へ変換する
+          frac = f32(oi) / iterationDenominator;
+        }
+        // CPU と同じになるよう、frac >= 累積値 の間は次の band へ進める
+        var bandIdx: u32 = 0u;
+        if (u.bandMode == 1u) {
+          bandIdx = trajBandIdx;
+        } else {
+          var bi: u32 = 0u;
+          while (bi < u.bandCount && frac >= bands[bi].color.a) { bi = bi + 1u; }
+          bandIdx = bi;
+          if (bandIdx >= u.bandCount) { bandIdx = u.bandCount - 1u; }
+        }
+        // あらかじめ計算した整数寄与量を bandContribs から読む
+        let contribVec = bandContribs[bandIdx];
+        atomicAdd(&rAcc[idx], contribVec.x);
+        atomicAdd(&gAcc[idx], contribVec.y);
+        atomicAdd(&bAcc[idx], contribVec.z);
       }
-      // CPU と同じになるよう、frac >= 累積値 の間は次の band へ進める
-      var bandIdx: u32 = 0u;
-      if (u.bandMode == 1u) {
-        bandIdx = trajBandIdx;
-      } else {
-        var bi: u32 = 0u;
-        while (bi < u.bandCount && frac >= bands[bi].color.a) { bi = bi + 1u; }
-        bandIdx = bi;
-        if (bandIdx >= u.bandCount) { bandIdx = u.bandCount - 1u; }
+
+      // 200 点以下の軌道は従来の判定位置に達しないため追跡不要。
+      // convergence update begin
+      if (iter > 200u) {
+        if (currentPixelIdx >= 0) {
+          if (currentPixelIdx == newestPixel) {
+            newestAt = i32(oi);
+          } else {
+            if (currentPixelIdx != secondPixel) { thirdAt = secondAt; }
+            secondPixel = newestPixel;
+            secondAt = newestAt;
+            newestPixel = currentPixelIdx;
+            newestAt = i32(oi);
+          }
+        }
+        // ウィンドウは [oi - 49, oi]。画面外の点も時間を進めるが種類に数えない。
+        if (oi >= 200u && oi % 10u == 0u && thirdAt <= i32(oi) - 50) { break; }
       }
-  let bandColor = bands[bandIdx].color;
-  // あらかじめ計算した整数寄与量を bandContribs から読む
-  let contribVec = bandContribs[bandIdx];
-  let rContrib = contribVec.x;
-  let gContrib = contribVec.y;
-  let bContrib = contribVec.z;
-  atomicAdd(&rAcc[idx], rContrib);
-  atomicAdd(&gAcc[idx], gContrib);
-  atomicAdd(&bAcc[idx], bContrib);
+      // convergence update end
     }
   }
 }
@@ -1327,17 +1352,26 @@ export async function colorMapDensity({ rBuf, gBuf, bBuf, width, height, brightn
   })
 
   // uniform buffer を作る
-  const maxVal = Math.max(
-    1,
-    Math.max(...rBuf.map((v) => v || 0), ...gBuf.map((v) => v || 0), ...bBuf.map((v) => v || 0)),
-  )
-  const invLogDenom = 1 / Math.log10(1 + maxVal)
+  // CPU 描画経路と同じく、RGB 合計の最大密度を基準にする。
+  // チャンネルごとの最大値を使うと palette の色比が崩れ、特にサンプル数が
+  // 多いときに一色だけが支配的に見える。また、展開演算子で巨大な密度配列を
+  // Math.max へ渡すとブラウザの引数数上限に達するため、1 回の走査で求める。
+  let maxVal = 0
+  for (let i = 0; i < len; i++) {
+    const total = (rBuf[i] || 0) + (gBuf[i] || 0) + (bBuf[i] || 0)
+    if (total > maxVal) maxVal = total
+  }
+  maxVal = Math.max(1, maxVal)
+  // drawBuddhaDensityChannels の CPU フォールバックと同じ露出にする。
+  const invLogDenom = 2 / Math.log10(1 + maxVal)
   // denomScale は CPU 側と同じ考え方で、密度が大きいときの明るさを調整する
   const denomScale = 1 + Math.log10(1 + maxVal) / 4
   const uniformData = new Float32Array([invLogDenom, brightness, gamma, denomScale])
   // 16 byte 境界に合わせつつ width / height も入れる
   const uniformBuffer = device.createBuffer({
-    size: 16,
+    // Params は uniform address space で 16-byte alignment を持つ。
+    // float 4 個に続く width / height も格納できるよう 32 bytes を確保する。
+    size: 32,
     usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
   })
   device.queue.writeBuffer(uniformBuffer, 0, uniformData.buffer, 0, 16)

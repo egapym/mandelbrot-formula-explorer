@@ -19,9 +19,9 @@ async function acquireWorker() {
 
 function releaseWorker(worker) {
   try {
-    worker.onmessage = null
-    worker.postMessage({ cmd: 'stop' })
-    idleWorkers.push(worker)
+    // Wait for the worker's message handler to stop its active job before
+    // allowing another runner to acquire it from the pool.
+    worker.postMessage({ cmd: 'stop', releaseToPool: true })
   } catch (_e) {
     // A worker that is no longer usable must not be put back in the pool.
     try {
@@ -161,7 +161,7 @@ export class BuddhabrotRunner {
     const creates = []
     for (let i = 0; i < this.workerCount; i++) {
       const p = acquireWorker()
-        .then((w) => {
+      .then((w) => {
           // terminate() can run while an asynchronously created worker is
           // still loading.  Return that worker to the pool instead of leaking
           // it or attaching it to a disposed runner.
@@ -169,7 +169,19 @@ export class BuddhabrotRunner {
             releaseWorker(w)
             return null
           }
-          w.onmessage = (e) => this._onWorkerMessage(e)
+          const handleMessage = (e) => {
+            if (e.data?.type === 'released') {
+              idleWorkers.push(w)
+              return
+            }
+            this._onWorkerMessage(e)
+          }
+          w.onmessage = handleMessage
+          w.onerror = () => {
+            const idx = idleWorkers.indexOf(w)
+            if (idx >= 0) idleWorkers.splice(idx, 1)
+            try { w.terminate() } catch (_e) {}
+          }
           this.workers.push(w)
           return w
         })
@@ -232,6 +244,9 @@ export class BuddhabrotRunner {
 
   async start(params = {}) {
     if (this.running) return
+    // Do not let an earlier async start() send its job after a newer request
+    // has already started on this runner.
+    if (this._currentJobId !== null) this._startToken++
     const startToken = ++this._startToken
     this._terminated = false
     this.resetDensity()

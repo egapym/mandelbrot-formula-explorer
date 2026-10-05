@@ -88,6 +88,8 @@ At very high resolutions, switching can happen at different zoom levels to reduc
 - Sample count input
 - Buddhabrot GPU toggle
 - Buddhabrot palette selector
+- Band mode selector (per-trajectory / per-point; defaults to per-trajectory)
+- Anti-Buddhabrot Coloring toggle (off by default; uses per-point color distribution when enabled)
 - Brightness and gamma controls with reset buttons
 - CPU render speed delay slider with reset button
 - Render and Stop actions

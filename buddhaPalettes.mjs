@@ -12,7 +12,6 @@ export const BUDDHA_PALETTES = [
   {
     id: 'Preset-01',
     name: 'Preset-01',
-    buddhaBandMode: 'perTrajectory',
     bands: [
       { color: [0, 67, 112], ratio: 0.04 },
       { color: [0, 179, 167], ratio: 0.04 },
@@ -23,7 +22,6 @@ export const BUDDHA_PALETTES = [
   {
     id: 'Preset-02',
     name: 'Preset-02',
-    buddhaBandMode: 'perPoint',
     bands: [
       { color: [255, 255, 255], ratio: 0.02 },
       { color: [255, 200, 0], ratio: 0.18 },
@@ -33,7 +31,6 @@ export const BUDDHA_PALETTES = [
   {
     id: 'Preset-03',
     name: 'Preset-03',
-    buddhaBandMode: 'perTrajectory',
     bands: [
       { color: [0, 0, 0], ratio: 0.01 },
       { color: [255, 255, 255], ratio: 0.19 },
@@ -43,7 +40,6 @@ export const BUDDHA_PALETTES = [
   {
     id: 'Preset-04',
     name: 'Preset-04',
-    buddhaBandMode: 'perPoint',
     bands: [
       { color: [0, 0, 0], ratio: 0.05 },
       { color: [0, 255, 0], ratio: 0.65 },

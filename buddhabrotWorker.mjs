@@ -150,6 +150,7 @@ self.onmessage = (e) => {
     running = true
     renderDelay = data.renderDelay ?? 0 // start 時に待ち時間を初期化する
     currentJobId = data.jobId ?? 0 // この描画セッションの job ID を保持する
+    const jobId = currentJobId
     const iterFnStr = data.iterationFunction || null
     let compiledIter = null
     if (iterFnStr) {
@@ -164,14 +165,17 @@ self.onmessage = (e) => {
     }
     // 本番ではデバッグメッセージは出さない
     runSampling({ ...data, iterationFunctionCompiled: compiledIter }).then(() => {
-      if (running) {
-        postMessage({ type: 'done', jobId: currentJobId })
+      // An old async sampling loop can resume after a newer start message.
+      // It must not emit completion for the newer job.
+      if (running && currentJobId === jobId) {
+        postMessage({ type: 'done', jobId })
       }
     })
   } else if (data.cmd === 'stop') {
     running = false
     // 古いメッセージを無視できるよう job ID を無効化する
     currentJobId = -1
+    if (data.releaseToPool === true) postMessage({ type: 'released' })
   } else if (data.cmd === 'setSpeed') {
     // 実行中に待ち時間を更新する
     renderDelay = data.renderDelay ?? 0

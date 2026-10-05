@@ -583,16 +583,19 @@
               <div class="mb-2 row">
                 <div class="col col-sm-6">
                   <div class="d-flex align-items-start gap-3">
-                    <div style="flex: 1">
-                      <label for="buddhaMode" class="col-form-label py-0 d-block">Buddhabrot Mode</label>
-                      <select
-                        id="buddhaMode"
-                        class="form-select form-select-sm py-0"
-                        title="Buddhabrot: accumulates escaping orbits. Anti-Buddhabrot: accumulates non-escaping orbits."
-                      >
-                        <option value="buddha" selected>Buddhabrot</option>
-                        <option value="antibuddha">Anti-Buddhabrot</option>
-                      </select>
+                    <div>
+                      <label for="buddha-gpu" class="col-form-label py-0 d-block">Buddhabrot GPU</label>
+                      <div class="d-flex align-items-center py-1">
+                        <div class="form-check form-switch m-0">
+                          <input
+                            id="buddha-gpu"
+                            class="form-check-input"
+                            type="checkbox"
+                            role="switch"
+                            title="Use WebGPU acceleration for Buddhabrot rendering (requires a compatible browser and GPU)"
+                          />
+                        </div>
+                      </div>
                     </div>
                     <div>
                       <label for="buddha-toggle" class="col-form-label py-0 d-block">View</label>
@@ -612,43 +615,71 @@
                   </div>
                 </div>
                 <div class="col col-sm-6">
-                  <label for="buddha-iterations" class="col-form-label col col-sm-6 py-0">Samples</label>
-                  <input
-                    id="buddha-iterations"
-                    type="number"
-                    class="form-control form-control-sm py-0"
-                    value="3000000"
-                    step="100000"
-                    title="Total number of orbit samples for Buddhabrot rendering. More samples = higher quality but longer render time"
-                  />
+                  <div class="d-flex align-items-start gap-3">
+                    <div style="flex: 1">
+                      <label for="buddha-iterations" class="col-form-label py-0 d-block">Samples</label>
+                      <input
+                        id="buddha-iterations"
+                        type="number"
+                        class="form-control form-control-sm py-0"
+                        value="3000000"
+                        step="100000"
+                        title="Total number of orbit samples for Buddhabrot rendering. More samples = higher quality but longer render time"
+                      />
+                    </div>
+                    <div style="flex: 1">
+                      <label for="buddha-palette" class="col-form-label py-0 d-block">Palette</label>
+                      <select
+                        id="buddha-palette"
+                        class="form-select form-select-sm py-0"
+                        title="Select the color palette used for Buddhabrot rendering"
+                      >
+                        <!-- populated by JS -->
+                      </select>
+                    </div>
+                  </div>
                 </div>
               </div>
               <div class="mb-2 row">
-                <div class="col-6 d-flex align-items-start">
-                  <div>
-                    <label for="buddha-gpu" class="col-form-label py-0 d-block">Buddhabrot GPU</label>
-                    <div class="d-flex align-items-center py-1">
-                      <div class="form-check form-switch m-0">
-                        <input
-                          id="buddha-gpu"
-                          class="form-check-input"
-                          type="checkbox"
-                          role="switch"
-                          title="Use WebGPU acceleration for Buddhabrot rendering (requires a compatible browser and GPU)"
-                        />
-                      </div>
+                <div class="col col-sm-6">
+                  <div class="d-flex align-items-start gap-3">
+                    <div style="flex: 1">
+                      <label for="buddhaMode" class="col-form-label py-0 d-block">Buddhabrot Mode</label>
+                      <select
+                        id="buddhaMode"
+                        class="form-select form-select-sm py-0"
+                        title="Buddhabrot: accumulates escaping orbits. Anti-Buddhabrot: accumulates non-escaping orbits."
+                      >
+                        <option value="buddha" selected>Buddhabrot</option>
+                        <option value="antibuddha">Anti-Buddhabrot</option>
+                      </select>
+                    </div>
+                    <div style="flex: 1">
+                      <label for="buddha-bandmode" class="col-form-label py-0 d-block">Band Mode</label>
+                      <select
+                        id="buddha-bandmode"
+                        class="form-select form-select-sm py-0"
+                        title="Choose whether each orbit uses one color band or colors each point by its iteration."
+                      >
+                        <option value="perTrajectory" selected>perTrajectory</option>
+                        <option value="perPoint">perPoint</option>
+                      </select>
                     </div>
                   </div>
                 </div>
                 <div class="col col-sm-6">
-                  <label for="buddha-palette" class="col-form-label col col-sm-6 py-0">Palette</label>
-                  <select
-                    id="buddha-palette"
-                    class="form-select form-select-sm py-0 me-2"
-                    title="Select the color palette used for Buddhabrot rendering"
-                  >
-                    <!-- populated by JS -->
-                  </select>
+                  <label for="buddha-anti-coloring" class="col-form-label py-0 d-block">Anti-Buddhabrot Coloring</label>
+                  <div class="d-flex align-items-center py-1">
+                    <div class="form-check form-switch m-0">
+                      <input
+                        id="buddha-anti-coloring"
+                        class="form-check-input"
+                        type="checkbox"
+                        role="switch"
+                        title="Use per-point color distribution for Anti-Buddhabrot"
+                      />
+                    </div>
+                  </div>
                 </div>
               </div>
               <div class="mb-2 row">
