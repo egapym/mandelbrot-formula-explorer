@@ -3818,97 +3818,6 @@ async function startBuddhaRender() {
     } catch (e) {
       console.error('index.js: error creating buddhaRunner', e?.message ? e.message : e, e)
     }
-    // GPU 優先設定で factory が使えるなら、GPU runner への切り替えを試す
-    ;(async () => {
-      try {
-        // アプリ全体または Buddhabrot 専用の GPU トグルが ON のときだけ試す
-        if (
-          historyGpuSupported &&
-          (() => {
-            try {
-              // Buddhabrot 専用 GPU トグルがあればそちらを優先する
-              const bEl = document.getElementById('buddha-gpu')
-              if (bEl) return !!bEl.checked
-              const el = document.getElementById('gpu')
-              return el ? !!el.checked : false
-            } catch (_e) {
-              return false
-            }
-          })()
-        ) {
-          // 非同期の別経路で差し替わっていないか確認できるよう、今の runner を控える
-          const createdRunner = buddhaRunner
-          const mod = await import('./buddhabrot.mjs')
-          if (mod && typeof mod.createBuddhaRunner === 'function') {
-            const gpuRunner = await mod.createBuddhaRunner({
-              useGpu: true,
-              workerCount: Math.max(1, DEFAULT_WORKER_COUNT),
-              width: targetCanvas.width,
-              height: targetCanvas.height,
-              maxIter: targetRenderer.max_iter,
-              samples: samples,
-              renderDelay: buddhaRunner.renderDelay,
-              renderPointBatchSize: buddhaRunner.renderPointBatchSize,
-              onProgress: buddhaRunner.onProgress,
-              onChunk: buddhaRunner.onChunk,
-              onComplete: buddhaRunner.onComplete,
-              brightness: buddhaRunner.brightness,
-              gamma: buddhaRunner.gamma,
-            })
-
-            if (abortIfBuddhaRenderCanceled()) {
-              gpuRunner?.terminate?.()
-              return
-            }
-            if (!gpuRunner) return
-
-            // GPU 初期化中に別 runner へ変わっていたら差し替えない
-            if (buddhaRunner !== createdRunner) {
-              return
-            }
-
-            // 途中状態を引き継ぎ、GPU 側で続行できるようにする
-            const oldRunner = buddhaRunner
-            const wasRunning = !!(oldRunner?.running && oldRunner._sent > 0)
-            // 旧 runner を止める
-            oldRunner?.terminate?.()
-            // 差し替える
-            buddhaRunner = gpuRunner
-
-            // 旧 runner が動作中だったなら、同等パラメータで GPU runner を開始する
-            if (wasRunning) {
-              try {
-                const params = {
-                  samples: oldRunner.samples || 0,
-                  maxIter: oldRunner.maxIter || targetRenderer.max_iter,
-                  width: oldRunner.width || targetCanvas.width,
-                  height: oldRunner.height || targetCanvas.height,
-                  center: oldRunner.center || {
-                    x: targetRenderer.center[0].toNumber ? targetRenderer.center[0].toNumber() : -0.5,
-                    y: targetRenderer.center[1].toNumber ? targetRenderer.center[1].toNumber() : 0,
-                  },
-                  zoom: oldRunner.zoom || (targetRenderer.zoom.toNumber ? targetRenderer.zoom.toNumber() : 1),
-                  supersampling: oldRunner.supersampling || 0,
-                  palette: oldRunner.palette || pal,
-                  mode: oldRunner.mode || mode,
-                  brightness: oldRunner.brightness || brightness,
-                  gamma: oldRunner.gamma || gamma,
-                  iterationFunction: oldRunner.iterationFunction || target.iterationFunction,
-                  fractalType: oldRunner.fractalType || target.fractalType,
-                  juliaRe: oldRunner.juliaRe ?? target.juliaRe,
-                  juliaIm: oldRunner.juliaIm ?? target.juliaIm,
-                }
-                await buddhaRunner.start(params)
-              } catch (e) {
-                console.warn('Error starting GPU buddhaRunner after replacement:', e?.message ? e.message : e)
-              }
-            }
-          }
-        }
-      } catch (e) {
-        console.warn('Could not initialize GPU buddha runner:', e?.message ? e.message : e)
-      }
-    })()
   }
 
   // runner の設定を更新して開始する
@@ -3942,7 +3851,9 @@ async function startBuddhaRender() {
   buddhaLockedByFractalChange = false
   // view トグルはここでは有効化せず、描画完了時に有効化する
 
-  // GPU 優先なら、start() 前に GPU runner を作って差し替えられるか試す
+  // GPU 優先なら、start() 前に GPU runner を一度だけ作って差し替える。
+  // runner 作成をここへ集約し、連続実行時に同一要求から複数の GPU runner が
+  // 非同期に起動・破棄し合わないようにする。
   if (
     historyGpuSupported &&
     (() => {
@@ -4257,6 +4168,10 @@ function drawBuddhaDensityChannels(
   // Buddhabrot が非アクティブなら早めに抜ける
   // ただし保持表示モード中は、既存 density バッファの再マッピングだけ許可する
   if (!buddhaActive && !buddhaPreservedDisplay) return
+  // colorMapDensity() / createImageBitmap() は非同期で完了する。連続 Render 時に
+  // 古い密度の bitmap が新しい結果より後に返ってキャンバスを巻き戻さないよう、
+  // この描画要求が最新かを完了時にも確認する。
+  const drawGeneration = ++buddhaDensityDrawGeneration
   const displayTargetKind = BuddhabrotState.targetKind || getBuddhabrotTargetSnapshot().kind
   const displayCanvas = getBuddhabrotDisplayCanvas(displayTargetKind)
 
@@ -4267,7 +4182,22 @@ function drawBuddhaDensityChannels(
     const v = (rBuf[i] || 0) + (gBuf[i] || 0) + (bBuf[i] || 0)
     if (v > max) max = v
   }
-  if (max === 0) return
+  if (max === 0) {
+    // Preset-04 の黒 band だけが選ばれた場合も、前回の画像を残さず今回の
+    // 計算結果として黒いキャンバスへ更新する。drawGeneration はこの関数の
+    // 先頭で更新済みなので、古い非同期 bitmap の後着も抑止される。
+    const ctx = displayCanvas.getContext('2d')
+    ctx.save()
+    ctx.fillStyle = 'black'
+    ctx.fillRect(0, 0, displayCanvas.width, displayCanvas.height)
+    ctx.restore()
+    _lastHighResBuddhaCanvas = null
+    if (lastHighResBuddhaBitmap && typeof lastHighResBuddhaBitmap.close === 'function') {
+      lastHighResBuddhaBitmap.close()
+    }
+    lastHighResBuddhaBitmap = null
+    return
+  }
 
   // CPU フォールバック描画用の offscreen キャンバスを用意する
   const off = document.createElement('canvas')
@@ -4289,6 +4219,10 @@ function drawBuddhaDensityChannels(
         brightness,
         gamma,
 	      }).then((bitmap) => {
+	        if (drawGeneration !== buddhaDensityDrawGeneration) {
+	          bitmap.close?.()
+	          return
+	        }
 	        try {
 	          _lastHighResBuddhaCanvas = null
 	          if (lastHighResBuddhaBitmap && typeof lastHighResBuddhaBitmap.close === 'function') {
@@ -4360,6 +4294,10 @@ function drawBuddhaDensityChannels(
       mainCtx.imageSmoothingEnabled = true
       if (!synchronous && typeof createImageBitmap === 'function') {
         createImageBitmap(off).then((bitmap) => {
+          if (drawGeneration !== buddhaDensityDrawGeneration) {
+            bitmap.close?.()
+            return
+          }
           if (lastHighResBuddhaBitmap && typeof lastHighResBuddhaBitmap.close === 'function') {
             lastHighResBuddhaBitmap.close()
           }
@@ -5005,6 +4943,8 @@ let savedBuddhaImageCaptureGeneration = 0
 let _lastHighResBuddhaCanvas = null
 // 描画に使った直近の ImageBitmap を保持し、差し替え時に close できるようにする
 let lastHighResBuddhaBitmap = null
+// 非同期の密度色変換が古いレンダーを後着で描かないようにする世代番号
+let buddhaDensityDrawGeneration = 0
 // 破棄済み runner から飛んでくる遅延描画を無効化するための世代番号
 let buddhaRunnerGeneration = 0
 // runner 生成前の非同期 Buddhabrot 開始リクエストをキャンセルするための世代番号
