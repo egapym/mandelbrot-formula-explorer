@@ -3214,18 +3214,20 @@ try {
 
 // Buddhabrot の GPU 利用設定トグルを接続する
 const buddhaGpuToggle = document.getElementById('buddha-gpu')
+function disableBuddhabrotGpuForCpuOnlySetting() {
+  if (buddhaGpuToggle) buddhaGpuToggle.checked = false
+  // GPU runner が動作中なら停止し、次回は CPU runner を作り直す。
+  const isGpuRunner =
+    buddhaRunner &&
+    ((buddhaRunner.constructor && buddhaRunner.constructor.name === 'BuddhabrotWebGPU') ||
+      typeof buddhaRunner.devicePromise !== 'undefined')
+  if (isGpuRunner) buddhaRunner.terminate?.()
+}
+
 if (buddhaGpuToggle) {
   buddhaGpuToggle.addEventListener('change', (_e) => {
     try {
-      // GPU 版の runner が動作中に OFF へした場合は停止し、次回は CPU 版で作り直す
-      if (!buddhaGpuToggle.checked && buddhaRunner) {
-        const isGpuRunner =
-          (buddhaRunner.constructor && buddhaRunner.constructor.name === 'BuddhabrotWebGPU') ||
-          typeof buddhaRunner.devicePromise !== 'undefined'
-        if (isGpuRunner) {
-          buddhaRunner.terminate?.()
-        }
-      }
+      if (!buddhaGpuToggle.checked) disableBuddhabrotGpuForCpuOnlySetting()
     } catch (e) {
       console.warn('Error handling buddha-gpu toggle change:', e)
     }
@@ -9067,18 +9069,22 @@ function initListeners() {
   // 同時に描画する座標数を、実行中の CPU worker にも反映する。
   try {
     const pointBatchSizeEl = DOM.buddha.pointBatchSize
-    const updatePointBatchSize = () => syncBuddhaPointBatchSize()
+    const syncPointBatchSize = () => syncBuddhaPointBatchSize()
+    const updatePointBatchSize = () => {
+      disableBuddhabrotGpuForCpuOnlySetting()
+      syncPointBatchSize()
+    }
     if (pointBatchSizeEl) {
       pointBatchSizeEl.addEventListener('input', updatePointBatchSize)
-      DOM.buddha.iterations?.addEventListener('input', updatePointBatchSize)
-      DOM.buddha.iterations?.addEventListener('change', updatePointBatchSize)
-      DOM.supersamplingToggle?.addEventListener('change', updatePointBatchSize)
+      DOM.buddha.iterations?.addEventListener('input', syncPointBatchSize)
+      DOM.buddha.iterations?.addEventListener('change', syncPointBatchSize)
+      DOM.supersamplingToggle?.addEventListener('change', syncPointBatchSize)
       document.getElementById('reset-buddha-point-batch-size')?.addEventListener('click', () => {
         applyDefaultAndRefresh('buddha-point-batch-size', UI_DEFAULTS.buddhaPointBatchSize, {
           onApply: updatePointBatchSize,
         })
       })
-      updatePointBatchSize()
+      syncPointBatchSize()
     }
   } catch (e) {
     console.warn('Error wiring buddha-point-batch-size controls:', e)
@@ -9089,6 +9095,7 @@ function initListeners() {
     const resetBuddhaDrawSpeed = document.getElementById('reset-buddha-draw-speed')
     if (resetBuddhaDrawSpeed) {
       resetBuddhaDrawSpeed.addEventListener('click', () => {
+        disableBuddhabrotGpuForCpuOnlySetting()
         applyDefaultAndRefresh('buddha-draw-speed', UI_DEFAULTS.buddhaRenderSpeed, {
           onApply: (val) => {
             try {
@@ -9127,6 +9134,7 @@ function initListeners() {
       buddhaDrawSpeedEl.addEventListener('input', () => {
         try {
           const val = parseFloat(buddhaDrawSpeedEl.value)
+          disableBuddhabrotGpuForCpuOnlySetting()
           updateValueDisplay()
           if (buddhaRunner && typeof buddhaRunner.setRenderSpeed === 'function') {
             buddhaRunner.setRenderSpeed(getCpuBuddhabrotRenderDelay(val))
