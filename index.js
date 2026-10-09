@@ -5469,6 +5469,10 @@ let pinnedOrbit = null
 let juliaPinnedOrbit = null
 let mainOrbitHoverActive = false
 let juliaOrbitHoverActive = false
+// Julia Buddhabrot 中にも最後のホバー位置へ軌道を重ねられるようにする。
+// この座標は表示専用で、パン・ズームなどの操作には使わない。
+let juliaLastOrbitClientX = null
+let juliaLastOrbitClientY = null
 let orbitTouchTapCandidate = false
 let orbitTouchStart = null
 let juliaOrbitTouchTapCandidate = false
@@ -6105,9 +6109,20 @@ function onJuliaMouseDown(evt) {
 }
 
 function onJuliaMouseMove(evt) {
-  if (evt.type === 'mousemove') juliaOrbitHoverActive = true
+  if (evt.type === 'mousemove') {
+    juliaOrbitHoverActive = true
+    juliaLastOrbitClientX = evt.clientX
+    juliaLastOrbitClientY = evt.clientY
+  }
   if (isJuliaCanvasInteractionBlockedByBuddhabrot()) {
     if (juliaCanvasElement) juliaCanvasElement.style.cursor = ''
+    // Buddhabrot は Julia の操作を禁止するが、Orbit は独立した表示用
+    // オーバーレイなので、表示中の画像を変えずに重ねられる。
+    if (orbitDrawEnabled && isBuddhabrotViewShownOnJulia() && !juliaPinnedOrbit) {
+      try {
+        drawOrbitOnJuliaCanvas(evt.clientX, evt.clientY)
+      } catch (_) {}
+    }
     return
   }
   // 固定した Julia 軌道の十字付近では、解除できることが分かるようポインター表示にする
@@ -6799,12 +6814,21 @@ function _refreshActiveOrbitOverlays() {
   if (!orbitDrawEnabled) return
   if (pinnedOrbit) {
     _refreshPinnedOrbits()
-    return
+  } else {
+    _refreshMainOrbitOverlayAtLastPoint()
   }
-  _refreshMainOrbitOverlayAtLastPoint()
   if (orbitDrawEnabled && juliaPinnedOrbit && juliaState?.active) {
     try {
       drawOrbitOnJuliaCanvasAtComplex(juliaPinnedOrbit.re, juliaPinnedOrbit.im)
+    } catch (_) {}
+  } else if (
+    juliaState?.active &&
+    juliaOrbitHoverActive &&
+    juliaLastOrbitClientX !== null &&
+    juliaLastOrbitClientY !== null
+  ) {
+    try {
+      drawOrbitOnJuliaCanvas(juliaLastOrbitClientX, juliaLastOrbitClientY)
     } catch (_) {}
   } else if (!juliaOrbitHoverActive) {
     clearJuliaOrbitCanvas()
@@ -6829,7 +6853,6 @@ function clearJuliaOrbitCanvas() {
  * @param refPixY   任意: z0Imag に対応する Julia キャンバスの物理ピクセル Y
  */
 function drawOrbitOnJuliaCanvasAtComplex(z0Real, z0Imag, refPixX = null, refPixY = null) {
-  if (isJuliaCanvasInteractionBlockedByBuddhabrot()) return
   if (!juliaState.active || !juliaState.renderer) return
   const jOrbitCanvas = document.getElementById('julia-orbit-canvas')
   if (!jOrbitCanvas) return
@@ -9537,6 +9560,7 @@ function initListeners() {
               } else {
                 redrawJulia()
               }
+              _refreshActiveOrbitOverlays()
             })
           }
         } else {
@@ -9579,6 +9603,9 @@ function initListeners() {
           requestAnimationFrame(() => {
             resizeToCanvasSize()
             if (stoppedBuddhabrotRendering) restoreOrRedrawFractalDisplayAfterClearingBuddha('main')
+            // ミニマップ上で固定した通常軌道を、通常サイズの overlay バッファへ
+            // 再描画する。小さいバッファを CSS 拡大した表示を残さない。
+            _refreshActiveOrbitOverlays()
           })
         }
         if (detailEnabled) _renderDetailIndicator()

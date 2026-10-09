@@ -51,6 +51,7 @@ async function sample(options = {}, delay = 0, onYield = null, pointBatchSize = 
   const progress = []
   const waits = []
   let chunks = 0
+  let clock = 0
   const context = vm.createContext({
     self: {},
     console,
@@ -67,6 +68,7 @@ async function sample(options = {}, delay = 0, onYield = null, pointBatchSize = 
       pendingSteps.push([sample, step])
     },
     Math: Object.assign(Object.create(Math), { random: () => 0.25 }),
+    Date: { now: () => (clock += opts.clockStep ?? 8) },
     postMessage(message) {
       if (message.type === 'progress') progress.push(message.done)
       if (message.type !== 'chunk') return
@@ -106,8 +108,9 @@ async function sample(options = {}, delay = 0, onYield = null, pointBatchSize = 
   return { density, contributions, hits, progress, waits, chunks, stepFrames }
 }
 
-function equalDensity(expected, actual) {
+function equalDensity(expected, actual, exact = false) {
   assert.deepEqual(actual.hits, expected.hits, 'Orbit hits or band colors changed')
+  if (exact) assert.deepEqual(actual.density, expected.density, 'Immediate Float32 density changed')
   for (let c = 0; c < 3; c++) {
     for (let i = 0; i < expected.density[c].length; i++) {
       // Batching changes Float32 addition grouping, but must retain all hits and colors.
@@ -121,6 +124,15 @@ function equalDensity(expected, actual) {
 }
 
 const immediate = await sample()
+// Fast samples should not incur a timer on every sample-count checkpoint.
+// Slow slices still need to accept Stop, even when they have visible density.
+const fastSlices = await sample({ clockStep: 0 })
+assert.equal(fastSlices.waits.length, 0, 'Cheap immediate samples paid timer roundtrips')
+equalDensity(immediate, fastSlices)
+const stoppedImmediate = await sample({}, 0,
+  (context) => context.self.onmessage({ data: { cmd: 'stop' } }))
+assert.equal(stoppedImmediate.waits.length, 1, 'Immediate rendering ignored Stop at a slice boundary')
+assert.ok(!stoppedImmediate.progress.includes(base.samples))
 for (const delay of [0.01, 1, 10, 100]) {
   const delayed = await sample({}, delay)
   assert.ok(delayed.waits.length < 2000, `Long anti-buddhabrot orbits waited ${delayed.waits.length} times`)
@@ -136,7 +148,7 @@ for (const expression of [null, 'z*z+c', 'c*(z+1/(z^2))', 'z*z+c+0.1*zDelay(2)']
       for (const paletteStops of [null, ...BUDDHA_PALETTES]) {
         const opts = { iterationFunction: expression, mode, buddhaBandMode, paletteStops, samples: 128, maxIter: 240 }
         equalDensity(await sample(opts), await sample(opts, 10))
-        if (referenceSource) equalDensity(await sample({ ...opts, workerSource: referenceSource }), await sample(opts))
+        if (referenceSource) equalDensity(await sample({ ...opts, workerSource: referenceSource }), await sample(opts), true)
         cases++
       }
     }
@@ -156,9 +168,29 @@ for (const fractalType of ['julia', 'julia-custom']) {
         iterationFunction: fractalType === 'julia-custom' ? 'z*z+c+0.1*zAt(0)' : null,
       }
       equalDensity(await sample(opts), await sample(opts, 10))
-      if (referenceSource) equalDensity(await sample({ ...opts, workerSource: referenceSource }), await sample(opts))
+      if (referenceSource) equalDensity(await sample({ ...opts, workerSource: referenceSource }), await sample(opts), true)
       cases++
     }
+  }
+}
+
+// Exercise Float32/Float64 trajectory storage, convergence boundaries and
+// palette rounding at zero/negative ratios with non-default initial states.
+for (const maxIter of [0, 199, 200, 201, 5000, 5001]) {
+  for (const buddhaBandMode of ['perPoint', 'perTrajectory']) {
+    const opts = {
+      samples: 16, maxIter, buddhaBandMode, iterationFunction: 'z*z+c+0.1*zDelay(2)',
+      z0Real: 0.1, z0Imag: -0.2, escapeRadius: 2,
+      paletteStops: { bands: [
+        { color: [201, 50, 255], ratio: 0.04 },
+        { color: [0, 0, 0], ratio: 0 },
+        { color: [17, 83, 129], ratio: -0.01 },
+        { color: [230, 58, 15], ratio: 0.97 },
+      ] },
+    }
+    equalDensity(await sample(opts), await sample(opts, 10))
+    if (referenceSource) equalDensity(await sample({ ...opts, workerSource: referenceSource }), await sample(opts), true)
+    cases++
   }
 }
 

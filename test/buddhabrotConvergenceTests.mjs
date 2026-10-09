@@ -15,13 +15,28 @@ const createTracker = new Function(`${extract('state')}
     return false;
   }`)
 
+const cpuSource = readFileSync(new URL('../buddhabrotWorker.mjs', import.meta.url), 'utf8')
+const extractCpu = (name) => {
+  const block = cpuSource.split(`// convergence ${name} begin`)[1]?.split(`// convergence ${name} end`)[0]
+  assert.ok(block, `Missing CPU convergence ${name} block`)
+  return block
+}
+const createCpuTracker = new Function(`${extractCpu('state')}
+  return (currentPixelIdx, k, trajLen) => {
+    const stepped = false;
+    ${extractCpu('update').replace('if (stepped) yield false', '').replace(/\breturn\b/g, 'return true')}
+    return false;
+  }`)
+
 let checks = 0
 function verify(pixels) {
   const track = createTracker()
+  const trackCpu = createCpuTracker()
   for (let i = 0; i < pixels.length; i++) {
     const expected = i >= 200 && i % 10 === 0 &&
       new Set(pixels.slice(Math.max(0, i - 49), i + 1).filter((p) => p >= 0)).size <= 2
     assert.equal(track(pixels[i], i, pixels.length), expected, `Window ending at ${i}`)
+    assert.equal(trackCpu(pixels[i], i, pixels.length), expected, `CPU window ending at ${i}`)
     checks++
   }
 }
@@ -53,4 +68,4 @@ for (let trial = 0; trial < 2000; trial++) {
     return pixel
   }))
 }
-console.log(`PASS: ${checks} convergence decisions match the 50-point Set oracle`)
+console.log(`PASS: ${checks} CPU/GPU convergence decisions match the 50-point Set oracle`)

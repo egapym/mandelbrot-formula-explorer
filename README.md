@@ -197,6 +197,17 @@ CPU rendering regressions: `node --test test/cpuRenderingTests.mjs`.
 With the local server running, open `test/cpuWorkerTests.html` for Worker batch,
 bitmap-cache update, cancellation and subsequent-job checks.
 
+Buddhabrot CPU checks: `node test/buddhabrotWorkerTests.mjs`,
+`node test/buddhabrotRunnerTests.mjs` and `node test/buddhabrotConvergenceTests.mjs`.
+The worker tests accept `BUDDHA_REFERENCE_WORKER=/path/to/old-worker.mjs` to
+compare seeded orbit hits, colors and immediate RGB density with an earlier implementation.
+Run `node test/buddhabrotCpuBenchmark.mjs` for a seeded single-worker Node benchmark
+(640×360, 1,000 iterations, Delay=0, warmup plus three measured runs).
+It also accepts `BUDDHA_REFERENCE_WORKER`, `BUDDHA_BENCH_SAMPLES` (default 10,000)
+and `BUDDHA_BENCH_REPEATS` (default 3). These times exclude browser canvas coloring.
+Immediate CPU sampling yields at sample checkpoints when its 8 ms time slice
+expires; delayed rendering still advances each active trajectory once per Delay.
+
 Browser-based tests are available under the `test/` directory.
 
 1. Start the local server:

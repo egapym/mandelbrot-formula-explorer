@@ -23,12 +23,9 @@ const SAMPLING_CONFIG = {
   MIN_FLUSH_INTERVAL: 1000,
   FLUSH_DIRTY_THRESHOLD: 2000,
   COOPERATIVE_SAMPLE_INTERVAL: 100,
+  COOPERATIVE_TIME_SLICE_MS: 8,
   VIEW_SPAN: 2.0,
   MAX_ITER_FLOAT32_THRESHOLD: 5000,
-  // 早期終了の最適化。安全側の緩めな設定にしている
-  CONVERGENCE_CHECK_WINDOW: 50, // 直近 50 点で収束を確認する
-  CONVERGENCE_UNIQUE_THRESHOLD: 2, // 一意なピクセル数が 2 以下なら収束とみなす
-  CONVERGENCE_MIN_POINTS: 200, // 200 点描くまでは収束判定しない
 }
 
 // ============================================================================
@@ -419,6 +416,12 @@ async function runSampling(opts) {
     }
   }
 
+  const useBands = bandsLen > 0
+  const perTrajectory = buddhaBandMode === 'perTrajectory'
+  const iterationDenominator = Math.max(1, maxIter)
+  const band1 = Math.max(1, Math.floor(maxIter * 0.01))
+  const band2 = Math.max(band1 + 1, Math.floor(maxIter * 0.1))
+
   function* drawTrajectory(stepped = false) {
     // 表示領域内のランダム点を選ぶ（PRNG を使用）
     const sampleRe = left + randf() * (right - left)
@@ -474,26 +477,32 @@ async function runSampling(opts) {
     const keep = (mode === 'buddha' && escaped) || (mode === 'antibuddha' && !escaped)
     if (!keep || trajLen === 0) return
 
-    // 軌道をピクセル貢献にマッピングする
-    const band1 = Math.max(1, Math.floor(maxIter * 0.01))
-    const band2 = Math.max(band1 + 1, Math.floor(maxIter * 0.1))
-    const useBands = bandsLen > 0
-    // perTrajectory モードかつ band がある場合は、
-    // 軌道全体に使う色を事前に決めておく
-    let trajBandColor = null
-    if (useBands && buddhaBandMode === 'perTrajectory') {
-      const fracTraj = trajLen / Math.max(1, maxIter)
+    // Color components retain the original Float32 palette rounding, followed
+    // by double-precision multiplication and Float32 density accumulation.
+    let colorR = 0
+    let colorG = 0
+    let colorB = 0
+    let pointBand = 0
+    if (useBands && perTrajectory) {
+      const fracTraj = trajLen / iterationDenominator
       let bi = 0
       while (bi < bandsLen && fracTraj >= bandCums[bi]) bi++
-      const bidxTraj = Math.min(bi, bandsLen - 1)
-      const offt = bidxTraj * 3
-      trajBandColor = [bandColors[offt] || 0, bandColors[offt + 1] || 0, bandColors[offt + 2] || 0]
+      const offset = Math.min(bi, bandsLen - 1) * 3
+      colorR = (bandColors[offset] || 0) * 1.2
+      colorG = (bandColors[offset + 1] || 0) * 1.2
+      colorB = (bandColors[offset + 2] || 0) * 1.2
     }
 
-    // 早期終了最適化：最近のピクセルヒットを追跡して収束を検出する
-    const recentPixels = new Int32Array(SAMPLING_CONFIG.CONVERGENCE_CHECK_WINDOW)
-    recentPixels.fill(-1) // 無効なインデックスで初期化
-    let recentPixelIndex = 0
+    // Track the last occurrences of the three most recent distinct pixels.
+    // The third timestamp determines whether the 50-point window has >2 IDs,
+    // without an orbit buffer or a Set scan at every convergence check.
+    // convergence state begin
+    let newestPixel = -1
+    let secondPixel = -1
+    let newestAt = -1
+    let secondAt = -1
+    let thirdAt = -1
+    // convergence state end
 
     const points = stepped ? trajBuf.slice(0, trajLen * 2) : trajBuf
     // Prime the trajectory without drawing: every active orbit starts at step zero.
@@ -517,90 +526,51 @@ async function runSampling(opts) {
       if (px >= 0 && px < chunkW_local && py >= 0 && py < chunkH_local) {
         const idx = py * chunkW_local + px
         currentPixelIdx = idx // 収束追跡のために保持
-        const contrib = 1.2
         if (useBands) {
-          if (buddhaBandMode === 'perTrajectory' && trajBandColor) {
-            const c0 = trajBandColor[0]
-            const c1 = trajBandColor[1]
-            const c2 = trajBandColor[2]
-            localR[idx] += c0 * contrib
-            localG[idx] += c1 * contrib
-            localB[idx] += c2 * contrib
-            if (!isDirty[idx]) {
-              isDirty[idx] = 1
-              dirtyList.push(idx)
-              pendingNonzeroCount++
-            }
-          } else {
-            let frac = 0
-            // 統一された意味付け：perPoint は各点の反復インデックスを maxIter に対する割合で扱い、
-            // パレット比率が最大反復数の割合になるようにする。
-            // perTrajectory モードは特別扱いで、trajLen/maxIter で band を決定し、
-            // 軌道全体をその色で塗る。
-            // maxIter に対する反復インデックス比を使うことで、
-            // パレット比率が最大反復数の割合に対応する。
-            frac = k / Math.max(1, maxIter)
-            let bi = 0
-            while (bi < bandsLen && frac >= bandCums[bi]) bi++
-            const bidx = Math.min(bi, bandsLen - 1)
-            const off = bidx * 3
-            const c0 = bandColors[off]
-            const c1 = bandColors[off + 1]
-            const c2 = bandColors[off + 2]
-            localR[idx] += c0 * contrib
-            localG[idx] += c1 * contrib
-            localB[idx] += c2 * contrib
-            if (!isDirty[idx]) {
-              isDirty[idx] = 1
-              dirtyList.push(idx)
-              pendingNonzeroCount++
-            }
+          if (!perTrajectory) {
+            // k increases monotonically: an earlier band cannot match again.
+            const frac = k / iterationDenominator
+            while (pointBand < bandsLen && frac >= bandCums[pointBand]) pointBand++
+            const offset = Math.min(pointBand, bandsLen - 1) * 3
+            colorR = bandColors[offset] * 1.2
+            colorG = bandColors[offset + 1] * 1.2
+            colorB = bandColors[offset + 2] * 1.2
           }
         } else {
-          let contribR = 0
-          let contribG = 0
-          let contribB = 0
-          if (k < band1) contribR = contrib
-          else if (k < band2) contribG = contrib
-          else contribB = contrib
-          if (contribR !== 0 || contribG !== 0 || contribB !== 0) {
-            localR[idx] += contribR
-            localG[idx] += contribG
-            localB[idx] += contribB
-            if (!isDirty[idx]) {
-              isDirty[idx] = 1
-              dirtyList.push(idx)
-              pendingNonzeroCount++
-            }
-          }
+          colorR = k < band1 ? 1.2 : 0
+          colorG = k >= band1 && k < band2 ? 1.2 : 0
+          colorB = k >= band2 ? 1.2 : 0
+        }
+        localR[idx] += colorR
+        localG[idx] += colorG
+        localB[idx] += colorB
+        if (!isDirty[idx]) {
+          isDirty[idx] = 1
+          dirtyList.push(idx)
+          pendingNonzeroCount++
         }
       }
 
-      // 収束検出のために最近のピクセル追跡を更新する
-      recentPixels[recentPixelIndex] = currentPixelIdx
-      recentPixelIndex = (recentPixelIndex + 1) % SAMPLING_CONFIG.CONVERGENCE_CHECK_WINDOW
-
-      // 収束判定：十分な点を描画し、最近の点が少数の一意ピクセルにしか
-      // 到達していない場合は計算を早期終了して時間を節約する
-      if (k >= SAMPLING_CONFIG.CONVERGENCE_MIN_POINTS && k % 10 === 0) {
-        // 最近のウィンドウ内で一意なピクセル数を数える
-        let uniqueCount = 0
-        const seenPixels = new Set()
-        for (let i = 0; i < SAMPLING_CONFIG.CONVERGENCE_CHECK_WINDOW; i++) {
-          const pixIdx = recentPixels[i]
-          if (pixIdx >= 0 && !seenPixels.has(pixIdx)) {
-            seenPixels.add(pixIdx)
-            uniqueCount++
+      // Offscreen points advance the window without counting as a pixel ID.
+      // convergence update begin
+      if (trajLen > 200) {
+        if (currentPixelIdx >= 0) {
+          if (currentPixelIdx === newestPixel) {
+            newestAt = k
+          } else {
+            if (currentPixelIdx !== secondPixel) thirdAt = secondAt
+            secondPixel = newestPixel
+            secondAt = newestAt
+            newestPixel = currentPixelIdx
+            newestAt = k
           }
         }
-
-        if (uniqueCount <= SAMPLING_CONFIG.CONVERGENCE_UNIQUE_THRESHOLD) {
-          // 軌道が狭い領域に収束していると判断したら早期終了する
-          // 早期終了 - 軌道は収束している
+        if (k >= 200 && k % 10 === 0 && thirdAt <= k - 50) {
           if (stepped) yield false
           return
         }
       }
+      // convergence update end
 
       if (stepped) yield k + 1 < trajLen
     }
@@ -610,6 +580,9 @@ async function runSampling(opts) {
   let nextSample = 0
   let completedSamples = 0
   let invisibleSteps = 0
+  // Yield often enough for Stop/live controls, without paying a timer roundtrip
+  // for every 100 cheap samples. This clock controls scheduling only.
+  let sliceStarted = Date.now()
 
   while (jobCtx.isActive() && (nextSample < samples || trajectories.length > 0)) {
     if (renderDelay === 0) {
@@ -625,9 +598,13 @@ async function runSampling(opts) {
       const shouldFlush = dirtyList.length >= flushWhenDirtyCount ||
         (completedSamples > 0 && completedSamples % flushIntervalSamples === 0)
       if (shouldFlush) flushSparse(jobCtx)
-      if (shouldFlush || completedSamples % SAMPLING_CONFIG.COOPERATIVE_SAMPLE_INTERVAL === 0) {
+      if (
+        (shouldFlush || completedSamples % SAMPLING_CONFIG.COOPERATIVE_SAMPLE_INTERVAL === 0) &&
+        Date.now() - sliceStarted >= SAMPLING_CONFIG.COOPERATIVE_TIME_SLICE_MS
+      ) {
         await new Promise((resolve) => setTimeout(resolve, 0))
         if (jobCtx.shouldStop()) break
+        sliceStarted = Date.now()
         jobCtx.sendProgress(completedSamples, samples)
       }
       continue
