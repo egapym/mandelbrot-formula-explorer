@@ -739,19 +739,19 @@
                     max="1024"
                     step="1"
                     value="64"
-                    title="Number of sampled coordinates whose trajectories are drawn concurrently. Each trajectory advances one step per Render Speed Delay. Applies to CPU delayed rendering."
+                    title="Number of sampled coordinates whose trajectories are drawn concurrently. Each trajectory advances one step per render pass. Applies when Render Slowdown is greater than 0."
                   />
                 </div>
                 <div class="col-6">
                   <div class="d-flex align-items-center">
                     <label for="buddha-draw-speed" class="col-form-label py-0"
-                      >Render Speed Delay (CPU): <span id="buddha-draw-speed-value">0</span>ms</label
+                      >Render Slowdown (CPU): <span id="buddha-draw-speed-value">0</span></label
                     >
                     <button
                       type="button"
                       id="reset-buddha-draw-speed"
                       class="btn btn-sm btn-outline-secondary rounded-pill slider-reset ms-2"
-                      title="Reset render speed"
+                      title="Reset render slowdown"
                     >
                       ↺
                     </button>
@@ -764,7 +764,7 @@
                     max="50"
                     step="1"
                     value="0"
-                    title="Delay between CPU render passes in ms. Increase to reduce CPU load and keep the UI responsive."
+                    title="Unitless control for slowing CPU rendering. 0 renders at full speed; higher values draw trajectories more slowly. The value is not a time interval."
                   />
                 </div>
               </div>

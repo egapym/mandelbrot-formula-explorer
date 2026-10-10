@@ -453,7 +453,6 @@ export class BuddhabrotRunner {
       for (const { data, worker } of ready) {
         if (!this.running || data.jobId !== this._currentJobId) continue
         this._mergeChunk(data.chunk)
-        this._lastPresentationTimes.set(worker, Date.now())
         presented.push({ data, worker })
       }
       if (presented.length > 0) {
@@ -462,9 +461,13 @@ export class BuddhabrotRunner {
           // Recolor the full canvas once, then release all of them together.
           // Calling onChunk once per worker made a larger Points per Batch value
           // spend most of its time repeatedly recoloring the same canvas.
-          this.onChunk(presented[0].data.chunk)
+          this.onChunk(presented[0].data.chunk, presented.map(({ data }) => data.chunk))
         } finally {
+          // Start the wait after the synchronous canvas draw. Measuring from
+          // the merge would let expensive recoloring consume the entire delay.
+          const completedAt = Date.now()
           for (const { data, worker } of presented) {
+            this._lastPresentationTimes.set(worker, completedAt)
             worker.postMessage({ cmd: 'presented', jobId: data.jobId, presentationId: data.chunk.presentationId })
           }
         }

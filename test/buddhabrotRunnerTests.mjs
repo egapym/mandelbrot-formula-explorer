@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
+import { runInNewContext } from 'node:vm'
 import { getRenderPointBatchLimit, normalizeRenderPointBatchSize } from '../buddhabrotRenderConfig.mjs'
 
 for (const [samples, workers, maximum] of [
@@ -94,11 +96,15 @@ const nextFrame = (time) => {
 }
 const displayed = []
 const coalesced = []
+const coalescedChunks = []
 const aggregate = new BuddhabrotRunner({
   workerCount: 2,
   width: 2,
   height: 2,
-  onChunk: () => coalesced.push(Array.from(aggregate.densityR).reduce((sum, value) => sum + value, 0)),
+  onChunk: (_chunk, chunks) => {
+    coalesced.push(Array.from(aggregate.densityR).reduce((sum, value) => sum + value, 0))
+    coalescedChunks.push(chunks.map((chunk) => Array.from(chunk.indices)))
+  },
 })
 await aggregate._workersReady
 await aggregate.start({ samples: 10, renderDelay: 100, renderPointBatchSize: 2 })
@@ -109,6 +115,7 @@ for (const [i, aggregateWorker] of aggregate.workers.entries()) {
 }
 nextFrame(0)
 assert.deepEqual(coalesced, [2], 'Ready workers recolored the canvas more than once')
+assert.deepEqual(coalescedChunks, [[[0], [1]]], 'Incremental drawing lost a coalesced worker chunk')
 assert.equal(aggregate.workers.flatMap((w) => w.messages).filter((m) => m.cmd === 'presented').length, 2)
 aggregate.terminate()
 
@@ -161,5 +168,55 @@ await parallel.start({ samples: 10, renderDelay: 0 })
 emit(parallel, parallel.workers[0], 'chunk', { ...chunk(undefined), r: [2] })
 assert.equal(displayed.at(-1), 2, 'Zero Delay did not merge immediately')
 parallel.terminate()
+
+// Exercise the UI mapping with a canvas draw slower than the former 5ms
+// maximum. Every nonzero setting must still wait after that draw completes.
+const uiSource = readFileSync(new URL('../index.js', import.meta.url), 'utf8')
+const delayFunction = uiSource.match(/function getCpuBuddhabrotRenderDelay\(value\) \{[\s\S]*?\n\}/)[0]
+const getDelay = runInNewContext(`(${delayFunction})`)
+const originalSetTimeout = globalThis.setTimeout
+const originalClearTimeout = globalThis.clearTimeout
+const timers = new Map()
+globalThis.setTimeout = (callback, wait) => {
+  const id = ++frameId
+  timers.set(id, { callback, due: currentTime + wait })
+  return id
+}
+globalThis.clearTimeout = (id) => timers.delete(id)
+const advance = (time) => {
+  nextFrame(time)
+  for (const [id, timer] of [...timers]) {
+    if (timer.due <= currentTime) {
+      timers.delete(id)
+      timer.callback()
+    }
+  }
+}
+let previousDelay = 0
+for (let value = 1; value <= 50; value++) {
+  const delay = getDelay(value)
+  assert.ok(delay > previousDelay, 'Slowdown must increase across the entire slider range')
+  previousDelay = delay
+  let draws = 0
+  const slowCanvas = new BuddhabrotRunner({
+    workerCount: 1, width: 2, height: 2,
+    onChunk: () => { draws++; currentTime += 100 },
+  })
+  await slowCanvas._workersReady
+  await slowCanvas.start({ samples: 10, renderDelay: delay })
+  emit(slowCanvas, slowCanvas.workers[0], 'chunk', chunk(1))
+  advance(currentTime)
+  const completedAt = currentTime
+  emit(slowCanvas, slowCanvas.workers[0], 'chunk', chunk(2))
+  advance(completedAt + delay / 2)
+  assert.equal(draws, 1, `Slowdown ${value} was consumed by canvas drawing`)
+  advance(completedAt + delay + 0.001)
+  assert.equal(draws, 2, `Slowdown ${value} did not release the next draw`)
+  slowCanvas.terminate()
+}
+assert.equal(getDelay(0), 0, 'Zero Slowdown must retain full speed')
+globalThis.setTimeout = originalSetTimeout
+globalThis.clearTimeout = originalClearTimeout
 Date.now = originalNow
+console.log('PASS: Slowdown 1-50 waits after expensive canvas drawing')
 console.log('PASS: global trajectory slots, independent worker clocks, immediate slot reuse, live Delay and Stop')

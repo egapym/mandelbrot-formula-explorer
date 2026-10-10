@@ -8,6 +8,7 @@ import {
 } from './animation.mjs'
 import { AnimationGpuSession } from './animationGpuSession.mjs'
 import { BuddhabrotRunner } from './buddhabrot.mjs'
+import { CpuDensityColorMap } from './buddhabrotCpuColorMap.mjs'
 import { DEFAULT_RENDER_POINT_BATCH_SIZE, getRenderPointBatchLimit, normalizeRenderPointBatchSize } from './buddhabrotRenderConfig.mjs'
 import { BUDDHA_PALETTES, buildBuddhaStops, getBuddhaPalette } from './buddhaPalettes.mjs'
 import { compileIterationFunction, getIterationHistoryRequirements, getParsedExpression, usesIterationHistory } from './customFunctionParser.mjs'
@@ -369,11 +370,12 @@ const UI_DEFAULTS = {
   buddhaPointBatchSize: DEFAULT_RENDER_POINT_BATCH_SIZE,
 }
 
-// The delayed CPU path presents one orbit step at a time.  Keep the control's
-// range, while making every non-zero setting ten times more responsive.
+// The delayed CPU path presents one orbit step at a time. The unitless
+// slowdown control uses a quadratic wait so its upper range remains visible
+// even when recoloring the canvas takes longer than a few milliseconds.
 function getCpuBuddhabrotRenderDelay(value) {
   const delay = Number(value)
-  return Number.isFinite(delay) && delay > 0 ? delay / 10 : 0
+  return Number.isFinite(delay) && delay > 0 ? (delay * delay) / 10 : 0
 }
 
 const EMBEDDED_MODE = document.documentElement.classList.contains('embedded-mode')
@@ -3707,7 +3709,7 @@ async function startBuddhaRender() {
             console.warn('Error updating progress from BuddhabrotRunner onProgress:', e?.message ? e.message : e)
           }
         },
-        onChunk: (chunk) => {
+        onChunk: (chunk, presentedChunks) => {
           // 進捗更新は別で行うので、ここでは描画予約だけ行う
           try {
             if (buddhaRunnerGeneration !== runnerGeneration) return
@@ -3724,8 +3726,12 @@ async function startBuddhaRender() {
                 buddhaRunner.brightness,
                 buddhaRunner.gamma,
                 true,
+                presentedChunks,
               )
             } else {
+              // Immediate chunks can arrive before the scheduled full draw.
+              // Do not reuse a sparse cache if Slowdown is switched back on.
+              cpuBuddhaColorMaps.delete(buddhaRunner.densityR)
               scheduleDraw()
             }
           } catch (e) {
@@ -4164,8 +4170,10 @@ function stopBuddhaPreserveDisplay() {
   }
 }
 
+const cpuBuddhaColorMaps = new WeakMap()
+
 function drawBuddhaDensityChannels(
-  rBuf, gBuf, bBuf, width, height, _pal, brightness = 1.8, gamma = 0.8, synchronous = false,
+  rBuf, gBuf, bBuf, width, height, _pal, brightness = 1.8, gamma = 0.8, synchronous = false, presentedChunks,
 ) {
   // Buddhabrot が非アクティブなら早めに抜ける
   // ただし保持表示モード中は、既存 density バッファの再マッピングだけ許可する
@@ -4177,12 +4185,37 @@ function drawBuddhaDensityChannels(
   const displayTargetKind = BuddhabrotState.targetKind || getBuddhabrotTargetSnapshot().kind
   const displayCanvas = getBuddhabrotDisplayCanvas(displayTargetKind)
 
+  let cpuFrame = null
+  let cpuUpdate = null
+  if (synchronous) {
+    cpuFrame = cpuBuddhaColorMaps.get(rBuf)
+    if (!cpuFrame || cpuFrame.mapper.g !== gBuf || cpuFrame.mapper.b !== bBuf ||
+      cpuFrame.off.width !== width || cpuFrame.off.height !== height) {
+      const off = document.createElement('canvas')
+      off.width = width
+      off.height = height
+      const offCtx = off.getContext('2d')
+      const img = offCtx.createImageData(width, height)
+      cpuFrame = { off, offCtx, img, mapper: new CpuDensityColorMap(rBuf, gBuf, bBuf, width, height, img.data) }
+      cpuBuddhaColorMaps.set(rBuf, cpuFrame)
+    }
+    cpuUpdate = cpuFrame.mapper.update(brightness, gamma, presentedChunks)
+  } else {
+    // Full-speed/GPU draws and display changes can mutate the same buffers
+    // without sparse notifications. Rebuild when delayed rendering resumes.
+    cpuBuddhaColorMaps.delete(rBuf)
+  }
+
   // 3 チャンネル合計の最大値を求める
   let max = 0
   const len = width * height
-  for (let i = 0; i < len; i++) {
-    const v = (rBuf[i] || 0) + (gBuf[i] || 0) + (bBuf[i] || 0)
-    if (v > max) max = v
+  if (cpuUpdate) {
+    max = cpuUpdate.max
+  } else {
+    for (let i = 0; i < len; i++) {
+      const v = (rBuf[i] || 0) + (gBuf[i] || 0) + (bBuf[i] || 0)
+      if (v > max) max = v
+    }
   }
   if (max === 0) {
     // Preset-04 の黒 band だけが選ばれた場合も、前回の画像を残さず今回の
@@ -4202,10 +4235,12 @@ function drawBuddhaDensityChannels(
   }
 
   // CPU フォールバック描画用の offscreen キャンバスを用意する
-  const off = document.createElement('canvas')
-  off.width = width
-  off.height = height
-  const offCtx = off.getContext('2d')
+  const off = cpuFrame?.off || document.createElement('canvas')
+  if (!cpuFrame) {
+    off.width = width
+    off.height = height
+  }
+  const offCtx = cpuFrame?.offCtx || off.getContext('2d')
 
   // 使える場合は GPU 側のカラーマッピングを試す
   let usedGpu = false
@@ -4254,28 +4289,34 @@ function drawBuddhaDensityChannels(
 
   // CPU フォールバック経路
   if (!usedGpu) {
-    const img = offCtx.createImageData(width, height)
-    const invLogDenom = (1 / Math.log10(1 + max)) * 2
-    // 密度が大きいときは brightness の効きを少し抑え、サンプル増加で急に白飛びしないようにする
-    const denomScale = 1 + Math.log10(1 + max) / 4 // tunable divisor
-    const data = img.data
-    for (let i = 0, di = 0; i < len; i++, di += 4) {
-      const rv = rBuf[i] || 0
-      const gv = gBuf[i] || 0
-      const bv = bBuf[i] || 0
-      const lr = Math.log10(1 + rv) * invLogDenom
-      const lg = Math.log10(1 + gv) * invLogDenom
-      const lb = Math.log10(1 + bv) * invLogDenom
-      const rn = Math.min(1, ((lr * brightness) / denomScale) ** gamma)
-      const gn = Math.min(1, ((lg * brightness) / denomScale) ** gamma)
-      const bn = Math.min(1, ((lb * brightness) / denomScale) ** gamma)
-      data[di] = (255 * rn) | 0
-      data[di + 1] = (255 * gn) | 0
-      data[di + 2] = (255 * bn) | 0
-      data[di + 3] = 255
+    const img = cpuFrame?.img || offCtx.createImageData(width, height)
+    if (!cpuFrame) {
+      const invLogDenom = (1 / Math.log10(1 + max)) * 2
+      // 密度が大きいときは brightness の効きを少し抑え、サンプル増加で急に白飛びしないようにする
+      const denomScale = 1 + Math.log10(1 + max) / 4 // tunable divisor
+      const data = img.data
+      for (let i = 0, di = 0; i < len; i++, di += 4) {
+        const rv = rBuf[i] || 0
+        const gv = gBuf[i] || 0
+        const bv = bBuf[i] || 0
+        const lr = Math.log10(1 + rv) * invLogDenom
+        const lg = Math.log10(1 + gv) * invLogDenom
+        const lb = Math.log10(1 + bv) * invLogDenom
+        const rn = Math.min(1, ((lr * brightness) / denomScale) ** gamma)
+        const gn = Math.min(1, ((lg * brightness) / denomScale) ** gamma)
+        const bn = Math.min(1, ((lb * brightness) / denomScale) ** gamma)
+        data[di] = (255 * rn) | 0
+        data[di + 1] = (255 * gn) | 0
+        data[di + 2] = (255 * bn) | 0
+        data[di + 3] = 255
+      }
     }
 
-	    offCtx.putImageData(img, 0, 0)
+    if (cpuUpdate) {
+      offCtx.putImageData(img, 0, 0, cpuUpdate.x, cpuUpdate.y, cpuUpdate.width, cpuUpdate.height)
+    } else {
+      offCtx.putImageData(img, 0, 0)
+    }
 	    _lastHighResBuddhaCanvas = off
 
 	    const mainCtx = displayCanvas.getContext('2d')
@@ -9733,7 +9774,7 @@ function reset() {
     onApply: () => syncBuddhaPointBatchSize(),
   })
 
-  // Render Speed Delay（buddha-draw-speed）を既定値へ戻す
+  // Render Slowdown（buddha-draw-speed）を既定値へ戻す
   try {
     applyDefaultAndRefresh('buddha-draw-speed', UI_DEFAULTS.buddhaRenderSpeed, {
       onApply: (val) => {
