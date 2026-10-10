@@ -1446,6 +1446,7 @@ class Mandelbrot {
       iterationFunction: this.iterationFunction,
       escapeRadius: this.escapeRadius,
       animationQuick: this.currentInteractionGpuRedraw,
+      readEscapeZ: false,
     }
     this.activeGpuViewRevision = task.viewRevision
     this.mandelbrotGpu.process(task)
@@ -1504,6 +1505,8 @@ class Mandelbrot {
       z0: [z0Real, z0Imag],
       escapeRadius: this.escapeRadius,
       animationQuick: this.currentInteractionGpuRedraw,
+      // Signs remain cached for palette changes; escape z is unused by current palettes.
+      readEscapeZ: false,
     }
     this.activeGpuViewRevision = task.viewRevision
     this.mandelbrotCustomGpu.process(task)
@@ -2091,6 +2094,7 @@ class JuliaRenderer {
       iterationFunction: this.iterationFunction,
       z0: [z0Real, z0Imag],
       escapeRadius: this.escapeRadius,
+      readEscapeZ: false,
     }
     this.juliaGpu.process(task)
   }

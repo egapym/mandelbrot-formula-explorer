@@ -167,6 +167,12 @@ export class MandelbrotWebGPU {
     const animationQuick = !!task.animationQuick
     const updateIntervalMs = animationQuick ? 16 : 100
     let lastUpdate = Date.now()
+    const readDisplayResults = async () => {
+      const result = await this.mandelbrotPipeline.readResults({
+        doSmooth: task.smooth, readEscapeZ: task.readEscapeZ,
+      })
+      ;({ values, smooth, signs, zreal, zimag } = result)
+    }
     while (!solved) {
       const ref = this.referencePoints[refIdx]
       const result = await this.perturbationPass({
@@ -189,16 +195,14 @@ export class MandelbrotWebGPU {
         bailout,
         skipTopLeft,
         supersampling: task.supersampling,
-        deferReadback: !!task.finalOnly,
+        // Every pass needs unresolved indices, but full pixel channels are
+        // needed only for visible updates, completion, or a stopped frame.
+        deferReadback: true,
       })
       const remainingIndices = result.indices
-      values = result.values
-      smooth = result.smooth
-      signs = result.signs
-      zreal = result.zreal
-      zimag = result.zimag
       if (this.shouldStop()) {
         if (task.finalOnly) return { error: 'Stopped' }
+        await readDisplayResults()
         this.p.onGpuUpdate({
           jobToken: task.jobToken,
           values,
@@ -248,6 +252,7 @@ export class MandelbrotWebGPU {
           const ref = await this.calculate_reference(rr, ri, bigScale, scale, bailout)
           if (this.shouldStop()) {
             if (task.finalOnly) return { error: 'Stopped' }
+            await readDisplayResults()
             this.p.onGpuUpdate({
               jobToken: task.jobToken,
               values,
@@ -279,15 +284,13 @@ export class MandelbrotWebGPU {
       solved = indices.length === 0
       const now = Date.now()
       if (!task.finalOnly && !solved && now - lastUpdate > updateIntervalMs) {
+        await readDisplayResults()
         this.intermediateUpdate(values, smooth, signs, zreal, zimag)
-        lastUpdate = now
+        lastUpdate = Date.now()
       }
       passnr++
     }
-    if (task.finalOnly) {
-      const finalResult = await this.mandelbrotPipeline.readResults({ doSmooth: task.smooth })
-      ;({ values, smooth, signs, zreal, zimag } = finalResult)
-    }
+    await readDisplayResults()
     await this.mandelbrotPipeline.finish()
 
     for (const [offset, iter, zq, escZr, escZi] of refValues) {
@@ -743,9 +746,10 @@ class MandelbrotPipeline {
     const pairs = [
       [this.valuesBuffer, this.resultValuesBuffer],
       [this.signsBuffer, this.resultSignsBuffer],
-      [this.zrealBuffer, this.resultZrealBuffer],
-      [this.zimagBuffer, this.resultZimagBuffer],
     ]
+    if (data.readEscapeZ !== false) {
+      pairs.push([this.zrealBuffer, this.resultZrealBuffer], [this.zimagBuffer, this.resultZimagBuffer])
+    }
     if (data.doSmooth) pairs.push([this.smoothBuffer, this.resultSmoothBuffer])
     for (const [source, target] of pairs) encoder.copyBufferToBuffer(source, 0, target, 0, target.size)
     device.queue.submit([encoder.finish()])
@@ -759,8 +763,8 @@ class MandelbrotPipeline {
       const signs = new Int8Array(new Uint32Array(this.resultSignsBuffer.getMappedRange()))
       const smooth = new Uint8ClampedArray(this.resultSmoothBuffer.size / 4)
       if (data.doSmooth) smooth.set(new Int32Array(this.resultSmoothBuffer.getMappedRange()))
-      const zreal = new Float32Array(new Float32Array(this.resultZrealBuffer.getMappedRange()))
-      const zimag = new Float32Array(new Float32Array(this.resultZimagBuffer.getMappedRange()))
+      const zreal = data.readEscapeZ !== false ? new Float32Array(new Float32Array(this.resultZrealBuffer.getMappedRange())) : null
+      const zimag = data.readEscapeZ !== false ? new Float32Array(new Float32Array(this.resultZimagBuffer.getMappedRange())) : null
       return { values, smooth, signs, zreal, zimag }
     } finally {
       for (const [, target] of pairs) if (target.mapState === 'mapped') target.unmap()

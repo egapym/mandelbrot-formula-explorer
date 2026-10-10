@@ -239,6 +239,7 @@ export class MandelbrotCustomWebGPU {
         isJulia: task.fractalType === 'julia' || task.fractalType === 'julia-custom',
         juliaC: [task.juliaRe ?? 0.0, task.juliaIm ?? 0.0],
         escapeRadius: task.escapeRadius !== undefined ? task.escapeRadius : 4.0,
+        readEscapeZ: task.readEscapeZ,
       })
     } catch (error) {
       const message = ErrorHelpers.format(error)
@@ -724,7 +725,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     const w = params.w
     const h = params.h
 
-    const resources = this.getResources(device, w * h, params.doSmooth)
+    const resources = this.getResources(device, w * h, params.doSmooth, params.readEscapeZ !== false)
     const { specBuffer, valuesBuffer, smoothBuffer, signsBuffer, zrealBuffer, zimagBuffer, readBuffers } = resources
     const specData = new ArrayBuffer(SHADER_CONSTANTS.SPEC_SIZE)
     const specView = new DataView(specData)
@@ -793,17 +794,18 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 
       // One mapping for all channels. Pad each segment to the 8-byte typed-view alignment.
       const { stride, byteSize } = resources
-      const outputs = [valuesBuffer, signsBuffer, zrealBuffer, zimagBuffer]
+      const outputs = [valuesBuffer, signsBuffer]
+      if (resources.readEscapeZ) outputs.push(zrealBuffer, zimagBuffer)
       if (params.doSmooth) outputs.push(smoothBuffer)
-      outputs.forEach((buffer, i) =>
+      for (const [i, buffer] of outputs.entries()) {
         commandEncoder.copyBufferToBuffer(
           buffer,
           0,
           readBuffers.length === 1 ? readBuffers[0] : readBuffers[i],
           readBuffers.length === 1 ? i * stride : 0,
           byteSize,
-        ),
-      )
+        )
+      }
       device.queue.submit([commandEncoder.finish()])
       const results = await Promise.allSettled(readBuffers.map((buffer) => buffer.mapAsync(GPUMapMode.READ)))
       const failure = results.find((result) => result.status === 'rejected')
@@ -817,11 +819,11 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
       const signsData = channel(Uint32Array, 1)
       const signs = new Int8Array(count)
       for (let i = 0; i < count; i++) signs[i] = signsData[i] & 0xff
-      const zreal = new Float32Array(channel(Float32Array, 2))
-      const zimag = new Float32Array(channel(Float32Array, 3))
+      const zreal = resources.readEscapeZ ? new Float32Array(channel(Float32Array, 2)) : null
+      const zimag = resources.readEscapeZ ? new Float32Array(channel(Float32Array, 3)) : null
       let smooth = null
       if (params.doSmooth) {
-        const smoothData = channel(Uint32Array, 4)
+        const smoothData = channel(Uint32Array, resources.readEscapeZ ? 4 : 2)
         smooth = new Uint8ClampedArray(count)
         for (let i = 0; i < count; i++) smooth[i] = smoothData[i] & 0xff
       }
@@ -835,14 +837,15 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     }
   }
 
-  getResources(device, count, doSmooth) {
-    if (this.resources?.device === device && this.resources.count === count && this.resources.doSmooth === doSmooth) {
+  getResources(device, count, doSmooth, readEscapeZ = true) {
+    if (this.resources?.device === device && this.resources.count === count &&
+      this.resources.doSmooth === doSmooth && this.resources.readEscapeZ === readEscapeZ) {
       return this.resources
     }
     this.disposeResources()
     const byteSize = count * 4
     const stride = Math.ceil(byteSize / 8) * 8
-    const resources = { device, count, doSmooth, byteSize, stride }
+    const resources = { device, count, doSmooth, readEscapeZ, byteSize, stride }
     this.resources = resources
     try {
       resources.specBuffer = BufferHelpers.createBuffer(
@@ -854,7 +857,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         resources[name] = BufferHelpers.createStorageBuffer(device, byteSize)
       }
       if (doSmooth) resources.smoothBuffer = BufferHelpers.createStorageBuffer(device, byteSize)
-      const channels = doSmooth ? 5 : 4
+      const channels = 2 + (readEscapeZ ? 2 : 0) + (doSmooth ? 1 : 0)
       const combinedSize = stride * channels
       // Preserve large-image support on devices whose per-buffer limit is smaller than all channels together.
       resources.readBuffers = []

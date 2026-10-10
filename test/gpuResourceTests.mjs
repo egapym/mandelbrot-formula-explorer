@@ -44,6 +44,14 @@ async function checkMandelbrotReadback() {
       }
       assert(buffers.every(buffer => buffer.mapState === 'unmapped'), 'Mandelbrot left a mapped buffer')
     }
+    const selective = await pipeline.readResults({ doSmooth: true, readEscapeZ: false })
+    assert(selective.zreal === null && selective.zimag === null, 'Unused escape channels were returned')
+    for (const [name, , data] of fixtures.filter(([name]) => !['zreal', 'zimag'].includes(name))) {
+      const expected = name === 'signs' ? new Int8Array(data)
+        : name === 'smooth' ? new Uint8ClampedArray(data) : data
+      assert(expected.every((value, i) => Object.is(value, selective[name][i])), `Selective Mandelbrot ${name} changed`)
+    }
+    assert(buffers.every(buffer => buffer.mapState === 'unmapped'), 'Selective readback left a mapped buffer')
   } finally {
     for (const buffer of buffers) buffer.destroy()
   }
@@ -150,6 +158,25 @@ async function run() {
   try {
     const reference = await renderer.renderDirect(params)
     assert(reference.values.some(value => value > 4), 'Expected escaping pixels')
+    for (const variant of [
+      {},
+      { iterationFunction: 'z*z + c + 0.2*zDelay(5)', supersampling: 2 },
+      { isJulia: true, juliaC: [-0.7, 0.2] },
+    ]) for (const doSmooth of [true, false]) {
+      const selectedParams = { ...params, ...variant, doSmooth }
+      const full = await renderer.renderDirect(selectedParams)
+      const reduced = await renderer.renderDirect({ ...selectedParams, readEscapeZ: false })
+      for (const name of ['values', 'smooth', 'signs']) {
+        if (full[name] === null) assert(reduced[name] === null, `${name} should be absent`)
+        else assert(full[name].every((value, i) => Object.is(value, reduced[name][i])), `Reduced ${name} changed`)
+      }
+      assert(reduced.zreal === null && reduced.zimag === null, 'Direct readback returned escape channels')
+      const reducedResources = renderer.pipeline.resources
+      assert(reducedResources.readBuffers[0].size === reducedResources.stride * (doSmooth ? 3 : 2), 'Readback size was not reduced')
+      await renderer.renderDirect({ ...selectedParams, readEscapeZ: false })
+      assert(renderer.pipeline.resources === reducedResources, 'Reduced readback did not reuse resources')
+    }
+    equal(reference, await renderer.renderDirect(params))
     const resources = renderer.pipeline.resources
     equal(reference, await renderer.renderDirect(params))
     assert(renderer.pipeline.resources === resources, 'Repeated render must reuse resources')
@@ -174,6 +201,9 @@ async function run() {
     renderer.pipeline.devicePromise = Promise.resolve(limitedDevice)
     equal(reference, await renderer.renderDirect(params))
     assert(renderer.pipeline.resources.readBuffers.length === 5, 'Large readback must split at device limit')
+    const reducedLimited = await renderer.renderDirect({ ...params, readEscapeZ: false })
+    assert(renderer.pipeline.resources.readBuffers.length === 3, 'Reduced large readback must split into three channels')
+    assert(reference.values.every((value, i) => value === reducedLimited.values[i]), 'Split reduced readback changed values')
     renderer.pipeline.devicePromise = Promise.resolve(device)
     equal(reference, await renderer.renderDirect(params))
 
@@ -192,7 +222,7 @@ async function run() {
     await checkCustomShaderParity(device)
     await device.queue.onSubmittedWorkDone()
     assert(errors.length === 0, errors.join('\n'))
-    return 'PASS: repeated renders, odd dimensions, resize, smooth, supersampling, history, bailout, device limit, map failure recovery, Mandelbrot channel readback, buffer reuse, 8016-byte reference boundary, deep-zoom final-only readback parity, optimized shader parity (SS OFF/2/4/8/16/32), custom iteration-limit parity (160 cases)'
+    return 'PASS: selective escape-channel readback (standard/history/Julia, Smooth OFF/ON, SS OFF/2), reduced staging reuse and device-limit fallback, repeated renders, odd dimensions, resize, smooth, supersampling, history, bailout, map failure recovery, Mandelbrot channel readback, buffer reuse, 8016-byte reference boundary, deep-zoom final-only readback parity, optimized shader parity (SS OFF/2/4/8/16/32), custom iteration-limit parity (160 cases)'
   } finally {
     renderer.pipeline.dispose()
   }
