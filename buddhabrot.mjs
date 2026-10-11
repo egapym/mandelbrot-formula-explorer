@@ -243,9 +243,9 @@ export class BuddhabrotRunner {
     }
   }
 
-  /** 1 ワーカーへ割り当てられるサンプル数から同時描画数の上限を求める。 */
+  /** 全ワーカー合計のサンプル数から同時描画数の上限を求める。 */
   get maxRenderPointBatchSize() {
-    return getRenderPointBatchLimit(this.samples, this.workerCount)
+    return getRenderPointBatchLimit(this.samples)
   }
 
   /** CPU で同時に描画を進める座標（軌道）の数を更新する。 */

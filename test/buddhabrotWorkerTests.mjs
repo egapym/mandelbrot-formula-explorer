@@ -245,6 +245,22 @@ for (const count of [1, 4, 16]) {
 }
 assert.deepEqual((await sample(batchOptions, 10, null, 64)).waits, defaultBatch.waits)
 
+// Exercise the actual ceiling with enough drawable orbits to fill every slot.
+const boundaryOptions = { ...batchOptions, samples: 1025, maxIter: 4 }
+const boundaryImmediate = await sample(boundaryOptions)
+for (const requested of [1023, 1024, 1025]) {
+  const concurrent = await sample(boundaryOptions, 10, null, requested)
+  const effective = Math.min(requested, 1024)
+  assert.equal(concurrent.stepFrames[0].length, effective, 'Worker did not draw the effective maximum batch')
+  assert.equal(new Set(concurrent.stepFrames[0].map(([sample]) => sample)).size, effective)
+  for (let frame = 0; frame < boundaryOptions.maxIter; frame++) {
+    assert.equal(concurrent.stepFrames[frame].length, effective)
+    assert.ok(concurrent.stepFrames[frame].every(([, step]) => step === frame),
+      'Maximum batch did not advance each trajectory exactly one step per pass')
+  }
+  equalDensity(boundaryImmediate, concurrent)
+}
+
 const changedBatch = await sample(batchOptions, 10, (context, count) => {
   if (count === 1) context.self.onmessage({ data: { cmd: 'setPointBatchSize', renderPointBatchSize: 1024 } })
 }, 1)

@@ -3018,7 +3018,7 @@ function syncBuddhaPointBatchSize(samplesOverride = null) {
   }
   const maximum = runningCpu && samplesOverride === null
     ? buddhaRunner.maxRenderPointBatchSize
-    : getRenderPointBatchLimit(samples, DEFAULT_WORKER_COUNT)
+    : getRenderPointBatchLimit(samples)
   const size = normalizeRenderPointBatchSize(slider.value, maximum)
   slider.max = String(maximum)
   slider.value = String(size)

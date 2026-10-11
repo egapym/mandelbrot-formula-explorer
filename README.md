@@ -91,7 +91,7 @@ At very high resolutions, switching can happen at different zoom levels to reduc
 - Band mode selector for both Buddhabrot and Anti-Buddhabrot (per-trajectory / per-point; defaults to per-trajectory)
 - Brightness and gamma controls with reset buttons
 - CPU render speed delay slider with reset button
-- CPU points-per-batch slider (default 64, maximum adapts to sample count up to 1024) for concurrent trajectories; each advances one step per render delay, with reset button
+- CPU points-per-batch slider (default 64, maximum is min(Samples, 1024)) for concurrent trajectories across all workers; each advances one step per render delay, with reset button
 - Render and Stop actions
 
 ### Navigation, Export, and Session Flow

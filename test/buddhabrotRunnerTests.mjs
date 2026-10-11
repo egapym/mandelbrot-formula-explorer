@@ -3,10 +3,11 @@ import { readFileSync } from 'node:fs'
 import { runInNewContext } from 'node:vm'
 import { getRenderPointBatchLimit, normalizeRenderPointBatchSize } from '../buddhabrotRenderConfig.mjs'
 
-for (const [samples, workers, maximum] of [
-  [100, 5, 20], [101, 5, 21], [3, 8, 1], [0, 5, 1], [3000000, 8, 1024], [1600, 5, 320],
+for (const [samples, maximum] of [
+  [100, 100], [101, 101], [3, 3], [0, 1], [3000000, 1024], [1600, 1024],
+  [1023, 1023], [1024, 1024], [1025, 1024],
 ]) {
-  assert.equal(getRenderPointBatchLimit(samples, workers), maximum)
+  assert.equal(getRenderPointBatchLimit(samples), maximum)
   assert.equal(normalizeRenderPointBatchSize(9999, maximum), maximum)
 }
 
@@ -124,6 +125,16 @@ const parallel = new BuddhabrotRunner({
   onChunk: () => displayed.push(Array.from(parallel.densityR).reduce((sum, value) => sum + value, 0)),
 })
 await parallel._workersReady
+await parallel.start({ samples: 1600, renderDelay: 100, renderPointBatchSize: 1024 })
+assert.equal(parallel.maxRenderPointBatchSize, 1024)
+assert.deepEqual(parallel.workers.map((w) => w.messages.at(-1).trajectorySlots), [205, 205, 205, 205, 204],
+  'Maximum batch did not allocate all 1024 global trajectory slots')
+parallel.stop()
+await parallel.start({ samples: 3, renderDelay: 100, renderPointBatchSize: 1024 })
+assert.equal(parallel.maxRenderPointBatchSize, 3)
+assert.deepEqual(parallel.workers.map((w) => w.messages.at(-1).trajectorySlots), [1, 1, 1, 0, 0],
+  'Small sample count was incorrectly limited to one worker capacity')
+parallel.stop()
 await parallel.start({ samples: 10, renderDelay: 100, renderPointBatchSize: 1 })
 assert.deepEqual(parallel.workers.map((w) => w.messages.at(-1).trajectorySlots), [1, 0, 0, 0, 0])
 const emit = (runner, worker, type, chunk) => worker.onmessage({

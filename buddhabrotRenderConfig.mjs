@@ -1,11 +1,11 @@
 export const DEFAULT_RENDER_POINT_BATCH_SIZE = 64
 export const MAX_RENDER_POINT_BATCH_SIZE = 1024
 
-export function getRenderPointBatchLimit(samples, workerCount = 1) {
+export function getRenderPointBatchLimit(samples) {
   const count = Number(samples)
   if (!Number.isFinite(count)) return MAX_RENDER_POINT_BATCH_SIZE
-  const workers = Math.max(1, Math.floor(Number(workerCount) || 1))
-  return Math.max(1, Math.min(MAX_RENDER_POINT_BATCH_SIZE, Math.ceil(Math.max(0, count) / workers)))
+  // The runner distributes this global trajectory budget across all workers.
+  return Math.max(1, Math.min(MAX_RENDER_POINT_BATCH_SIZE, Math.floor(Math.max(0, count))))
 }
 
 export function normalizeRenderPointBatchSize(value, maximum = MAX_RENDER_POINT_BATCH_SIZE) {
