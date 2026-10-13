@@ -15,7 +15,7 @@ function observe(workerSource) {
   const instrumented = workerSource.replace(
     /local([RGB])\[idx\] \+= ([^\n]+)/g,
     (_, channel, value) => `local${channel}[idx] += recordContribution('${channel}', idx, ${value})`,
-  )
+  ).replace(/(    const sampleIm = [^\n]+)/, '$1\n    recordSample(sampleRe, sampleIm)')
   return workerSource.includes('function* drawTrajectory')
     ? instrumented.replace('    const sampleRe =', '    const observedSampleId = nextSample - 1\n    const sampleRe =')
       .replace('      const pr = points[k * 2]', '      recordStep(observedSampleId, k)\n      const pr = points[k * 2]')
@@ -47,6 +47,7 @@ async function sample(options = {}, delay = 0, onYield = null, pointBatchSize = 
   )
   const hits = new Map()
   const stepFrames = []
+  const sampledCoordinates = []
   let pendingSteps = []
   const progress = []
   const waits = []
@@ -58,6 +59,9 @@ async function sample(options = {}, delay = 0, onYield = null, pointBatchSize = 
     compileIterationFunction,
     DEFAULT_RENDER_POINT_BATCH_SIZE,
     normalizeRenderPointBatchSize,
+    recordSample(re, im) {
+      sampledCoordinates.push([re, im])
+    },
     recordContribution(channel, index, value) {
       contributions[channel][index] += value
       const key = `${channel}:${index}:${value}`
@@ -105,7 +109,7 @@ async function sample(options = {}, delay = 0, onYield = null, pointBatchSize = 
     ...opts,
     iterationFunctionCompiled: opts.iterationFunction ? compileIterationFunction(opts.iterationFunction) : null,
   })
-  return { density, contributions, hits, progress, waits, chunks, stepFrames }
+  return { density, contributions, hits, progress, waits, chunks, stepFrames, sampledCoordinates }
 }
 
 function equalDensity(expected, actual, exact = false) {
@@ -124,6 +128,27 @@ function equalDensity(expected, actual, exact = false) {
 }
 
 const immediate = await sample()
+// Fixed random seeds prove that sampling stays at the initial view after pan/zoom,
+// while drawing still projects orbit hits into the current display bounds.
+for (const fractalType of ['mandelbrot', 'julia']) {
+  for (const mode of ['buddha', 'antibuddha']) {
+    const options = { fractalType, mode, iterationFunction: 'z*z+c', z0Real: 0, juliaRe: -0.7, juliaIm: 0.2 }
+    const initial = await sample(options)
+    assert.ok(initial.hits.size > 0, 'Initial view must have orbit hits for the projection check')
+    const fixed = await sample({ ...options, center: { x: 100, y: 100 }, zoom: 8,
+      samplingCenter: base.center, samplingZoom: base.zoom })
+    assert.deepEqual(fixed.sampledCoordinates, initial.sampledCoordinates, 'Pan/zoom changed initial-view sampling')
+    assert.equal(fixed.hits.size, 0, 'Orbit hits were projected into sampling bounds instead of display bounds')
+    const current = await sample({ ...options, center: { x: 100, y: 100 }, zoom: 8 })
+    assert.notDeepEqual(current.sampledCoordinates, initial.sampledCoordinates, 'Current-view sampling ignored pan/zoom')
+    for (const [re, im] of current.sampledCoordinates) {
+      assert.ok(re >= 99.75 && re <= 100.25 && im >= 99.859375 && im <= 100.140625)
+    }
+  }
+}
+const explicitCurrent = await sample({ samplingCenter: base.center, samplingZoom: base.zoom })
+equalDensity(immediate, explicitCurrent, true)
+console.log('PASS: initial-view sampling is independent of pan/zoom; orbit hits use current display bounds')
 // Fast samples should not incur a timer on every sample-count checkpoint.
 // Slow slices still need to accept Stop, even when they have visible density.
 const fastSlices = await sample({ clockStep: 0 })

@@ -275,6 +275,7 @@ ON にすると、色の段差が目立ちにくくなり、より自然なグ�
 
 - `Buddhabrot Mode`: 描画に使う軌跡の種類を選ぶ
 - `Samples`: 試す軌跡の数。多いほどきれいで遅い
+- `Sampling Range`: ランダム座標を生成する範囲。`Current View`（初期値）は現在の表示範囲、`Initial View` は選択中のプリセットの初期位置・ズーム率を使う。どちらも軌跡は現在の表示範囲に描画され、CPU・GPUの両方に対応する。変更は次の `Render` から反映される。`Initial View` では拡大先に入る軌跡が少なくなるため、必要に応じて `Samples` を増やす。Julia の初期位置は原点、ズーム率は1
 - `Buddhabrot GPU`: GPU で高速化
 - `Brightness`: 明るさ
 - `Gamma`: 暗い部分と明るい部分の見え方の調整

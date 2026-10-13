@@ -266,6 +266,15 @@ async function runSampling(opts) {
   const aspect = height / width
   const top = center.y - (1 / zoom) * SAMPLING_CONFIG.VIEW_SPAN * aspect
   const bottom = center.y + (1 / zoom) * SAMPLING_CONFIG.VIEW_SPAN * aspect
+  // Sampling may use the initial view while orbit hits still map to the current view.
+  const samplingCenter = opts.samplingCenter || center
+  const samplingZoom = opts.samplingZoom || zoom
+  const sampleLeft = samplingCenter.x - SAMPLING_CONFIG.VIEW_SPAN / samplingZoom
+  const sampleTop = samplingCenter.y - (SAMPLING_CONFIG.VIEW_SPAN / samplingZoom) * aspect
+  const sampleRight = samplingCenter.x + SAMPLING_CONFIG.VIEW_SPAN / samplingZoom
+  const sampleBottom = samplingCenter.y + (SAMPLING_CONFIG.VIEW_SPAN / samplingZoom) * aspect
+  const sampleWidth = sampleRight - sampleLeft
+  const sampleHeight = sampleBottom - sampleTop
 
   const chunkW = width
   const chunkH = height
@@ -424,8 +433,8 @@ async function runSampling(opts) {
 
   function* drawTrajectory(stepped = false) {
     // 表示領域内のランダム点を選ぶ（PRNG を使用）
-    const sampleRe = left + randf() * (right - left)
-    const sampleIm = top + randf() * (bottom - top)
+    const sampleRe = sampleLeft + randf() * sampleWidth
+    const sampleIm = sampleTop + randf() * sampleHeight
     const cr = isJulia ? fixedJuliaRe : sampleRe
     const ci = isJulia ? fixedJuliaIm : sampleIm
 

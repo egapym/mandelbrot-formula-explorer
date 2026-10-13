@@ -258,6 +258,7 @@ struct Uniforms {
   isJulia: u32,
   juliaCr: f32,
   juliaCi: f32,
+  samplingCenterX: f32, samplingCenterY: f32, samplingZoom: f32,
 };
 @group(0) @binding(0) var<uniform> u: Uniforms;
 @group(0) @binding(1) var<storage, read_write> rAcc: array<atomic<u32>>;
@@ -298,15 +299,15 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   let iterationLimit = u.maxIter;
   let escapeRadiusSquared = u.escapeRadius * u.escapeRadius;
   // サンプリングで繰り返し使う不変値を先に計算しておく
-  let scale_local = u.zoom * f32(u.width);
+  let scale_local = u.samplingZoom * f32(u.width);
   let invDenom_local = 4.0 / scale_local;
   let halfW = f32(u.width) / 2.0;
   let halfH = f32(u.height) / 2.0;
     for (var si: u32 = 0u; si < spt; si = si + 1u) {
 	    let rpx = rand(&state) * f32(u.width);
 	    let rpy = rand(&state) * f32(u.height);
-	  let rx = (rpx - halfW) * invDenom_local + u.centerX;
-	  let ry = (rpy - halfH) * invDenom_local + u.centerY;
+	  let rx = (rpx - halfW) * invDenom_local + u.samplingCenterX;
+	  let ry = (rpy - halfH) * invDenom_local + u.samplingCenterY;
 	    let sample = vec2<f32>(rx, ry);
 	    let c = select(sample, vec2<f32>(u.juliaCr, u.juliaCi), u.isJulia != 0u);
 	    var z = select(vec2<f32>(u.z0x, u.z0y), sample, u.isJulia != 0u);
@@ -556,6 +557,14 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     device.queue.writeBuffer(uniformBuf, 68, isJuliaView.buffer, 0, isJuliaView.byteLength)
     const juliaView = new Float32Array([params.juliaRe ?? 0.0, params.juliaIm ?? 0.0])
     device.queue.writeBuffer(uniformBuf, 72, juliaView.buffer, 0, juliaView.byteLength)
+    // Sampling coordinates are independent of the display transform at offset 44.
+    const samplingCenter = params.samplingCenter || params.center
+    const samplingView = new Float32Array([
+      samplingCenter?.x ?? 0.0,
+      samplingCenter?.y ?? 0.0,
+      params.samplingZoom || params.zoom || 1.0,
+    ])
+    device.queue.writeBuffer(uniformBuf, 80, samplingView.buffer, 0, samplingView.byteLength)
 
     // Mandelbrot 以外でも反復式を WGSL 化できるなら GPU 経路を使う。
     // 変換できない式だけは、上位で CPU フォールバックできるよう例外にする。

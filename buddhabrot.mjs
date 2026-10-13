@@ -374,6 +374,8 @@ export class BuddhabrotRunner {
         height: this.height,
         center: this.center,
         zoom: this.zoom,
+        samplingCenter: params.samplingCenter,
+        samplingZoom: params.samplingZoom,
         mode: params.mode || DEFAULT_CONFIG.MODE,
         paletteStops: this.palette,
         iterationFunction: params.iterationFunction || null,

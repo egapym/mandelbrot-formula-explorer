@@ -86,6 +86,7 @@ At very high resolutions, switching can happen at different zoom levels to reduc
 - Buddhabrot mode selector (Buddhabrot / Anti-Buddhabrot)
 - Buddhabrot view toggle
 - Sample count input
+- Sampling range selector: Current View (default) or Initial View; initial sampling uses the selected preset's reset position/zoom while orbit hits map to the current view, on both CPU and GPU
 - Buddhabrot GPU toggle
 - Buddhabrot palette selector
 - Band mode selector for both Buddhabrot and Anti-Buddhabrot (per-trajectory / per-point; defaults to per-trajectory)

@@ -547,6 +547,7 @@ const DOM = {
     stop: document.getElementById('buddha-stop'),
     mode: document.getElementById('buddhaMode'),
     bandMode: document.getElementById('buddha-bandmode'),
+    samplingRange: document.getElementById('buddha-sampling-range'),
   },
   palette: {
     dropdown: document.getElementById('palette-dropdown'),
@@ -3917,6 +3918,13 @@ async function startBuddhaRender() {
   if (!runnerToStart || typeof runnerToStart.start !== 'function') {
     console.error('index.js: runnerToStart.start is not available', runnerToStart)
   }
+  const useInitialSamplingRange = DOM.buddha.samplingRange?.value === 'initial'
+  const presetIndex = parseInt(DOM.fractalTypeSelect?.value?.split(':')[1], 10)
+  const initialPreset = functionPresets[presetIndex]
+  // Match Reset Position, including the separate Julia view and embedded zoom correction.
+  const initialSamplingCenter = target.kind === 'julia'
+    ? { x: 0, y: 0 }
+    : { x: initialPreset?.coordX || 0, y: initialPreset?.coordY || 0 }
   await runnerToStart.start({
     samples: samples,
     renderPointBatchSize: syncBuddhaPointBatchSize(samples),
@@ -3928,6 +3936,10 @@ async function startBuddhaRender() {
       y: targetRenderer.center[1].toNumber ? targetRenderer.center[1].toNumber() : 0,
     },
     zoom: targetRenderer.zoom.toNumber ? targetRenderer.zoom.toNumber() : 1,
+    samplingCenter: useInitialSamplingRange ? initialSamplingCenter : undefined,
+    samplingZoom: useInitialSamplingRange
+      ? (target.kind === 'julia' ? 1 : getInitialFractalZoom(targetRenderer.precision).toNumber())
+      : undefined,
     // Buddhabrot 専用 supersampling UI があれば読む
     supersampling: targetRenderer.supersampling,
     palette: pal,
@@ -9724,6 +9736,7 @@ function reset() {
   if (buddhaModeEl) buddhaModeEl.value = 'buddha'
   const buddhaBandModeEl = document.getElementById('buddha-bandmode')
   if (buddhaBandModeEl) buddhaBandModeEl.value = 'perTrajectory'
+  if (DOM.buddha.samplingRange) DOM.buddha.samplingRange.value = 'current'
 
   const buddhaIterEl = document.getElementById('buddha-iterations')
   if (buddhaIterEl) buddhaIterEl.value = '3000000'
