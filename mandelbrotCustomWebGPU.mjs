@@ -5,7 +5,6 @@
  */
 
 import { getIterationHistoryRequirements, getParsedExpression } from './customFunctionParser.mjs'
-import { BAILOUT_MIN, BAILOUT_SMOOTH } from './sharedCalculations.mjs'
 import { CUSTOM_FUNCTION_WGSL_HELPERS, jsExprToWGSL_safe } from './wgslCompiler.mjs'
 import { WorkerContext } from './workerContext.mjs'
 
@@ -24,8 +23,6 @@ const WORKGROUP_CONFIG = {
 // シェーダー用定数
 const SHADER_CONSTANTS = {
   SPEC_SIZE: 16 * 4, // Uniforms 構造体サイズ（byte）
-  DEFAULT_BAILOUT: BAILOUT_SMOOTH, // スムーズカラー用の脱出半径
-  MIN_BAILOUT: BAILOUT_MIN, // 通常カラー用の最小 bailout
   MAX_VALID_VALUE: 1e20, // 座標の上限値（NaN / Inf 判定用）
   MAX_VALID_VALUE_WGSL: '1e20', // WGSL 向け表記
   IN_SET_INDEX: 2, // 集合内を表す値
@@ -213,11 +210,7 @@ export class MandelbrotCustomWebGPU {
     const refr = rmin.toNumber()
     const refi = imin.toNumber()
 
-    const bailout = task.smooth
-      ? SHADER_CONSTANTS.DEFAULT_BAILOUT
-      : task.escapeRadius !== undefined
-        ? task.escapeRadius ** 2
-        : 16
+    const bailout = (task.escapeRadius ?? 4.0) ** 2
 
     let result
     try {
@@ -613,7 +606,9 @@ ${historyAfter}
                    abs(z_next.x) < ${SHADER_CONSTANTS.MAX_VALID_VALUE_WGSL} && abs(z_next.y) < ${SHADER_CONSTANTS.MAX_VALID_VALUE_WGSL};
 
     if (!is_valid) {
-      // Treat as diverged
+      // Preserve an escaped result instead of retaining the previous orbit point.
+      z = vec2<f32>(${SHADER_CONSTANTS.MAX_VALID_VALUE_WGSL}, 0.0);
+      zq = 1e30;
       break;
     }
 
@@ -630,18 +625,18 @@ ${historyAfter}
       ? `
   // Smooth coloring - use normalized iteration count
   var smoothVal: u32 = 0u;
-  if (iter >= 0 && zq > 4.0) {
+  if (iter >= 0 && zq > 1.0) {
     let nu = log2(log2(zq)) - 1.0;
     let nuFloor = floor(nu);
-    iter = i32(floor(f32(iter) + 1.0 - nu));
+    iter = max(0, i32(floor(f32(iter) + 1.0 - nu)));
     smoothVal = u32(floor(${SHADER_CONSTANTS.SMOOTH_SCALE} - ${SHADER_CONSTANTS.SMOOTH_SCALE} * (nu - nuFloor)));
   }
 
-  return IterResult(u32(iter + ${SHADER_CONSTANTS.ESCAPE_OFFSET}), smoothVal, signVal, z.x, z.y);
+  return IterResult(u32(max(0, iter) + ${SHADER_CONSTANTS.ESCAPE_OFFSET}), smoothVal, signVal, z.x, z.y);
   `
       : `
   // No smooth coloring - return iteration count directly
-  return IterResult(u32(iter + ${SHADER_CONSTANTS.ESCAPE_OFFSET}), 0u, signVal, z.x, z.y);
+  return IterResult(u32(max(0, iter) + ${SHADER_CONSTANTS.ESCAPE_OFFSET}), 0u, signVal, z.x, z.y);
   `
   }
 }

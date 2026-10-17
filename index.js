@@ -6561,7 +6561,9 @@ function _fxpComplexToOrbitCss(reFxp, imFxp, ow, oh, view = null) {
 }
 
 function _getOrbitBailout(renderer = fractal) {
-  if (renderer?.smooth) return BAILOUT_SMOOTH
+  if (renderer?.smooth && renderer.fractalType !== 'custom' && renderer.fractalType !== 'julia-custom') {
+    return BAILOUT_SMOOTH
+  }
   const escapeRadius = renderer?.escapeRadius ?? fractal.escapeRadius ?? 4
   return escapeRadius * escapeRadius
 }
@@ -6603,16 +6605,18 @@ function _computeOrbitPoints(z0r, z0i, cr, ci, iterFn, _complexToScreen, maxIter
   const history = { z: [] }
   let zr = z0r,
     zi = z0i,
-    escaped = false
-  for (let iter = 0; iter < maxIter; iter++) {
+    escaped = !Number.isFinite(zr) || !Number.isFinite(zi) ||
+      Math.abs(zr) >= 1e20 || Math.abs(zi) >= 1e20 || zr * zr + zi * zi > bailout
+  for (let iter = 0; !escaped && iter < maxIter; iter++) {
     let nzr, nzi
     try {
       ;[nzr, nzi] = iterFn(zr, zi, cr, ci, iter, history)
     } catch (_e) {
+      escaped = true
       break
     }
     // Infinity/NaN は SAFE_SENTINEL と同様に脱出扱いにする
-    if (!Number.isFinite(nzr) || !Number.isFinite(nzi)) {
+    if (!Number.isFinite(nzr) || !Number.isFinite(nzi) || Math.abs(nzr) >= 1e20 || Math.abs(nzi) >= 1e20) {
       escaped = true
       break
     }

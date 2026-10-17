@@ -6,6 +6,7 @@
 
 import { DEFAULT_RENDER_POINT_BATCH_SIZE, normalizeRenderPointBatchSize } from './buddhabrotRenderConfig.mjs'
 import { compileIterationFunction } from './customFunctionParser.mjs'
+import { getBuddhabrotProjection } from './buddhabrotProjection.mjs'
 
 // ============================================================================
 // 定数
@@ -233,9 +234,15 @@ async function runSampling(opts) {
   // 'perPoint' は各点ごと、'perTrajectory' は軌道全体に 1 つの band を使う。
   const buddhaBandMode = opts.buddhaBandMode || SAMPLING_CONFIG.DEFAULT_BAND_MODE
   const compiledIter = opts.iterationFunctionCompiled || null
-  const escapeRadiusSq = opts.escapeRadius !== undefined ? opts.escapeRadius * opts.escapeRadius : 4
+  const escapeRadiusSq = opts.escapeRadius !== undefined ? opts.escapeRadius * opts.escapeRadius : 16
   const fractalType = opts.fractalType || 'mandelbrot'
   const isJulia = fractalType === 'julia' || fractalType === 'julia-custom'
+  const projection = getBuddhabrotProjection(opts.iterationFunction, fractalType)
+  const projectPoints = !projection.identity
+  const { xx, xy, yx, yy, tx, ty } = projection
+  // Only unusually large radii need separate component-limit checks. For
+  // normal radii the squared-magnitude comparison rejects huge values too.
+  const checkComponentLimit = escapeRadiusSq >= 1e40
   const fixedJuliaRe = typeof opts.juliaRe === 'number' ? opts.juliaRe : 0
   const fixedJuliaIm = typeof opts.juliaIm === 'number' ? opts.juliaIm : 0
 
@@ -442,6 +449,10 @@ async function runSampling(opts) {
     // Julia は画素側を z0 とし、Mandelbrot / Custom は従来どおり固定 z0 から始める
     let zx = isJulia ? sampleRe : typeof opts.z0Real === 'number' ? opts.z0Real : 0
     let zy = isJulia ? sampleIm : typeof opts.z0Imag === 'number' ? opts.z0Imag : 0
+    if (
+      !(zx * zx + zy * zy <= escapeRadiusSq) ||
+      (checkComponentLimit && (Math.abs(zx) >= 1e20 || Math.abs(zy) >= 1e20))
+    ) return
     let escaped = false
     let trajLen = 0
     const history = { z: [] }
@@ -460,16 +471,20 @@ async function runSampling(opts) {
           x2 = Number(res[0])
           y2 = Number(res[1])
         } catch (_e) {
-          // コンパイル済み関数の実行に失敗した場合は通常の z^2 + c に戻す
-          x2 = zx * zx - zy * zy + cr
-          y2 = 2 * zx * zy + ci
+          escaped = true
+          break
         }
       } else {
         // z = z^2 + c  (実部/虚部)
         x2 = zx * zx - zy * zy + cr
         y2 = 2 * zx * zy + ci
       }
-      if (x2 * x2 + y2 * y2 > escapeRadiusSq) {
+      // Negating <= rejects NaN as well as out-of-radius values, without
+      // separate finite/absolute-value checks on every ordinary iteration.
+      if (
+        !(x2 * x2 + y2 * y2 <= escapeRadiusSq) ||
+        (checkComponentLimit && (Math.abs(x2) >= 1e20 || Math.abs(y2) >= 1e20))
+      ) {
         // 次の z が発散する場合は脱出とみなし、脱出点自体は含めない
         escaped = true
         break
@@ -525,8 +540,14 @@ async function runSampling(opts) {
 
       const pr = points[k * 2]
       const pi = points[k * 2 + 1]
-      const fx = (pr - left) * invWSpan
-      const fy = (pi - top) * invHSpan
+      let displayRe = pr
+      let displayIm = pi
+      if (projectPoints) {
+        displayRe = xx * pr + xy * pi + tx
+        displayIm = yx * pr + yy * pi + ty
+      }
+      const fx = (displayRe - left) * invWSpan
+      const fy = (displayIm - top) * invHSpan
       const px = Math.floor(fx * width_local)
       const py = Math.floor(fy * height_local)
 

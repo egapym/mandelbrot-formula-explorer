@@ -195,6 +195,18 @@ passes keep their accumulated results. Resizing replaces only affected buffers.
 ## Testing
 
 CPU rendering regressions: `node --test test/cpuRenderingTests.mjs`.
+Complex formula and escape-rule regressions: `node --test test/complexIterationTests.mjs`.
+Open `test/complexIterationBrowserTests.html` for actual CPU/WebGPU escape
+classification, Orbit Trap and Buddhabrot orbit-location checks. Custom formulas
+use the selected escape radius with Smooth both OFF and ON; smoothing never
+changes an escaped point into an interior point. Non-finite results and
+components with magnitude at least `1e20` terminate the orbit as escaped.
+Buddhabrot/Anti-Buddhabrot automatically align orbit hits with the ordinary
+parameter-plane axes for formulas of the form `f(z) + a*c + b`: hits are displayed
+at `(z-b)/a`. This aligns rotations, translations and scaling such as `c*i`,
+`c+i` and `2*c`. Iteration and escape tests retain the original coordinates.
+Julia and nonlinear, mixed or singular parameter terms retain raw orbit coordinates.
+Run `node --test test/buddhabrotProjectionTests.mjs` for projection regressions.
 With the local server running, open `test/cpuWorkerTests.html` for Worker batch,
 bitmap-cache update, cancellation and subsequent-job checks.
 
@@ -203,9 +215,18 @@ Buddhabrot CPU checks: `node test/buddhabrotWorkerTests.mjs`,
 The worker tests accept `BUDDHA_REFERENCE_WORKER=/path/to/old-worker.mjs` to
 compare seeded orbit hits, colors and immediate RGB density with an earlier implementation.
 Run `node test/buddhabrotCpuBenchmark.mjs` for a seeded single-worker Node benchmark
-(640×360, 1,000 iterations, Delay=0, warmup plus three measured runs).
+(640×360, 1,000 iterations, Delay=0, two warmups plus three measured runs).
 It also accepts `BUDDHA_REFERENCE_WORKER`, `BUDDHA_BENCH_SAMPLES` (default 10,000)
-and `BUDDHA_BENCH_REPEATS` (default 3). These times exclude browser canvas coloring.
+and `BUDDHA_BENCH_REPEATS` (default 3). `BUDDHA_BENCH_CASES` filters case names
+with a regular expression. Reference/current runs alternate to reduce timing bias.
+These times exclude browser canvas coloring.
+Open `test/buddhabrotPerformanceBrowserTests.html` for fixed-seed GPU timing
+(seven measured runs after two warmups). It uses GPU timestamps when supported,
+and reports end-to-end sampling/readback time separately. An optional
+`?reference=./reference.mjs` compares a local earlier module and verifies exact
+density parity; its relative imports must resolve from the reference location.
+Use `&compareDensity=false` only when comparing with a version whose intended
+display coordinates differ, such as the version before parameter-plane alignment.
 Immediate CPU sampling yields at sample checkpoints when its 8 ms time slice
 expires; delayed rendering still advances each active trajectory once per Delay.
 

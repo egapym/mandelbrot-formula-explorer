@@ -1,0 +1,16 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Complex iteration CPU / WebGPU regression tests</title>
+<style>
+  body { font-family: system-ui, sans-serif; padding: 20px; }
+  .comparison { display: flex; flex-wrap: wrap; gap: 24px; }
+  figure { margin: 0; }
+  figcaption { margin-bottom: 8px; }
+  canvas { max-width: 100%; background: #000; }
+</style>
+<pre id="result">Running…</pre>
+<div class="comparison">
+  <figure><figcaption>通常描画：z*z+c*i</figcaption><canvas id="ordinary" width="400" height="300"></canvas></figure>
+  <figure><figcaption>Buddhabrot：z*z+c*i（表示座標を補正）</figcaption><canvas id="buddha" width="400" height="300"></canvas></figure>
+</div>
+<script type="module" src="./complexIterationBrowserTests.mjs"></script>

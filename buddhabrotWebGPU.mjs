@@ -5,6 +5,7 @@
  */
 
 import { CUSTOM_FUNCTION_WGSL_HELPERS } from './wgslCompiler.mjs'
+import { getBuddhabrotProjection, getBuddhabrotProjectionWGSL } from './buddhabrotProjection.mjs'
 
 export class BuddhabrotWebGPU {
   constructor(options = {}) {
@@ -36,6 +37,14 @@ export class BuddhabrotWebGPU {
   async _startGpu(params, deviceParam) {
     let device = deviceParam
     const fractalType = params.fractalType || params.type || 'mandelbrot'
+    const projection = getBuddhabrotProjection(params.iterationFunction, fractalType)
+    const displayCoordinates = getBuddhabrotProjectionWGSL(projection)
+    // The norm check rejects NaN/Inf too. Separate component-limit checks are
+    // needed only when the selected escape radius can reach that limit.
+    const checkComponentLimit = Math.fround(Math.abs(params.escapeRadius ?? 4.0)) >= Math.fround(1e20)
+    const componentLimit = (name) => checkComponentLimit
+      ? ` || abs(${name}.x) >= 1e20 || abs(${name}.y) >= 1e20`
+      : ''
     const width = this.width
     const height = this.height
     const len = width * height
@@ -284,8 +293,8 @@ fn rand(state: ptr<function, u32>) -> f32 {
 fn coordToIndex(x: f32, y: f32) -> vec2<f32> {
   let scale = u.zoom * f32(u.width);
   // CPU レンダラーと同じ座標変換を使う。横方向の表示幅は 4 / zoom
-  let fx = (x - u.centerX) * scale / 4.0 + f32(u.width) / 2.0;
-  let fy = (y - u.centerY) * scale / 4.0 + f32(u.height) / 2.0;
+  let fx = ((${displayCoordinates.real}) - u.centerX) * scale / 4.0 + f32(u.width) / 2.0;
+  let fy = ((${displayCoordinates.imag}) - u.centerY) * scale / 4.0 + f32(u.height) / 2.0;
   return vec2<f32>(fx, fy);
 }
 
@@ -311,6 +320,8 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 	    let sample = vec2<f32>(rx, ry);
 	    let c = select(sample, vec2<f32>(u.juliaCr, u.juliaCi), u.isJulia != 0u);
 	    var z = select(vec2<f32>(u.z0x, u.z0y), sample, u.isJulia != 0u);
+	    // An already escaped initial point contributes no density in either mode.
+	    if (!(dot(z, z) <= escapeRadiusSquared)${componentLimit('z')}) { continue; }
 	    var escaped = false;
 	    var iter: u32 = 0u;
 ${historyDeclarations}
@@ -321,16 +332,15 @@ ${historyInitialize}
       // 一度一時変数へ入れてから妥当性を確認する
       let n = f32(iter);
 ${historyBefore('iter')}
-      var _tmp_iter = ${customWGSLIteration};
+      let _tmp_iter = ${customWGSLIteration};
 ${historyAfter('iter')}
-      // WGSL には isnan / isfinite がないため、自己比較と上限値で判定する
-      if (!(_tmp_iter.x == _tmp_iter.x) || !(_tmp_iter.y == _tmp_iter.y) || abs(_tmp_iter.x) > 1e20 || abs(_tmp_iter.y) > 1e20) {
-        // 原点へ潰れて真っ黒にならないよう c へ戻す
-        _tmp_iter = c;
+      let zzq = dot(_tmp_iter, _tmp_iter);
+      // Negated <= catches NaN as well as a point outside the escape radius.
+      if (!(zzq <= escapeRadiusSquared)${componentLimit('_tmp_iter')}) {
+        escaped = true;
+        break;
       }
       z = _tmp_iter;
-      let zzq = dot(z, z);
-      if (zzq > escapeRadiusSquared) { escaped = true; break; }
       iter = iter + 1u;
 	    }
 	    if (!((escaped && u.mode == 0u) || (!escaped && u.mode == 1u))) { continue; }
@@ -350,7 +360,7 @@ ${historyReset}
       trajBandIdx = bi_t;
       if (trajBandIdx >= u.bandCount) { trajBandIdx = u.bandCount - 1u; }
     }
-    if (u.isJulia != 0u) {
+    if (u.isJulia != 0u && dot(sample, sample) <= escapeRadiusSquared) {
       let pcoords0 = coordToIndex(sample.x, sample.y);
       let fx0 = pcoords0.x;
       let fy0 = pcoords0.y;
@@ -389,15 +399,14 @@ ${historyReset}
       // 一時変数へ評価してから妥当性を確認する
       let n = f32(oi);
 ${historyBefore('oi')}
-      var _tmp_iter = ${customWGSLIteration};
+      let _tmp_iter = ${customWGSLIteration};
 ${historyAfter('oi')}
-      if (!(_tmp_iter.x == _tmp_iter.x) || !(_tmp_iter.y == _tmp_iter.y) || abs(_tmp_iter.x) > 1e20 || abs(_tmp_iter.y) > 1e20) {
-        // 原点へ潰れて真っ黒にならないよう c へ戻す
-        _tmp_iter = c;
+      let zzq2 = dot(_tmp_iter, _tmp_iter);
+      if (!(zzq2 <= escapeRadiusSquared)${componentLimit('_tmp_iter')}) {
+        // The escape point is excluded from density accumulation.
+        break;
       }
       z = _tmp_iter;
-      let zzq2 = dot(z, z);
-      if (zzq2 > 1e10) { break; }
       let pcoords = coordToIndex(z.x, z.y);
       let fx_px = pcoords.x;
       let fy_py = pcoords.y;

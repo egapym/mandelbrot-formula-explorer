@@ -8,7 +8,17 @@ export async function checkCustomShaderParity(device) {
   const create = () => new MandelbrotCustomWebGPU({ onGpuUpdate() {} }, new WorkerContext(),
     error => { throw new Error(error) }, { devicePromise: Promise.resolve(device) })
   const baseline = create()
-  baseline.pipeline.generateShader = legacyCustomShader
+  // Keep the frozen loop implementation as the scheduling reference, while
+  // applying the intentional escape/coloring corrections to both versions.
+  baseline.pipeline.generateShader = function (...args) {
+    return legacyCustomShader.apply(this, args)
+      .replace('// Treat as diverged\n      break;',
+        'z = vec2<f32>(1e20, 0.0);\n      zq = 1e30;\n      break;')
+      .replace('iter >= 0 && zq > 4.0', 'iter >= 0 && zq > 1.0')
+      .replace('iter = i32(floor(f32(iter) + 1.0 - nu));',
+        'iter = max(0, i32(floor(f32(iter) + 1.0 - nu)));')
+      .replaceAll('u32(iter + 4)', 'u32(max(0, iter) + 4)')
+  }
   const optimized = create()
   const expressions = [
     'z*z + c', 'sin(z) + c', 'exp(z) + c', 'conj(z)^2 + c',

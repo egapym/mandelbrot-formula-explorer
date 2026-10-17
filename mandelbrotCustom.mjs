@@ -7,7 +7,6 @@
 import { compileIterationFunction, usesIterationHistory } from './customFunctionParser.mjs'
 import { calculatePixelOrbitTrap } from './orbitTrap.mjs'
 import { OrbitReplay } from './orbitReplay.mjs'
-import { BAILOUT_MIN, BAILOUT_SMOOTH } from './sharedCalculations.mjs'
 import { WorkerContext } from './workerContext.mjs'
 
 // ============================================================================
@@ -18,8 +17,6 @@ import { WorkerContext } from './workerContext.mjs'
 const SAFE_SENTINEL = 1e20
 
 const ITERATION_CONFIG = {
-  DEFAULT_BAILOUT_SMOOTH: BAILOUT_SMOOTH,
-  DEFAULT_BAILOUT: BAILOUT_MIN,
   IN_SET_INDEX: 2,
   ESCAPE_OFFSET: 4,
   MIN_ITER_FOR_SMOOTH: 3,
@@ -335,13 +332,13 @@ export class MandelbrotCustom {
                   sampleRe,
                   sampleIm,
                   this.max_iter,
-                  ITERATION_CONFIG.DEFAULT_BAILOUT_SMOOTH,
+                  this.escapeRadius * this.escapeRadius,
                 )
                 let nu = 1
-                if (iter > ITERATION_CONFIG.MIN_ITER_FOR_SMOOTH) {
+                if (iter > ITERATION_CONFIG.MIN_ITER_FOR_SMOOTH && zq > 1) {
                   const log_zn = Math.log(zq) / 2
                   nu = Math.log(log_zn / Math.log(2)) / Math.log(2)
-                  iter = Math.floor(iter + 1 - nu)
+                  iter = Math.max(ITERATION_CONFIG.ESCAPE_OFFSET, Math.floor(iter + 1 - nu))
                   nu = nu - Math.floor(nu)
                 }
                 totalIter += iter
@@ -380,12 +377,12 @@ export class MandelbrotCustom {
             )
         } else {
           if (smooth) {
-            let [iter, zq, zrE, ziE] = this.juliaIterate(re, im, this.max_iter, ITERATION_CONFIG.DEFAULT_BAILOUT_SMOOTH)
+            let [iter, zq, zrE, ziE] = this.juliaIterate(re, im, this.max_iter, this.escapeRadius * this.escapeRadius)
             let nu = 1
-            if (iter > ITERATION_CONFIG.MIN_ITER_FOR_SMOOTH) {
+            if (iter > ITERATION_CONFIG.MIN_ITER_FOR_SMOOTH && zq > 1) {
               const log_zn = Math.log(zq) / 2
               nu = Math.log(log_zn / Math.log(2)) / Math.log(2)
-              iter = Math.floor(iter + 1 - nu)
+              iter = Math.max(ITERATION_CONFIG.ESCAPE_OFFSET, Math.floor(iter + 1 - nu))
               nu = nu - Math.floor(nu)
             }
             smooth[offset] = Math.floor(ITERATION_CONFIG.SMOOTH_SCALE - ITERATION_CONFIG.SMOOTH_SCALE * nu)
@@ -438,13 +435,13 @@ export class MandelbrotCustom {
                 sampleRe,
                 sampleIm,
                 this.max_iter,
-                ITERATION_CONFIG.DEFAULT_BAILOUT_SMOOTH,
+                this.escapeRadius * this.escapeRadius,
               )
               let nu = 1
-              if (iter > ITERATION_CONFIG.MIN_ITER_FOR_SMOOTH) {
+              if (iter > ITERATION_CONFIG.MIN_ITER_FOR_SMOOTH && zq > 1) {
                 const log_zn = Math.log(zq) / 2
                 nu = Math.log(log_zn / Math.log(2)) / Math.log(2)
-                iter = Math.floor(iter + 1 - nu)
+                iter = Math.max(ITERATION_CONFIG.ESCAPE_OFFSET, Math.floor(iter + 1 - nu))
                 nu = nu - Math.floor(nu)
               }
               totalIter += iter
@@ -486,12 +483,12 @@ export class MandelbrotCustom {
       } else {
         // Normal single sample
         if (smooth) {
-          let [iter, zq, zrE, ziE] = this.iterate(re, im, this.max_iter, ITERATION_CONFIG.DEFAULT_BAILOUT_SMOOTH)
+          let [iter, zq, zrE, ziE] = this.iterate(re, im, this.max_iter, this.escapeRadius * this.escapeRadius)
           let nu = 1
-          if (iter > ITERATION_CONFIG.MIN_ITER_FOR_SMOOTH) {
+          if (iter > ITERATION_CONFIG.MIN_ITER_FOR_SMOOTH && zq > 1) {
             const log_zn = Math.log(zq) / 2
             nu = Math.log(log_zn / Math.log(2)) / Math.log(2)
-            iter = Math.floor(iter + 1 - nu)
+            iter = Math.max(ITERATION_CONFIG.ESCAPE_OFFSET, Math.floor(iter + 1 - nu))
             nu = nu - Math.floor(nu)
           }
           smooth[offset] = Math.floor(ITERATION_CONFIG.SMOOTH_SCALE - ITERATION_CONFIG.SMOOTH_SCALE * nu)
@@ -553,15 +550,21 @@ export class MandelbrotCustom {
     let zq = zReal * zReal + zImag * zImag
     const history = { z: [] }
     while (zq <= bailout) {
-      if (iter++ === max_iter) {
+      if (++iter === max_iter) {
         return [ITERATION_CONFIG.IN_SET_INDEX, 0, 0, 0]
       }
       const result = this.compiledFunction(zReal, zImag, cReal, cImag, iter, history)
       let r0 = result[0]
       let r1 = result[1]
-      if (!Number.isFinite(r0) || !Number.isFinite(r1) || Number.isNaN(r0) || Number.isNaN(r1)) {
+      if (
+        !Number.isFinite(r0) ||
+        !Number.isFinite(r1) ||
+        Math.abs(r0) >= SAFE_SENTINEL ||
+        Math.abs(r1) >= SAFE_SENTINEL
+      ) {
         r0 = SAFE_SENTINEL
         r1 = 0.0
+        return [iter + ITERATION_CONFIG.ESCAPE_OFFSET, 1e30, r0, r1]
       }
       zReal = r0
       zImag = r1
@@ -570,7 +573,7 @@ export class MandelbrotCustom {
         zq = SAFE_SENTINEL * SAFE_SENTINEL
       }
     }
-    return [iter + ITERATION_CONFIG.ESCAPE_OFFSET, zq, zReal, zImag]
+    return [Math.max(0, iter) + ITERATION_CONFIG.ESCAPE_OFFSET, zq, zReal, zImag]
   }
 
   /**
@@ -588,11 +591,11 @@ export class MandelbrotCustom {
     let zReal = this.z0Real !== undefined ? this.z0Real : DEFAULT_Z0_COMPONENT
     let zImag = this.z0Imag !== undefined ? this.z0Imag : DEFAULT_Z0_COMPONENT
     let iter = -1
-    let zq = 0.0
+    let zq = zReal * zReal + zImag * zImag
     const history = { z: [] }
 
     while (zq <= bailout) {
-      if (iter++ === max_iter) {
+      if (++iter === max_iter) {
         return [ITERATION_CONFIG.IN_SET_INDEX, 0, 0, 0]
       }
 
@@ -602,10 +605,16 @@ export class MandelbrotCustom {
       // Normalize result to finite sentinel when GPU uses large finite sentinel
       let r0 = result[0]
       let r1 = result[1]
-      if (!Number.isFinite(r0) || !Number.isFinite(r1) || Number.isNaN(r0) || Number.isNaN(r1)) {
+      if (
+        !Number.isFinite(r0) ||
+        !Number.isFinite(r1) ||
+        Math.abs(r0) >= SAFE_SENTINEL ||
+        Math.abs(r1) >= SAFE_SENTINEL
+      ) {
         // Replace Infinity/NaN with large finite sentinel to match WGSL behavior
         r0 = SAFE_SENTINEL
         r1 = 0.0
+        return [iter + ITERATION_CONFIG.ESCAPE_OFFSET, 1e30, r0, r1]
       }
 
       zReal = r0
@@ -618,6 +627,6 @@ export class MandelbrotCustom {
         zq = SAFE_SENTINEL * SAFE_SENTINEL
       }
     }
-    return [iter + ITERATION_CONFIG.ESCAPE_OFFSET, zq, zReal, zImag]
+    return [Math.max(0, iter) + ITERATION_CONFIG.ESCAPE_OFFSET, zq, zReal, zImag]
   }
 }

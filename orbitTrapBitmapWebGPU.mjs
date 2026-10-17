@@ -240,7 +240,8 @@ export class OrbitTrapWebGPU {
     const shapeId = SHAPE_TO_ID[trapSpec.shape] ?? SHAPE_TO_ID[TRAP_SHAPE.RING]
     const colorPatternId = COLOR_PATTERN_TO_ID[task.colorPatternId] ?? COLOR_PATTERN_TO_ID[COLOR_PATTERN.COSINE_RGB]
     const ssScale = task.supersampling > 0 ? task.supersampling : 1
-    const valueBailout = task.smooth ? BAILOUT_SMOOTH : (task.escapeRadius ?? 4.0) ** 2
+    const isCustom = task.fractalType === 'custom' || task.fractalType === 'julia-custom'
+    const valueBailout = task.smooth && !isCustom ? BAILOUT_SMOOTH : (task.escapeRadius ?? 4.0) ** 2
     const trapEscapeBailout = (task.escapeRadius ?? 4.0) ** 2
     const threshold = Number.isFinite(trapSpec.threshold) ? trapSpec.threshold : 1e20
     const [bgR, bgG, bgB] = _normalizeColor(trapSpec.bitmapBackgroundColor, DEFAULT_BACKGROUND)
@@ -307,7 +308,7 @@ export class OrbitTrapWebGPU {
     view.setUint32(offset, shapeId, true)
     view.setUint32(offset + 4, colorPatternId, true)
     view.setUint32(offset + 8, isJulia ? 1 : 0, true)
-    view.setUint32(offset + 12, 0, true)
+    view.setUint32(offset + 12, isCustom ? 1 : 0, true)
     offset += 16
 
     view.setFloat32(offset, frameTopLeftRLo, true)
@@ -662,21 +663,26 @@ fn computeIterValue(zInit: vec2<f32>, c: vec2<f32>) -> f32 {
       break;
     }
 
-    z = safeNext(z, c, f32(iter + 1));
-    let oldIter = iter;
     iter = iter + 1;
-    if (oldIter == i32(spec.dims.z)) {
+    if (spec.extra.w == 1u && iter == i32(spec.dims.z)) {
+      return 2.0;
+    }
+    z = safeNext(z, c, f32(iter));
+    if (spec.extra.w == 0u && iter - 1 == i32(spec.dims.z)) {
       return 2.0;
     }
 
     zq = dot(z, z);
+    if (spec.extra.w == 1u) { zq = min(zq, 1e30); }
   }
 
   var iterValue = f32(iter + 4);
-  if (spec.flags.x == 1u && iterValue > 3.0) {
+  if (spec.extra.w == 1u) { iterValue = max(4.0, iterValue); }
+  if (spec.flags.x == 1u && iterValue > 3.0 && zq > 1.0) {
     let logZn = log(zq) / 2.0;
     let nu = log(logZn / log(2.0)) / log(2.0);
     iterValue = floor(iterValue + 1.0 - nu);
+    if (spec.extra.w == 1u) { iterValue = max(4.0, iterValue); }
   }
   return iterValue;
 }
@@ -691,10 +697,12 @@ fn computeIterValueMandelbrotDs(zInit: Ds2, c: Ds2) -> f32 {
       break;
     }
 
-    z = safeNextMandelbrotDs(z, c);
-    let oldIter = iter;
     iter = iter + 1;
-    if (oldIter == i32(spec.dims.z)) {
+    if (spec.extra.w == 1u && iter == i32(spec.dims.z)) {
+      return 2.0;
+    }
+    z = safeNextMandelbrotDs(z, c);
+    if (spec.extra.w == 0u && iter - 1 == i32(spec.dims.z)) {
       return 2.0;
     }
 
@@ -702,10 +710,12 @@ fn computeIterValueMandelbrotDs(zInit: Ds2, c: Ds2) -> f32 {
   }
 
   var iterValue = f32(iter + 4);
-  if (spec.flags.x == 1u && iterValue > 3.0) {
+  if (spec.extra.w == 1u) { iterValue = max(4.0, iterValue); }
+  if (spec.flags.x == 1u && iterValue > 3.0 && zq > 1.0) {
     let logZn = log(zq) / 2.0;
     let nu = log(logZn / log(2.0)) / log(2.0);
     iterValue = floor(iterValue + 1.0 - nu);
+    if (spec.extra.w == 1u) { iterValue = max(4.0, iterValue); }
   }
   return iterValue;
 }

@@ -4,6 +4,7 @@ import vm from 'node:vm'
 import { BUDDHA_PALETTES } from '../buddhaPalettes.mjs'
 import { DEFAULT_RENDER_POINT_BATCH_SIZE, normalizeRenderPointBatchSize } from '../buddhabrotRenderConfig.mjs'
 import { compileIterationFunction } from '../customFunctionParser.mjs'
+import { getBuddhabrotProjection } from '../buddhabrotProjection.mjs'
 
 const source = readFileSync(
   process.env.BUDDHA_WORKER_SOURCE || new URL('../buddhabrotWorker.mjs', import.meta.url),
@@ -57,6 +58,7 @@ async function sample(options = {}, delay = 0, onYield = null, pointBatchSize = 
     self: {},
     console,
     compileIterationFunction,
+    getBuddhabrotProjection,
     DEFAULT_RENDER_POINT_BATCH_SIZE,
     normalizeRenderPointBatchSize,
     recordSample(re, im) {
@@ -167,7 +169,7 @@ for (const delay of [0.01, 1, 10, 100]) {
 }
 
 let cases = 4
-for (const expression of [null, 'z*z+c', 'c*(z+1/(z^2))', 'z*z+c+0.1*zDelay(2)']) {
+for (const expression of [null, 'z*z+c', 'z*z+c*i', 'z*z+c+i', 'c*(z+1/(z^2))', 'z*z+c+0.1*zDelay(2)']) {
   for (const mode of ['buddha', 'antibuddha']) {
     for (const buddhaBandMode of ['perPoint', 'perTrajectory']) {
       for (const paletteStops of [null, ...BUDDHA_PALETTES]) {
