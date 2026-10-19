@@ -5614,7 +5614,6 @@ function stopRenderingForJuliaToggleDuringBuddhabrot() {
   // startBuddhaRender() が runner 生成前の await 中でも、続きで描画を始めないようにする。
   buddhaRenderRequestGeneration++
   buddhaRenderPending = false
-  suppressResizeRedrawUntil = Date.now() + 500
 
   cancelActiveMainRender()
   cancelActiveJuliaRender()
@@ -7652,12 +7651,7 @@ let lastViewportScrollAt = 0
 let canvasPixelResizeObserver = null
 let devicePixelRatioQuery = null
 let devicePixelRatioQueryHandler = null
-let suppressResizeRedrawUntil = 0
 const SCROLL_RESIZE_SUPPRESSION_MS = 350
-
-function shouldSuppressResizeRedraw() {
-  return Date.now() < suppressResizeRedrawUntil
-}
 
 function noteViewportScroll() {
   lastKnownScrollX = window.scrollX || 0
@@ -7862,6 +7856,8 @@ function refreshDevicePixelBoxSize() {
 }
 
 function resizeToCanvasSize() {
+  // Changing the canvas buffer clears its pixels. Always redraw a changed size,
+  // including rapid Julia toggles immediately after stopping Buddhabrot.
   invalidateAnimation()
   // ── Julia Mode ──────────────────────────────────────────────────────────
   if (juliaState?.active) {
@@ -7921,7 +7917,7 @@ function resizeToCanvasSize() {
       if (sizeEl) sizeEl.innerText = `${juliaBufferWidth}x${juliaBufferHeight}`
       showZoomFactor()
       const canvasSizeChanged = mainCanvasChanged || mainRendererSizeChanged || juliaCanvasChanged
-      if (canvasSizeChanged && !shouldSuppressResizeRedraw()) redraw()
+      if (canvasSizeChanged) redraw()
       return canvasSizeChanged
     }
 
@@ -8019,7 +8015,7 @@ function resizeToCanvasSize() {
 
     showZoomFactor()
     const canvasSizeChanged = mainCanvasChanged || juliaCanvasChanged
-    if (canvasSizeChanged && !shouldSuppressResizeRedraw()) redraw()
+    if (canvasSizeChanged) redraw()
     return canvasSizeChanged
   }
 
@@ -8103,7 +8099,7 @@ function resizeToCanvasSize() {
 
   if (mainCanvasChanged) fractal.resized()
   showZoomFactor()
-  if (mainCanvasChanged && !shouldSuppressResizeRedraw()) redraw()
+  if (mainCanvasChanged) redraw()
   return mainCanvasChanged
 }
 
