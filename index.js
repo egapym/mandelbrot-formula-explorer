@@ -3412,6 +3412,8 @@ function lockBuddhabrotViewToggle() {
 
 function invalidateJuliaBuddhabrotView({ clearVisible = false } = {}) {
   if (!hasJuliaBuddhabrotState()) return false
+  buddhaRenderRequestGeneration++
+  buddhaRenderPending = false
   if (clearVisible && (BuddhabrotState.isViewEnabled() || buddhaActive)) {
     stopAndClearBuddha()
   } else {
@@ -5932,6 +5934,8 @@ function flushGpuInteractiveRedraw() {
 function zoomWithFactor(factor, cooldown, options = {}) {
   const buddhaOnJuliaView = isBuddhabrotViewShownOnJulia()
   if (isMainCanvasInteractionBlockedByBuddhabrot()) return
+  // Changing the source view changes Julia c, invalidating its Buddhabrot image.
+  invalidateJuliaBuddhabrotView({ clearVisible: true })
   // stopBuddhaPreserveDisplay は runner が実行中のときだけ呼ぶ。
   // 停止済みで呼ぶと density バッファが同期描画され、ズームのたびに
   // Buddhabrot が一瞬フラクタルの上へ重なって見えてしまう。
@@ -7174,6 +7178,10 @@ function onMouseMove(evt) {
   }
 
   if (dragStart) {
+    const dx = lastX - dragStart[0]
+    const dy = lastY - dragStart[1]
+    if (dx === 0 && dy === 0) return
+    invalidateJuliaBuddhabrotView({ clearVisible: true })
     if (detailEnabled) _renderDetailIndicator()
     // stopBuddhaPreserveDisplay は runner 実行中だけ呼ぶ。
     // 停止後に呼ぶと density がキャンバスへ描かれ、パンのたびに
@@ -7198,9 +7206,7 @@ function onMouseMove(evt) {
     }
     // 表示を動かしたので保存済み画像を無効化する
     savedFractalImageData = null
-    // ピクセル差分を求め、高精度 FxP の複素差分として反映する
-    const dx = lastX - dragStart[0]
-    const dy = lastY - dragStart[1]
+    // ピクセル差分を高精度 FxP の複素差分として反映する
 
     // canvas2complex() と同じ scale = zoom * width / 4 を再計算する
     const w_fx = fxp.fromNumber(fractal.width, fractal.precision)
@@ -8622,6 +8628,7 @@ function initListeners() {
         // View を OFF にした後でも、表示位置や倍率を変えた時点で復元対象を
         // 無効にしておかないと、Buddhabrot View が再び有効のまま残ってしまう。
         if (dx !== 0 || dy !== 0 || factor !== 1) {
+          invalidateJuliaBuddhabrotView({ clearVisible: true })
           buddhaLockedByFractalChange = true
           buddhaPreservedDisplay = false
           const toggle = document.getElementById('buddha-toggle')

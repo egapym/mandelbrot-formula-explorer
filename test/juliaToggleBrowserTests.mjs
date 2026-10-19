@@ -56,10 +56,53 @@ try {
           const viewToggle = doc.getElementById('buddha-toggle')
           if (viewToggle.checked || !viewToggle.disabled) throw new Error('Buddhabrot view was not cleared')
         }
+        // A Julia Buddhabrot belongs to the main view's current c. Changing
+        // that source view must clear the image and lock its View toggle.
+        doc.getElementById('buddha-iterations').value = '512'
+        const canvas = doc.getElementById('mandelbrot-canvas')
+        const win = doc.defaultView
+        const mouse = (type, x, y, buttons = 0) => canvas.dispatchEvent(new win.MouseEvent(type, {
+          bubbles: true, clientX: x, clientY: y, buttons,
+        }))
+        const touch = (type, points) => canvas.dispatchEvent(new win.TouchEvent(type, {
+          bubbles: true, cancelable: true,
+          touches: points.map(([clientX, clientY], identifier) => new win.Touch({
+            identifier, target: canvas, clientX, clientY, pageX: clientX, pageY: clientY,
+          })),
+        }))
+        for (const gesture of ['wheel', 'drag', 'touch pan', 'pinch']) {
+          doc.getElementById('buddha-render').click()
+          const viewToggle = doc.getElementById('buddha-toggle')
+          await waitFor(() => viewToggle.checked && !viewToggle.disabled, 'Julia Buddhabrot did not complete')
+          const rect = canvas.getBoundingClientRect()
+          const x = rect.x + rect.width / 2
+          const y = rect.y + rect.height / 2
+          mouse('mousemove', x, y)
+          if (!viewToggle.checked || viewToggle.disabled) throw new Error('Hover cleared Buddhabrot')
+          if (gesture === 'wheel') {
+            canvas.dispatchEvent(new win.WheelEvent('wheel', { bubbles: true, cancelable: true, clientX: x, clientY: y, deltaY: -100 }))
+          } else if (gesture === 'drag') {
+            mouse('mousedown', x, y, 1)
+            mouse('mousemove', x + 20, y + 10, 1)
+            mouse('mouseup', x + 20, y + 10)
+          } else if (gesture === 'touch pan') {
+            touch('touchstart', [[x, y]])
+            touch('touchmove', [[x + 20, y + 10]])
+            touch('touchend', [])
+          } else {
+            touch('touchstart', [[x - 20, y], [x + 20, y]])
+            touch('touchmove', [[x - 30, y], [x + 30, y]])
+            touch('touchend', [])
+          }
+          if (viewToggle.checked || !viewToggle.disabled) throw new Error(`${gesture}: View was not locked OFF`)
+          await delay(750)
+          await waitFor(() => hasRenderedPixels(doc, 'mandelbrot-canvas') && hasRenderedPixels(doc, 'julia-canvas'), `${gesture}: normal fractals were not restored`)
+          if (viewToggle.checked || !viewToggle.disabled) throw new Error(`${gesture}: stale completion re-enabled View`)
+        }
         setToggle(doc, 'julia-toggle', false)
         await delay(750)
         await waitFor(() => hasRenderedPixels(doc, 'mandelbrot-canvas'), 'Main view missing after Julia OFF')
-        passed.push(`PASS: ${width}px, GPU ${gpu ? 'ON (fallback allowed)' : 'OFF'}, rapid toggles and final OFF`)
+        passed.push(`PASS: ${width}px, GPU ${gpu ? 'ON (fallback allowed)' : 'OFF'}, rapid toggles, source gestures, and final OFF`)
         result.textContent = passed.join('\n') + '\nRunning…'
       } finally {
         frame.remove()
