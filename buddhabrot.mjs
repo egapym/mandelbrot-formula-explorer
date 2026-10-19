@@ -297,7 +297,8 @@ export class BuddhabrotRunner {
     this._terminated = false
     this.resetDensity()
     this.maxIter = params.maxIter ?? this.maxIter
-    this.samples = params.samples ?? this.samples
+    this.continuous = !!params.continuous
+    this.samples = this.continuous ? Infinity : params.samples ?? this.samples
     this.width = params.width || this.width
     this.height = params.height || this.height
     // 指定があれば待ち時間を更新する
@@ -337,7 +338,7 @@ export class BuddhabrotRunner {
     // サンプル数をワーカーへ分配する
     // samples が workerCount より少ない場合でも、先頭から順に 1 件ずつ割り当てる
     const base = Math.floor(this.samples / this.workerCount)
-    let rem = this.samples % this.workerCount
+    let rem = this.continuous ? 0 : this.samples % this.workerCount
     this._pendingWorkers = 0
     this._sent = 0
     // 進捗差分計算用に、各ワーカーの処理済みサンプル数を保持する
@@ -369,6 +370,7 @@ export class BuddhabrotRunner {
         id: i,
         jobId: this._currentJobId, // 古いメッセージを除外するための ID
         samples: assign,
+        continuous: this.continuous,
         maxIter: this.maxIter,
         width: this.width,
         height: this.height,

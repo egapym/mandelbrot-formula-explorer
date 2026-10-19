@@ -20,9 +20,7 @@ const SAMPLING_CONFIG = {
   DEFAULT_ZOOM: 1,
   DEFAULT_MODE: 'buddha',
   DEFAULT_BAND_MODE: 'perPoint',
-  FLUSH_INTERVAL_DIVISOR: 2000,
-  MIN_FLUSH_INTERVAL: 1000,
-  FLUSH_DIRTY_THRESHOLD: 2000,
+  FULL_SPEED_DISPLAY_INTERVAL_MS: 100,
   COOPERATIVE_SAMPLE_INTERVAL: 100,
   COOPERATIVE_TIME_SLICE_MS: 8,
   VIEW_SPAN: 2.0,
@@ -400,12 +398,6 @@ async function runSampling(opts) {
     pendingNonzeroCount = 0
   }
 
-  const flushIntervalSamples = Math.max(
-    SAMPLING_CONFIG.MIN_FLUSH_INTERVAL,
-    Math.floor(samples / SAMPLING_CONFIG.FLUSH_INTERVAL_DIVISOR),
-  )
-  const flushWhenDirtyCount = SAMPLING_CONFIG.FLUSH_DIRTY_THRESHOLD
-
   // 内側ループで頻繁に使う値をローカルへ退避する
   const invWSpan = 1 / (right - left)
   const invHSpan = 1 / (bottom - top)
@@ -613,6 +605,7 @@ async function runSampling(opts) {
   // Yield often enough for Stop/live controls, without paying a timer roundtrip
   // for every 100 cheap samples. This clock controls scheduling only.
   let sliceStarted = Date.now()
+  let lastDensityFlush = sliceStarted
 
   while (jobCtx.isActive() && (nextSample < samples || trajectories.length > 0)) {
     if (renderDelay === 0) {
@@ -625,13 +618,16 @@ async function runSampling(opts) {
         drawTrajectory().next()
       }
       completedSamples++
-      const shouldFlush = dirtyList.length >= flushWhenDirtyCount ||
-        (completedSamples > 0 && completedSamples % flushIntervalSamples === 0)
-      if (shouldFlush) flushSparse(jobCtx)
       if (
-        (shouldFlush || completedSamples % SAMPLING_CONFIG.COOPERATIVE_SAMPLE_INTERVAL === 0) &&
+        completedSamples % SAMPLING_CONFIG.COOPERATIVE_SAMPLE_INTERVAL === 0 &&
         Date.now() - sliceStarted >= SAMPLING_CONFIG.COOPERATIVE_TIME_SLICE_MS
       ) {
+        // Finite and continuous jobs share the same hot loop and display cadence.
+        // Always flush the final remainder after the loop, even for short jobs.
+        if (Date.now() - lastDensityFlush >= SAMPLING_CONFIG.FULL_SPEED_DISPLAY_INTERVAL_MS) {
+          flushSparse(jobCtx)
+          lastDensityFlush = Date.now()
+        }
         await new Promise((resolve) => setTimeout(resolve, 0))
         if (jobCtx.shouldStop()) break
         sliceStarted = Date.now()

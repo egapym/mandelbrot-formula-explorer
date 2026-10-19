@@ -167,10 +167,47 @@ async function run() {
           totalMs: +median(timings[i].wall).toFixed(3),
         })
     }
+    // Force periodic readback boundaries without a wall-clock wait. With the
+    // same seed each batch, clearing/accumulating must preserve every channel.
+    const clockDescriptor = Object.getOwnPropertyDescriptor(performance, 'now')
+    const realNow = performance.now.bind(performance)
+    let elapsedDisplayTime = 0
+    Object.defineProperty(performance, 'now', { configurable: true, value: () => realNow() + elapsedDisplayTime })
+    try {
+      for (const mode of ['buddha', 'antibuddha']) {
+        let expected
+        for (const continuous of [false, true]) {
+          const runner = new BuddhabrotWebGPU({ devicePromise: Promise.resolve(probe) })
+          let count = 0, frames = 0, failure
+          runner.onProgress = data => {
+            count += data.delta
+            if (continuous) elapsedDisplayTime += 1001
+            if (continuous && count >= 16384) runner.stop()
+          }
+          runner.onChunk = () => frames++
+          runner.onComplete = result => { if (result.error) failure = result.error }
+          await runner.start({ width: 64, height: 64, samples: 16384, maxIter: 1000,
+            center: { x: 0, y: 0 }, zoom: 1, escapeRadius: 4, gpu: true, mode, continuous })
+          assert(!failure && !runner._cpuRunner, failure || 'Continuous test fell back to CPU')
+          assert(count === 16384, 'Continuous Stop counted the wrong sample total')
+          const channels = [runner.densityR, runner.densityG, runner.densityB]
+          if (!continuous) expected = channels.map(channel => channel.slice())
+          else {
+            assert(frames >= 2, 'Periodic GPU readback did not publish updates')
+            for (let ch = 0; ch < channels.length; ch++)
+              assert(channels[ch].every((value, i) => value === expected[ch][i]),
+                `${mode}: continuous histogram clearing lost or duplicated density`)
+          }
+        }
+      }
+    } finally {
+      if (clockDescriptor) Object.defineProperty(performance, 'now', clockDescriptor)
+      else delete performance.now
+    }
     const error = await device.popErrorScope()
     assert(!error, error?.message)
     const validation = runners.length > 1 && compareDensity ? 'fixed-seed density parity' : 'fixed-seed sampling'
-    return `PASS: ${validation}; median of 7 runs after 2 warmups\n${JSON.stringify(rows, null, 2)}`
+    return `PASS: ${validation}; continuous readback/Stop density parity; median of 7 runs after 2 warmups\n${JSON.stringify(rows, null, 2)}`
   } finally {
     for (const { runner } of runners) runner.stop()
     querySet?.destroy()

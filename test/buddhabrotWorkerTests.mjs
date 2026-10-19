@@ -130,6 +130,11 @@ function equalDensity(expected, actual, exact = false) {
 }
 
 const immediate = await sample()
+const continuousImmediate = await sample({ continuous: true })
+equalDensity(immediate, continuousImmediate, true)
+assert.equal(immediate.chunks, continuousImmediate.chunks, 'Finite jobs must share the continuous display cadence')
+assert.deepEqual(immediate.waits, continuousImmediate.waits, 'Finite jobs must share the continuous yield cadence')
+equalDensity(immediate, await sample({ continuous: true }, 10))
 // Fixed random seeds prove that sampling stays at the initial view after pan/zoom,
 // while drawing still projects orbit hits into the current display bounds.
 for (const fractalType of ['mandelbrot', 'julia']) {
@@ -155,6 +160,7 @@ console.log('PASS: initial-view sampling is independent of pan/zoom; orbit hits 
 // Slow slices still need to accept Stop, even when they have visible density.
 const fastSlices = await sample({ clockStep: 0 })
 assert.equal(fastSlices.waits.length, 0, 'Cheap immediate samples paid timer roundtrips')
+assert.equal(fastSlices.chunks, 1, 'Jobs shorter than the display interval must publish their final density')
 equalDensity(immediate, fastSlices)
 const stoppedImmediate = await sample({}, 0,
   (context) => context.self.onmessage({ data: { cmd: 'stop' } }))

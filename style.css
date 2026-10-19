@@ -1207,3 +1207,9 @@ footer {
   height: 100% !important;
   image-rendering: pixelated;
 }
+
+/* Keep the drag cursor visible while hover handlers update their inline cursor. */
+#mandelbrot-canvas.canvas-dragging,
+#julia-canvas.canvas-dragging {
+  cursor: grabbing !important;
+}

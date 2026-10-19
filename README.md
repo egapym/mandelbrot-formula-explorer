@@ -85,15 +85,52 @@ At very high resolutions, switching can happen at different zoom levels to reduc
 
 - Buddhabrot mode selector (Buddhabrot / Anti-Buddhabrot)
 - Buddhabrot view toggle
-- Sample count input
+- Always-on Realtime Navigation: drag, wheel/trackpad zoom, or two-finger pinch on a rendered main or Julia Buddhabrot
+- Continuous toggle: accumulate samples until Stop (CPU updates live; GPU display updates every second)
+- Sample count input (computed sample total in Continuous mode)
 - Sampling range selector: Current View (default) or Initial View; initial sampling uses the selected preset's reset position/zoom while orbit hits map to the current view, on both CPU and GPU
 - Buddhabrot GPU toggle
 - Buddhabrot palette selector
 - Band mode selector for both Buddhabrot and Anti-Buddhabrot (per-trajectory / per-point; defaults to per-trajectory)
 - Brightness and gamma controls with reset buttons
 - CPU render speed delay slider with reset button
-- CPU points-per-batch slider (default 64, maximum is min(Samples, 1024)) for concurrent trajectories across all workers; each advances one step per render delay, with reset button
+- CPU points-per-batch slider (default 64, maximum is min(Samples, 1024), or 1024 in Continuous mode) for concurrent trajectories across all workers; each advances one step per render delay, with reset button
 - Render and Stop actions
+
+Enable **Continuous**, then select **Render Buddhabrot** to keep adding samples
+without a finite limit. Changing Continuous does not restart or stop the current
+render; the selection applies to the next Render, navigation or render-setting
+change. CPU results update about every 100ms at full speed (or each configured
+delayed presentation); GPU density is accumulated and displayed every second.
+Finite and Continuous CPU rendering share the same 100ms full-speed display
+cadence and always publish remaining density at completion. Configured delayed
+presentation is preserved. Both modes retain one calculation job, reusing workers
+and GPU pipelines. Samples becomes read-only and shows the computed total about every 500ms,
+with a final update on Stop. Turning Continuous off restores the prior finite
+sample limit. Render, navigation and render-setting changes start a fresh density
+map and reset the current render's count. Reset All Settings turns Continuous off.
+
+While Buddhabrot is shown (including a stopped image), changing Palette, Buddhabrot Mode,
+Band Mode or Sampling Range immediately starts a new render. Changing Samples
+only changes the limit for the next Render or navigation; it does not restart
+the current render. These controls do not start Buddhabrot
+when the ordinary fractal view is shown.
+
+In finite mode, Realtime Navigation renders during interaction with the configured Samples,
+canvas resolution, supersampling, iterations, CPU delay and points per batch.
+There is no reduced-quality interaction mode. Only the latest waiting view is
+kept; running frames are reprojected to the current pan and zoom when displayed.
+Wheel zoom anchors to the pointer; pinch zoom anchors to the fingers' midpoint
+and also supports panning. Release (or a pause in wheel input) renders the final
+view with the same settings. High-quality settings can increase update latency.
+Stop freezes the current image. Clicking without moving does not stop or restart
+the renderer. Both normal fractal and Buddhabrot canvases show a grabbing cursor
+while dragging. With Orbit enabled, a stationary click or single-finger tap pins
+the orbit; clicking/tapping its marker again releases it, including on Julia
+Buddhabrot. Drags and pinches do not toggle orbit pins.
+
+Interaction reference: [Buddhabrot Explorer](https://heledron.com/misc/buddhabrot/).
+Navigation reuses this project's CPU/WebGPU renderers.
 
 ### Navigation, Export, and Session Flow
 
@@ -211,7 +248,9 @@ With the local server running, open `test/cpuWorkerTests.html` for Worker batch,
 bitmap-cache update, cancellation and subsequent-job checks.
 
 Buddhabrot CPU checks: `node test/buddhabrotWorkerTests.mjs`,
-`node test/buddhabrotRunnerTests.mjs` and `node test/buddhabrotConvergenceTests.mjs`.
+`node test/buddhabrotRunnerTests.mjs`, `node test/buddhabrotConvergenceTests.mjs`,
+`node test/buddhabrotRealtimeTests.mjs`, `node test/buddhabrotSettingsTests.mjs`
+and `node test/buddhabrotContinuousTests.mjs`.
 The worker tests accept `BUDDHA_REFERENCE_WORKER=/path/to/old-worker.mjs` to
 compare seeded orbit hits, colors and immediate RGB density with an earlier implementation.
 Run `node test/buddhabrotCpuBenchmark.mjs` for a seeded single-worker Node benchmark

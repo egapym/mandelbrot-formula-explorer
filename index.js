@@ -7,7 +7,9 @@ import {
   AnimationStore, PreparedAnimation, analyzeAnimationPath, createAnimationPath, resolveAnimationMinimum,
 } from './animation.mjs'
 import { AnimationGpuSession } from './animationGpuSession.mjs'
-import { BuddhabrotRunner } from './buddhabrot.mjs'
+import { BuddhabrotRunner, createBuddhaRunner } from './buddhabrot.mjs'
+import { BuddhabrotRealtimeRenderer, getBuddhabrotFrameTransform } from './buddhabrotRealtime.mjs'
+import { BuddhabrotContinuousRunner, CONTINUOUS_SAMPLES } from './buddhabrotContinuous.mjs'
 import { CpuDensityColorMap } from './buddhabrotCpuColorMap.mjs'
 import { DEFAULT_RENDER_POINT_BATCH_SIZE, getRenderPointBatchLimit, normalizeRenderPointBatchSize } from './buddhabrotRenderConfig.mjs'
 import { BUDDHA_PALETTES, buildBuddhaStops, getBuddhaPalette } from './buddhaPalettes.mjs'
@@ -539,6 +541,7 @@ const DOM = {
     iterations: document.getElementById('buddha-iterations'),
     palette: document.getElementById('buddha-palette'),
     gpu: document.getElementById('buddha-gpu'),
+    continuous: document.getElementById('buddha-continuous'),
     brightness: document.getElementById('buddha-brightness'),
     gamma: document.getElementById('buddha-gamma'),
     renderSpeed: document.getElementById('buddha-draw-speed'),
@@ -3005,12 +3008,15 @@ let buddhaRunner = null
 let buddhaActive = false
 let buddhaPreservedDisplay = false
 let buddhaLockedByFractalChange = false
+let lastBuddhaRenderParams = null
+let realtimeBuddhaDrag = null
 
 function syncBuddhaPointBatchSize(samplesOverride = null) {
   const slider = DOM.buddha.pointBatchSize
   if (!slider) return DEFAULT_RENDER_POINT_BATCH_SIZE
-  const runningCpu = buddhaRunner instanceof BuddhabrotRunner && buddhaRunner.running
-  let samples = samplesOverride
+  const runningCpu = (buddhaRunner instanceof BuddhabrotRunner ||
+    (buddhaRunner instanceof BuddhabrotContinuousRunner && !buddhaRunner.useGpu)) && buddhaRunner.running
+  let samples = DOM.buddha.continuous?.checked ? CONTINUOUS_SAMPLES : samplesOverride
   if (samples === null) {
     samples = parseInt(DOM.buddha.iterations?.value, 10)
     if (Number.isNaN(samples)) samples = 100000
@@ -3228,7 +3234,11 @@ function disableBuddhabrotGpuForCpuOnlySetting() {
     buddhaRunner &&
     ((buddhaRunner.constructor && buddhaRunner.constructor.name === 'BuddhabrotWebGPU') ||
       typeof buddhaRunner.devicePromise !== 'undefined')
-  if (isGpuRunner) buddhaRunner.terminate?.()
+  if (isGpuRunner) {
+    if (buddhaRunner instanceof BuddhabrotContinuousRunner && buddhaRunner.running) {
+      startBuddhaRender().catch((error) => console.warn('Could not switch continuous rendering to CPU:', error))
+    } else buddhaRunner.terminate?.()
+  }
 }
 
 if (buddhaGpuToggle) {
@@ -3393,6 +3403,257 @@ function isBuddhabrotViewShownOnJulia() {
   )
 }
 
+// Pointer events own drag/pinch; wheel events use the same rendering session.
+function canNavigateBuddhabrot(kind) {
+  return lastBuddhaRenderParams &&
+    BuddhabrotState.targetKind === kind && (buddhaActive || BuddhabrotState.isViewEnabled())
+}
+
+function cancelRealtimeBuddhaDrag() {
+  const drag = realtimeBuddhaDrag
+  if (!drag) return
+  realtimeBuddhaDrag = null
+  clearTimeout(drag.wheelTimer)
+  drag.rendering.cancel()
+  drag.canvas.classList.remove('canvas-dragging')
+  for (const id of drag.pointers.keys()) {
+    if (drag.canvas.hasPointerCapture(id)) drag.canvas.releasePointerCapture(id)
+  }
+}
+
+function finishRealtimeBuddhaDrag() {
+  if (!realtimeBuddhaDrag) return
+  const changed = realtimeBuddhaDrag.changed
+  cancelRealtimeBuddhaDrag()
+  if (!changed) return
+  updateCoordinateInputs()
+  showZoomFactor()
+  updatePermalink()
+  startBuddhaRender().catch((error) => {
+    buddhaRenderPending = false
+    console.warn('Could not render Buddhabrot after navigation:', error)
+  })
+}
+
+function drawRealtimeBuddhaFrame(drag, runner, params) {
+  if (realtimeBuddhaDrag !== drag) return
+  const off = drag.off
+  off.width = runner.width
+  off.height = runner.height
+  const ctx = off.getContext('2d')
+  const img = ctx.createImageData(off.width, off.height)
+  new CpuDensityColorMap(runner.densityR, runner.densityG, runner.densityB,
+    off.width, off.height, img.data).update(
+      parseFloat(DOM.buddha.brightness.value), parseFloat(DOM.buddha.gamma.value))
+  ctx.putImageData(img, 0, 0)
+  const canvas = drag.canvas
+  const display = canvas.getContext('2d')
+  // Reproject delayed frames for both pan and zoom, without rewinding the view.
+  const transform = getBuddhabrotFrameTransform(canvas.width, canvas.height, params, {
+    center: { x: drag.renderer.center[0].toNumber(), y: drag.renderer.center[1].toNumber() },
+    zoom: drag.renderer.zoom.toNumber(),
+  })
+  display.fillStyle = 'black'
+  display.fillRect(0, 0, canvas.width, canvas.height)
+  display.drawImage(off, transform.x, transform.y, canvas.width * transform.scale, canvas.height * transform.scale)
+}
+
+function beginRealtimeBuddhaNavigation(canvas, kind) {
+  if (realtimeBuddhaDrag) return realtimeBuddhaDrag.canvas === canvas ? realtimeBuddhaDrag : null
+  const renderer = kind === 'julia' ? juliaState.renderer : fractal
+  let navigationGpuDevicePromise
+  const drag = {
+    canvas, renderer, kind, changed: false, orbitTapCandidate: true, pointers: new Map(),
+    off: document.createElement('canvas'), copy: document.createElement('canvas'),
+  }
+  drag.rendering = new BuddhabrotRealtimeRenderer({
+    createRunner: async () => {
+      const runner = await createBuddhaRunner({
+        useGpu: !!DOM.buddha.gpu?.checked && supportsGpuIterationFunction(lastBuddhaRenderParams.iterationFunction),
+        workerCount: Math.max(1, DEFAULT_WORKER_COUNT),
+        width: 1, height: 1,
+        devicePromise: navigationGpuDevicePromise,
+      })
+      if (!DOM.buddha.continuous?.checked) return runner
+      navigationGpuDevicePromise ||= runner.devicePromise
+      return wrapContinuousBuddhaRunner(runner, {
+        onProgress: (data) => {
+          if (realtimeBuddhaDrag === drag) updateBuddhaContinuousSamples(data.total, data.force)
+        },
+      })
+    },
+    draw: (runner, params) => drawRealtimeBuddhaFrame(drag, runner, params),
+    onError: (error) => {
+      console.warn('Buddhabrot navigation render failed:', error)
+      if (realtimeBuddhaDrag === drag) finishRealtimeBuddhaDrag()
+    },
+  })
+  realtimeBuddhaDrag = drag
+  return drag
+}
+
+// A press without movement is only a click. Leave the current runner, its
+// progress and its display intact until the view actually changes.
+function activateRealtimeBuddhaNavigation(drag) {
+  if (drag.changed) return
+  drag.changed = true
+  buddhaRunnerGeneration++
+  buddhaDensityDrawGeneration++
+  buddhaRenderRequestGeneration++
+  buddhaRenderPending = false
+  buddhaRunner?.stop?.()
+  buddhaRunner?.terminate?.()
+  buddhaRunner = null
+  discardSavedBuddhaImageData()
+  savedFractalImageData = null
+  finishBuddhabrotProgress(drag.kind, { showRenderTime: false })
+  buddhaActive = true
+  buddhaPreservedDisplay = false
+  DOM.buddha.toggle.checked = true
+  DOM.buddha.toggle.disabled = false
+  clearOrbitCanvas()
+  clearJuliaOrbitCanvas()
+}
+
+function requestRealtimeBuddhaFrame(drag) {
+  const renderer = drag.renderer
+  const supersampling = parseInt(renderer.supersampling, 10) || 0
+  const samples = DOM.buddha.continuous?.checked
+    ? CONTINUOUS_SAMPLES : parseInt(DOM.buddha.iterations.value, 10) || 100000
+  // Match normal rendering exactly: supersampling increases the sample budget,
+  // while density buffers keep the canvas dimensions. No interaction quality cap.
+  drag.rendering.request({
+    ...lastBuddhaRenderParams,
+    // A saved CPU render can be followed by GPU navigation (and vice versa).
+    // Keep the request mode consistent with the current runner selection.
+    gpu: !!DOM.buddha.gpu?.checked,
+    width: drag.canvas.width, height: drag.canvas.height,
+    samples: !DOM.buddha.continuous?.checked && supersampling > 1
+      ? Math.floor(samples * supersampling * supersampling) : samples,
+    supersampling,
+    maxIter: renderer.max_iter,
+    renderDelay: getCpuBuddhabrotRenderDelay(DOM.buddha.renderSpeed.value),
+    renderPointBatchSize: syncBuddhaPointBatchSize(),
+    center: { x: renderer.center[0].toNumber(), y: renderer.center[1].toNumber() },
+    zoom: renderer.zoom.toNumber(),
+  })
+  if (drag.kind === 'main') {
+    updateCoordinateInputs()
+    showZoomFactor()
+  }
+  refreshCoordinateGrid()
+}
+
+function transformRealtimeBuddhaView(drag, previous, current, factor = 1) {
+  activateRealtimeBuddhaNavigation(drag)
+  const { renderer, canvas, kind } = drag
+  const rect = canvas.getBoundingClientRect()
+  const px = (previous.x - rect.left) * canvas.width / rect.width
+  const py = (previous.y - rect.top) * canvas.height / rect.height
+  const x = (current.x - rect.left) * canvas.width / rect.width
+  const y = (current.y - rect.top) * canvas.height / rect.height
+  const p = renderer.precision
+  const oldZoom = renderer.zoom
+  const oldScale = oldZoom.multiply(fxp.fromNumber(canvas.width / 4, p))
+  const anchor = [
+    renderer.center[0].add(fxp.fromNumber(px - canvas.width / 2, p).divide(oldScale)),
+    renderer.center[1].add(fxp.fromNumber(py - canvas.height / 2, p).divide(oldScale)),
+  ]
+  renderer.setZoom(oldZoom.multiply(fxp.fromNumber(factor, p)).max(MIN_ZOOM.withScale(p)))
+  const newScale = renderer.zoom.multiply(fxp.fromNumber(canvas.width / 4, p))
+  const center = [
+    anchor[0].subtract(fxp.fromNumber(x - canvas.width / 2, p).divide(newScale)),
+    anchor[1].subtract(fxp.fromNumber(y - canvas.height / 2, p).divide(newScale)),
+  ]
+  if (kind === 'main') renderer.setCenter(center)
+  else renderer.center = center
+  const appliedFactor = renderer.zoom.divide(oldZoom).toNumber()
+  drag.copy.width = canvas.width
+  drag.copy.height = canvas.height
+  drag.copy.getContext('2d').drawImage(canvas, 0, 0)
+  const ctx = canvas.getContext('2d')
+  ctx.fillStyle = 'black'
+  ctx.fillRect(0, 0, canvas.width, canvas.height)
+  ctx.drawImage(drag.copy, x - appliedFactor * px, y - appliedFactor * py,
+    canvas.width * appliedFactor, canvas.height * appliedFactor)
+  requestRealtimeBuddhaFrame(drag)
+}
+
+function realtimeBuddhaGesture(pointers) {
+  const [a, b] = [...pointers.values()]
+  return b ? { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2, distance: Math.hypot(a.x - b.x, a.y - b.y) } : a
+}
+
+function initRealtimeBuddhaDrag(canvas, kind) {
+  canvas.addEventListener('pointerdown', (event) => {
+    if (!canNavigateBuddhabrot(kind) || event.button !== 0) return
+    const drag = beginRealtimeBuddhaNavigation(canvas, kind)
+    if (!drag || drag.pointers.size >= 2) return
+    event.preventDefault()
+    event.stopImmediatePropagation()
+    clearTimeout(drag.wheelTimer)
+    if (drag.pointers.size > 0) drag.orbitTapCandidate = false
+    drag.pointers.set(event.pointerId, { x: event.clientX, y: event.clientY })
+    canvas.setPointerCapture(event.pointerId)
+    canvas.classList.add('canvas-dragging')
+  }, { capture: true })
+  canvas.addEventListener('pointermove', (event) => {
+    const drag = realtimeBuddhaDrag
+    if (!drag || drag.canvas !== canvas || !drag.pointers.has(event.pointerId)) return
+    event.preventDefault()
+    event.stopImmediatePropagation()
+    const previous = realtimeBuddhaGesture(drag.pointers)
+    drag.pointers.set(event.pointerId, { x: event.clientX, y: event.clientY })
+    const current = realtimeBuddhaGesture(drag.pointers)
+    const factor = previous.distance >= 8 && current.distance >= 8 ? current.distance / previous.distance : 1
+    if (previous.x === current.x && previous.y === current.y && factor === 1) return
+    transformRealtimeBuddhaView(drag, previous, current, factor)
+  }, { capture: true })
+  for (const type of ['pointerup', 'pointercancel', 'lostpointercapture']) {
+    canvas.addEventListener(type, (event) => {
+      const drag = realtimeBuddhaDrag
+      if (!drag || drag.canvas !== canvas || !drag.pointers.has(event.pointerId)) return
+      event.preventDefault()
+      event.stopImmediatePropagation()
+      drag.pointers.delete(event.pointerId)
+      if (canvas.hasPointerCapture(event.pointerId)) canvas.releasePointerCapture(event.pointerId)
+      if (!drag.pointers.size) {
+        const pinOrbit = event.type === 'pointerup' && !drag.changed && drag.orbitTapCandidate && orbitDrawEnabled
+        finishRealtimeBuddhaDrag()
+        // Pointer events own Buddhabrot clicks/taps. Route only a stationary
+        // single-pointer release to Orbit; compatibility clicks remain suppressed.
+        if (pinOrbit) {
+          if (kind === 'julia') _togglePinnedJuliaOrbitAtClient(event.clientX, event.clientY)
+          else _togglePinnedOrbitAtClient(event.clientX, event.clientY)
+        }
+      }
+    }, { capture: true })
+  }
+  canvas.addEventListener('wheel', (event) => {
+    if (!canNavigateBuddhabrot(kind)) return
+    event.preventDefault()
+    event.stopImmediatePropagation()
+    const delta = getWheelZoomDelta(event)
+    if (!delta) return
+    const drag = beginRealtimeBuddhaNavigation(canvas, kind)
+    if (!drag) return
+    const position = { x: event.clientX, y: event.clientY }
+    transformRealtimeBuddhaView(drag, position, position, scaleFactor ** Math.max(-100, Math.min(100, -delta)))
+    clearTimeout(drag.wheelTimer)
+    drag.wheelTimer = setTimeout(() => {
+      if (realtimeBuddhaDrag === drag && !drag.pointers.size) finishRealtimeBuddhaDrag()
+    }, GPU_WHEEL_FINAL_REDRAW_DELAY_MS)
+  }, { capture: true, passive: false })
+  // Suppress the older touch navigation handlers when pointer events own it.
+  for (const type of ['touchstart', 'touchmove', 'touchend', 'touchcancel', 'click']) {
+    canvas.addEventListener(type, (event) => {
+      if (!canNavigateBuddhabrot(kind)) return
+      event.preventDefault()
+      event.stopImmediatePropagation()
+    }, { capture: true, passive: false })
+  }
+}
+
 function isMainCanvasInteractionBlockedByBuddhabrot() {
   return (buddhaActive || BuddhabrotState.isViewEnabled()) && !isBuddhabrotViewShownOnJulia()
 }
@@ -3474,13 +3735,79 @@ function discardSavedBuddhaImageData() {
   savedBuddhaImageDataPromise = null
 }
 
+let buddhaFiniteSampleValue = null
+let buddhaContinuousSampleCount = 0
+let buddhaContinuousSampleDisplayTime = -Infinity
+
+function updateBuddhaContinuousSamples(total, force = false) {
+  if (!DOM.buddha.continuous?.checked) return
+  buddhaContinuousSampleCount = Math.floor(total)
+  const now = performance.now()
+  if (!force && now - buddhaContinuousSampleDisplayTime < 500) return
+  buddhaContinuousSampleDisplayTime = now
+  DOM.buddha.iterations.value = String(buddhaContinuousSampleCount)
+}
+
+function syncBuddhaContinuousModeUi() {
+  const input = DOM.buddha.iterations
+  const enabled = !!DOM.buddha.continuous?.checked
+  if (enabled && !input.readOnly) {
+    buddhaFiniteSampleValue = input.value
+    updateBuddhaContinuousSamples(0, true)
+  } else if (!enabled && input.readOnly && buddhaFiniteSampleValue !== null) {
+    input.value = buddhaFiniteSampleValue
+    buddhaFiniteSampleValue = null
+  }
+  input.readOnly = enabled
+  input.title = enabled ? 'Total computed samples in this continuous render (updated periodically)'
+    : 'Total number of orbit samples for Buddhabrot rendering. More samples = higher quality but longer render time'
+  syncBuddhaPointBatchSize()
+}
+
+function wrapContinuousBuddhaRunner(runner, callbacks = runner) {
+  return new BuddhabrotContinuousRunner({
+    runner,
+    createCpuRunner: () => new BuddhabrotRunner({ workerCount: Math.max(1, DEFAULT_WORKER_COUNT) }),
+    onProgress: callbacks.onProgress, onChunk: callbacks.onChunk, onComplete: callbacks.onComplete,
+  })
+}
+
+let buddhaRenderSettingsSignature = null
+
+function getBuddhaRenderSettingsSignature() {
+  return JSON.stringify([
+    DOM.buddha.palette?.value,
+    DOM.buddha.mode?.value,
+    DOM.buddha.bandMode?.value,
+    DOM.buddha.samplingRange?.value,
+  ])
+}
+
+function redrawBuddhaForRenderSettingChange() {
+  if (!buddhaActive && !BuddhabrotState.isViewEnabled()) return
+  const sampleValue = DOM.buddha.iterations?.value?.trim()
+  const samples = Number(sampleValue)
+  // Leave the current display intact while a number is temporarily incomplete.
+  if (!DOM.buddha.continuous?.checked && (!sampleValue || !Number.isSafeInteger(samples) || samples < 0)) return
+  // Render once for a changed rendering mode or palette.
+  if (getBuddhaRenderSettingsSignature() === buddhaRenderSettingsSignature) return
+  const rendering = startBuddhaRender()
+  const generation = buddhaRenderRequestGeneration
+  rendering.catch((error) => {
+    if (generation === buddhaRenderRequestGeneration) buddhaRenderPending = false
+    console.warn('Could not redraw Buddhabrot after a setting change:', error)
+  })
+}
+
 /**
  * Buddhabrot の描画ジョブを開始する
  * @async
  * @throws {Error} 描画を開始できない場合
  */
 async function startBuddhaRender() {
+  cancelRealtimeBuddhaDrag()
   const target = getBuddhabrotTargetSnapshot()
+  buddhaRenderSettingsSignature = getBuddhaRenderSettingsSignature()
   const historyGpuSupported = supportsGpuIterationFunction(target.iterationFunction)
   const targetCanvas = target.canvas
   const targetRenderer = target.renderer
@@ -3493,7 +3820,8 @@ async function startBuddhaRender() {
   const isBuddhaRenderRequestCurrent = () => renderRequestGeneration === buddhaRenderRequestGeneration
   const abortIfBuddhaRenderCanceled = () => {
     if (isBuddhaRenderRequestCurrent()) return false
-    buddhaRenderPending = false
+    // Only the current request owns pending state; a superseded request may
+    // finish its GPU initialization while a newer settings render is starting.
     return true
   }
 
@@ -3554,11 +3882,12 @@ async function startBuddhaRender() {
   } catch (e) {
     console.warn('Error stopping existing Buddhabrot before starting new one:', e?.message ? e.message : e)
   }
-  let samples = parseInt(document.getElementById('buddha-iterations').value, 10)
+  const continuous = !!DOM.buddha.continuous?.checked
+  let samples = continuous ? CONTINUOUS_SAMPLES : parseInt(document.getElementById('buddha-iterations').value, 10)
   if (Number.isNaN(samples)) samples = 100000
   // 専用 supersampling UI は廃止済み。fractal 側の値があれば使う
   const ss = targetRenderer?.supersampling ? parseInt(targetRenderer.supersampling, 10) : 0
-  if (ss > 1) samples = Math.floor(samples * ss * ss)
+  if (!continuous && ss > 1) samples = Math.floor(samples * ss * ss)
 
   const palId = document.getElementById('buddha-palette').value
   // Buddhabrot 専用パレットがあればそのまま渡し、なければ通常パレットから組み立てる
@@ -3707,6 +4036,10 @@ async function startBuddhaRender() {
           try {
             // 完全消去または再実行で無効化済みになったジョブの通知は反映しない。
             if (buddhaRunnerGeneration !== runnerGeneration) return
+            if (data?.continuous) {
+              updateBuddhaContinuousSamples(data.total, data.force)
+              return
+            }
             if (!buddhaActive) return
             const progressMonitor = getBuddhabrotProgressMonitor()
             if (!progressMonitor) return
@@ -3848,7 +4181,7 @@ async function startBuddhaRender() {
   mode = modeEl && typeof modeEl.value !== 'undefined' ? modeEl.value || 'buddha' : 'buddha'
   // Buddhabrot 用進捗を開始する。タスク総数は samples ベースの近似値を使う
   try {
-    if (samples > 0) {
+    if (!continuous && samples > 0) {
       // 既存の逆側進捗表示は開始前に閉じる
       hideInactiveBuddhabrotProgress(target.kind)
       // ProgressMonitor はタスク数前提なので、sample 数をそのまま使う
@@ -3916,6 +4249,7 @@ async function startBuddhaRender() {
   }
 
   if (abortIfBuddhaRenderCanceled()) return
+  if (continuous) buddhaRunner = wrapContinuousBuddhaRunner(buddhaRunner)
   const runnerToStart = buddhaRunner
   if (!runnerToStart || typeof runnerToStart.start !== 'function') {
     console.error('index.js: runnerToStart.start is not available', runnerToStart)
@@ -3927,7 +4261,8 @@ async function startBuddhaRender() {
   const initialSamplingCenter = target.kind === 'julia'
     ? { x: 0, y: 0 }
     : { x: initialPreset?.coordX || 0, y: initialPreset?.coordY || 0 }
-  await runnerToStart.start({
+  const renderParams = {
+    renderDelay,
     samples: samples,
     renderPointBatchSize: syncBuddhaPointBatchSize(samples),
     maxIter: targetRenderer.max_iter,
@@ -3968,7 +4303,16 @@ async function startBuddhaRender() {
     })(),
     // 両モードとも画面で選択された Band Mode を使用する。
     buddhaBandMode: DOM.buddha.bandMode?.value === 'perPoint' ? 'perPoint' : 'perTrajectory',
-  })
+  }
+  lastBuddhaRenderParams = renderParams
+  if (continuous) {
+    finishBuddhabrotProgress(target.kind, { showRenderTime: false })
+    if (viewToggle) {
+      viewToggle.checked = true
+      viewToggle.disabled = false
+    }
+  }
+  await runnerToStart.start(renderParams)
 }
 
 // 実行中の Buddhabrot を停止し、バッファとキャンバスを消去する
@@ -3977,6 +4321,8 @@ async function startBuddhaRender() {
  * @param {boolean} suppressToggleChange - true ならトグル状態を変えない
  */
 function stopAndClearBuddha(suppressToggleChange = false) {
+  cancelRealtimeBuddhaDrag()
+  lastBuddhaRenderParams = null
   const displayCanvas = getBuddhabrotDisplayCanvas()
   buddhaRunnerGeneration++
   buddhaRedrawScheduled = false
@@ -4037,6 +4383,8 @@ function stopAndClearBuddha(suppressToggleChange = false) {
 
 // Buddhabrot ワーカーだけ止め、表示中のキャンバスは残す
 function stopBuddhaPreserveDisplay() {
+  cancelRealtimeBuddhaDrag()
+  updateBuddhaContinuousSamples(buddhaContinuousSampleCount, true)
   const displayCanvas = getBuddhabrotDisplayCanvas()
   if (buddhaRunner?.running) {
     buddhaRunner.stop()
@@ -6150,6 +6498,7 @@ function _juliaDocMouseMove(evt) {
 
 function _endJuliaDrag() {
   juliaDragStart = null
+  juliaCanvasElement?.classList.remove('canvas-dragging')
   document.removeEventListener('mousemove', _juliaDocMouseMove)
   document.removeEventListener('mouseup', _endJuliaDrag)
 }
@@ -6162,6 +6511,7 @@ function onJuliaMouseDown(evt) {
   }
   _juliaPinDragged = false
   juliaDragStart = _juliaCanvasCoords(evt)
+  juliaCanvasElement?.classList.add('canvas-dragging')
   // ポインターが他要素へ乗ってもドラッグを続けられるよう、
   // document レベルで監視する。
   document.addEventListener('mousemove', _juliaDocMouseMove)
@@ -7082,7 +7432,7 @@ function _togglePinnedOrbitAtClient(clientX, clientY) {
 
 function _togglePinnedJuliaOrbitAtClient(clientX, clientY) {
   const renderer = juliaState.renderer
-  if (isJuliaCanvasInteractionBlockedByBuddhabrot()) return
+  // Orbit is an independent overlay, including while Julia Buddhabrot renders.
   if (!juliaState.active || !renderer) return
   const [px, py] = toGraphicsCoordinatesOnCanvas(renderer.canvas, clientX, clientY)
   const jZoom = renderer.zoom.toNumber ? renderer.zoom.toNumber() : 1
@@ -7116,15 +7466,16 @@ function _togglePinnedJuliaOrbitAtClient(clientX, clientY) {
 }
 
 function onMouseDown(evt) {
-  // Buddhabrot 表示中、またはトグルがオンの間は、表示を固定するため
-  // パンやドラッグの開始を許可しない。
+  // Buddhabrot の操作は専用の pointer イベントで処理する。
   if (isMainCanvasInteractionBlockedByBuddhabrot()) return
   _orbitPinDragged = false
   updateMousePos(evt)
   dragStart = [lastX, lastY]
+  canvasElement.classList.add('canvas-dragging')
 }
 
 function onMouseMove(evt) {
+  if (realtimeBuddhaDrag?.canvas === canvasElement) return
   const [clientX, clientY] = _getClientCoordinatesFromEvent(evt)
   if (evt.type === 'mousemove') mainOrbitHoverActive = true
   const buddhaOnJuliaView = isBuddhabrotViewShownOnJulia()
@@ -7284,6 +7635,7 @@ function panCanvas(dx, dy) {
 
 function onMouseUp(evt) {
   updateMousePos(evt)
+  canvasElement.classList.remove('canvas-dragging')
   dragStart = null
   flushGpuInteractiveRedraw()
 }
@@ -8314,6 +8666,18 @@ function initListeners() {
   observeCanvasPixelSize()
   syncDevicePixelRatioWatcher()
 
+  initRealtimeBuddhaDrag(canvasElement, 'main')
+  if (juliaCanvasElement) initRealtimeBuddhaDrag(juliaCanvasElement, 'julia')
+  window.addEventListener('blur', finishRealtimeBuddhaDrag)
+  const clearDragCursors = (event) => {
+    if (event.type !== 'blur' && realtimeBuddhaDrag?.pointers.size > 1) return
+    canvasElement.classList.remove('canvas-dragging')
+    juliaCanvasElement?.classList.remove('canvas-dragging')
+  }
+  window.addEventListener('pointerup', clearDragCursors, { capture: true })
+  window.addEventListener('pointercancel', clearDragCursors, { capture: true })
+  window.addEventListener('blur', clearDragCursors)
+
   canvasElement.addEventListener('mousedown', onMouseDown)
   canvasElement.addEventListener('mousemove', onMouseMove)
   canvasElement.addEventListener('mouseup', onMouseUp)
@@ -9242,6 +9606,18 @@ function initListeners() {
     reset()
   })
 
+  if (DOM.buddha.continuous) {
+    DOM.buddha.continuous.checked = false
+    syncBuddhaContinuousModeUi()
+    DOM.buddha.continuous.addEventListener('change', syncBuddhaContinuousModeUi)
+  }
+
+  // Render-affecting controls apply immediately only while Buddhabrot is shown.
+  for (const control of [DOM.buddha.palette, DOM.buddha.mode,
+    DOM.buddha.bandMode, DOM.buddha.samplingRange]) {
+    control?.addEventListener('change', redrawBuddhaForRenderSettingChange)
+  }
+
   // Buddhabrot 実行ボタン
   try {
     const buddhaBtn = document.getElementById('buddha-render')
@@ -9264,7 +9640,7 @@ function initListeners() {
     const stopBtn = document.getElementById('buddha-stop')
     if (stopBtn) {
       stopBtn.addEventListener('click', () => {
-        if (buddhaActive && buddhaRunner?.running) {
+        if (buddhaActive && (buddhaRunner?.running || realtimeBuddhaDrag)) {
           stopBuddhaPreserveDisplay()
           // 保持表示を見せ続けるため、トグルを有効にしてオンのまま保つ
           const t = document.getElementById('buddha-toggle')
@@ -9692,10 +10068,14 @@ function initListeners() {
 }
 
 function reset() {
+  if (DOM.buddha.continuous) {
+    DOM.buddha.continuous.checked = false
+    syncBuddhaContinuousModeUi()
+  }
   // 実行中の Buddhabrot はすぐ停止する
   try {
     stopAndClearBuddha()
-  } catch (e) {
+      } catch (e) {
     console.warn('Error stopping/clearing buddha in reset():', e?.message ? e.message : e)
   }
   buddhaActive = false

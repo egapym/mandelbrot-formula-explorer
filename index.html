@@ -582,7 +582,7 @@
             <div id="buddhabrot-controls" class="mb-2 g-1">
               <div class="mb-2 row">
                 <div class="col col-sm-6">
-                  <div class="d-flex align-items-start gap-3">
+                  <div class="d-flex align-items-start flex-wrap gap-3">
                     <div>
                       <label for="buddha-gpu" class="col-form-label py-0 d-block">Buddhabrot GPU</label>
                       <div class="d-flex align-items-center py-1">
@@ -594,6 +594,16 @@
                             role="switch"
                             title="Use WebGPU acceleration for Buddhabrot rendering (requires a compatible browser and GPU)"
                           />
+                        </div>
+                      </div>
+                    </div>
+                    <div>
+                      <label for="buddha-continuous" class="col-form-label py-0 d-block">Continuous</label>
+                      <div class="d-flex align-items-center py-1">
+                        <div class="form-check form-switch m-0">
+                          <input id="buddha-continuous" class="form-check-input" type="checkbox" role="switch"
+                            aria-describedby="buddha-continuous-help"
+                            title="Apply to the next render: accumulate samples until Stop; Samples shows the computed total" />
                         </div>
                       </div>
                     </div>
@@ -640,6 +650,8 @@
                   </div>
                 </div>
               </div>
+              <p id="buddha-continuous-help" class="small text-muted mb-2">Continuous: render until Stop. Samples displays the computed total.</p>
+              <p id="buddha-navigation-help" class="small text-muted mb-2">Realtime Navigation: drag, scroll, or pinch the rendered view. Uses the configured rendering quality.</p>
               <div class="mb-2 row">
                 <div class="col col-sm-6">
                   <div class="d-flex align-items-start gap-3">
@@ -672,7 +684,7 @@
                   <select
                     id="buddha-sampling-range"
                     class="form-select form-select-sm py-0"
-                    title="Choose the range used to generate random coordinates. Orbits are drawn in the current view. Applies on the next Render."
+                    title="Choose the range used to generate random coordinates. Orbits are drawn in the current view. Changes redraw immediately while Buddhabrot is shown."
                   >
                     <option value="current" selected>Current View</option>
                     <option value="initial">Initial View</option>

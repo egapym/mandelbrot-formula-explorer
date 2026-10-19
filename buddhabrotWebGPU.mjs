@@ -9,7 +9,7 @@ import { getBuddhabrotProjection, getBuddhabrotProjectionWGSL } from './buddhabr
 
 export class BuddhabrotWebGPU {
   constructor(options = {}) {
-    this.devicePromise = this.initGpu()
+    this.devicePromise = options.devicePromise || this.initGpu()
     this.width = options.width || 800
     this.height = options.height || 600
     this.samples = options.samples || 100000
@@ -517,7 +517,8 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     })
 
     // uniform へ width, height, maxIter, samplesPerThread などを書き込む
-    const totalSamples = Math.max(0, Math.floor(params.samples || this.samples))
+    const continuous = !!params.continuous
+    const totalSamples = continuous ? Infinity : Math.max(0, Math.floor(params.samples || this.samples))
 
     // invocation 数を決める。通常はピクセル数ベースだが、
     // サンプル数が少ないときは totalSamples に合わせる。
@@ -702,17 +703,37 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     const MAX_SAMPLES_PER_THREAD = 1
     const MAX_SAMPLES_PER_BATCH = Math.max(1, invocations)
 
+    // Reuse the pipeline and histogram throughout continuous rendering. Read and
+    // clear the integer histogram periodically, accumulating into CPU densities.
+    const readDensity = async () => {
+      const buffer = device.createBuffer({ size: bufSize * 3,
+        usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ })
+      try {
+        const encoder = device.createCommandEncoder()
+        for (const [i, source] of [rBuf, gBuf, bBuf].entries()) {
+          encoder.copyBufferToBuffer(source, 0, buffer, i * bufSize, bufSize)
+          if (continuous) encoder.clearBuffer(source)
+        }
+        device.queue.submit([encoder.finish()])
+        await buffer.mapAsync(GPUMapMode.READ)
+        const values = new Uint32Array(buffer.getMappedRange())
+        for (const [channel, density] of [this.densityR, this.densityG, this.densityB].entries()) {
+          for (let i = 0; i < len; i++) {
+            const value = values[channel * len + i] / QUANT_SCALE
+            density[i] = continuous ? density[i] + value : value
+          }
+        }
+        buffer.unmap()
+      } finally { buffer.destroy() }
+    }
+    let lastDisplay = performance.now()
     let samplesRemaining = totalSamples
     try {
-      let batchIndex = 0
-      while (samplesRemaining > 0) {
+      while (samplesRemaining > 0 && this.running) {
         // このバッチで処理するサンプル数を決める
         const samplesThisBatch = Math.min(samplesRemaining, invocations * MAX_SAMPLES_PER_THREAD, MAX_SAMPLES_PER_BATCH)
         const invocationsThisBatch = Math.min(invocations, samplesThisBatch)
         const samplesPerThreadThis = Math.max(1, Math.ceil(samplesThisBatch / invocationsThisBatch))
-        console.info(
-          `buddhabrotWebGPU: batch[${batchIndex}] will request samplesThisBatch=${samplesThisBatch} (MAX_SAMPLES_PER_BATCH=${MAX_SAMPLES_PER_BATCH})`,
-        )
 
         // このバッチ用の samplesPerThread と seed を設定する
         u32view[3] = samplesPerThreadThis
@@ -729,9 +750,6 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         u32view[8] = batchSeed
         // 更新分だけ uniform に反映する
         device.queue.writeBuffer(uniformBuf, 0, u32view.buffer, 0, u32view.byteLength)
-        console.info(
-          `buddhabrotWebGPU: dispatching batch samplesThisBatch=${samplesThisBatch} samplesPerThread=${samplesPerThreadThis} invocations=${invocations}`,
-        )
 
         // workgroup が上限を超える場合は分割して dispatch する
         let remaining = Math.ceil(invocationsThisBatch / 64)
@@ -761,32 +779,13 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
           // GPU 完了待ちと abort を競合させ、stop() で中断できるようにする
           const waitRes = await Promise.race([device.queue.onSubmittedWorkDone(), this._abortPromise])
           if (waitRes === 'abort' || !this.running) {
-            console.info('buddhabrotWebGPU: aborted during batch wait — reading back partial density')
             this.running = false
             // ここまでにたまった密度だけでも読み戻し、画面が空白にならないようにする
             try {
-              const abortEncoder = device.createCommandEncoder()
-              const abortCombinedBuf = device.createBuffer({
-                size: bufSize * 3,
-                usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
-              })
-              abortEncoder.copyBufferToBuffer(rBuf, 0, abortCombinedBuf, 0, bufSize)
-              abortEncoder.copyBufferToBuffer(gBuf, 0, abortCombinedBuf, bufSize, bufSize)
-              abortEncoder.copyBufferToBuffer(bBuf, 0, abortCombinedBuf, bufSize * 2, bufSize)
-              device.queue.submit([abortEncoder.finish()])
-              await abortCombinedBuf.mapAsync(GPUMapMode.READ)
-              const abortRange = abortCombinedBuf.getMappedRange()
-              const abortU32 = new Uint32Array(abortRange)
-              const abortR = abortU32.subarray(0, bufSize / 4)
-              const abortG = abortU32.subarray(bufSize / 4, (bufSize * 2) / 4)
-              const abortB = abortU32.subarray((bufSize * 2) / 4, (bufSize * 3) / 4)
-              const abortLen = this.width * this.height
-              for (let i = 0; i < abortLen; i++) {
-                this.densityR[i] = (abortR[i] || 0) / QUANT_SCALE
-                this.densityG[i] = (abortG[i] || 0) / QUANT_SCALE
-                this.densityB[i] = (abortB[i] || 0) / QUANT_SCALE
-              }
-              abortCombinedBuf.unmap()
+              await readDensity()
+              // The readback is queued after every dispatch in this batch;
+              // successful mapping proves these submitted samples finished.
+              this.onProgress({ delta: samplesThisBatch, total: totalSamples })
             } catch (abortReadErr) {
               console.warn(
                 'buddhabrotWebGPU: failed to read back density on abort:',
@@ -801,20 +800,17 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
             })
             return
           }
-        } else {
-          console.info(
-            'buddhabrotWebGPU: device.queue.onSubmittedWorkDone not available; relying on buffer mapAsync for sync',
-          )
         }
 
         // このバッチで実際に処理したサンプル数を反映する
         const processed = samplesThisBatch
         samplesRemaining -= processed
         this.onProgress({ delta: processed, total: totalSamples })
-        console.info(
-          `buddhabrotWebGPU: batch[${batchIndex}] completed processed=${processed} samplesRemaining=${samplesRemaining} samplesPerThread=${samplesPerThreadThis}`,
-        )
-        batchIndex++
+        if (continuous && performance.now() - lastDisplay >= 1000) {
+          await readDensity()
+          this.onChunk({ continuous: true })
+          lastDisplay = performance.now()
+        }
       }
     } catch (e) {
       console.error('buddhabrotWebGPU: dispatchWorkgroups threw', e?.message ? e.message : e)
@@ -828,52 +824,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
       return
     }
 
-    // 新しい encoder で u32 バッファを読み戻す
-    const readEncoder = device.createCommandEncoder()
-    // R/G/B を連続配置で受け取る 1 本の読み出し buffer を作る
-    const combinedSize = bufSize * 3
-    const readCombined = device.createBuffer({
-      size: combinedSize,
-      usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
-    })
-    readEncoder.copyBufferToBuffer(rBuf, 0, readCombined, 0, bufSize)
-    readEncoder.copyBufferToBuffer(gBuf, 0, readCombined, bufSize, bufSize)
-    readEncoder.copyBufferToBuffer(bBuf, 0, readCombined, bufSize * 2, bufSize)
-    device.queue.submit([readEncoder.finish()])
-
-    // abort 済みでも密度を読めるよう、必ず mapAsync を待つ
-    try {
-      await readCombined.mapAsync(GPUMapMode.READ)
-    } catch (e) {
-      console.error('buddhabrotWebGPU: mapAsync for combined read buffer failed', e?.message ? e.message : e)
-      readCombined.unmap()
-      this.running = false
-      this.onComplete({
-        densityMap: null,
-        width: this.width,
-        height: this.height,
-        error: 'mapAsync failed',
-      })
-      return
-    }
-    // 中断有無にかかわらず、この後で密度バッファは更新する
-    // 余計なコピーを避けるため、読み取り範囲へ直接 view を作る
-    const combinedRange = readCombined.getMappedRange()
-    const combinedU32 = new Uint32Array(combinedRange)
-    const ar = combinedU32.subarray(0, bufSize / 4)
-    const ag = combinedU32.subarray(bufSize / 4, (bufSize * 2) / 4)
-    const ab = combinedU32.subarray((bufSize * 2) / 4, (bufSize * 3) / 4)
-
-    // 量子化した整数を float の密度へ戻す
-    const total = width * height
-
-    for (let i = 0; i < total; i++) {
-      this.densityR[i] = (ar[i] || 0) / QUANT_SCALE
-      this.densityG[i] = (ag[i] || 0) / QUANT_SCALE
-      this.densityB[i] = (ab[i] || 0) / QUANT_SCALE
-    }
-
-    readCombined.unmap()
+    await readDensity()
 
     return
   }
