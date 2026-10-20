@@ -4181,11 +4181,14 @@ async function startBuddhaRender({ preserveSourceRender = false } = {}) {
   mode = modeEl && typeof modeEl.value !== 'undefined' ? modeEl.value || 'buddha' : 'buddha'
   // Buddhabrot 用進捗を開始する。タスク総数は samples ベースの近似値を使う
   try {
-    if (!continuous && samples > 0) {
+    if (samples > 0) {
       // 既存の逆側進捗表示は開始前に閉じる
       hideInactiveBuddhabrotProgress(target.kind)
       // ProgressMonitor はタスク数前提なので、sample 数をそのまま使う
-      getBuddhabrotProgressMonitor(target.kind)?.start(samples)
+      const progress = getBuddhabrotProgressMonitor(target.kind)
+      progress?.start(samples)
+      // Continuous has no percentage, but still measures elapsed render time.
+      if (continuous) hideProgressMonitor(progress)
     }
   } catch (e) {
     console.warn('Error starting progress for buddha samples:', e?.message ? e.message : e)
@@ -4309,7 +4312,7 @@ async function startBuddhaRender({ preserveSourceRender = false } = {}) {
   renderParams.interactive = preserveSourceRender
   lastBuddhaRenderParams = renderParams
   if (continuous) {
-    finishBuddhabrotProgress(target.kind, { showRenderTime: false })
+    hideProgressMonitor(getBuddhabrotProgressMonitor(target.kind))
     if (viewToggle) {
       viewToggle.checked = true
       viewToggle.disabled = false
@@ -4389,6 +4392,8 @@ function stopBuddhaPreserveDisplay() {
   cancelRealtimeBuddhaDrag()
   updateBuddhaContinuousSamples(buddhaContinuousSampleCount, true)
   const displayCanvas = getBuddhabrotDisplayCanvas()
+  // Freeze at Stop, before final canvas capture or asynchronous GPU readback.
+  if (buddhaRunner?.continuous) finishBuddhabrotProgress()
   if (buddhaRunner?.running) {
     buddhaRunner.stop()
   }

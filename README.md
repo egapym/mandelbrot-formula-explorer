@@ -106,7 +106,8 @@ Finite and Continuous CPU rendering share the same 100ms full-speed display
 cadence and always publish remaining density at completion. Configured delayed
 presentation is preserved. Both modes retain one calculation job, reusing workers
 and GPU pipelines. Samples becomes read-only and shows the computed total about every 500ms,
-with a final update on Stop. Turning Continuous off restores the prior finite
+with a final update on Stop. Render time shows the elapsed duration when a
+Continuous render is stopped. Turning Continuous off restores the prior finite
 sample limit. Render, navigation and render-setting changes start a fresh density
 map and reset the current render's count. Reset All Settings turns Continuous off.
 
