@@ -371,6 +371,7 @@ export class BuddhabrotRunner {
         jobId: this._currentJobId, // 古いメッセージを除外するための ID
         samples: assign,
         continuous: this.continuous,
+        interactive: !!params.interactive,
         maxIter: this.maxIter,
         width: this.width,
         height: this.height,

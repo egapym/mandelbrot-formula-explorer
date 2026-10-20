@@ -130,6 +130,9 @@ function equalDensity(expected, actual, exact = false) {
 }
 
 const immediate = await sample()
+const interactiveImmediate = await sample({ interactive: true })
+equalDensity(immediate, interactiveImmediate)
+assert.ok(interactiveImmediate.chunks > immediate.chunks, 'Interactive jobs did not present partial density sooner')
 const continuousImmediate = await sample({ continuous: true })
 equalDensity(immediate, continuousImmediate, true)
 assert.equal(immediate.chunks, continuousImmediate.chunks, 'Finite jobs must share the continuous display cadence')

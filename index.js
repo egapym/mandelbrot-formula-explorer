@@ -3804,7 +3804,7 @@ function redrawBuddhaForRenderSettingChange() {
  * @async
  * @throws {Error} 描画を開始できない場合
  */
-async function startBuddhaRender() {
+async function startBuddhaRender({ preserveSourceRender = false } = {}) {
   cancelRealtimeBuddhaDrag()
   const target = getBuddhabrotTargetSnapshot()
   buddhaRenderSettingsSignature = getBuddhaRenderSettingsSignature()
@@ -3835,7 +3835,7 @@ async function startBuddhaRender() {
 
   // 通常フラクタル描画が進行中なら止め、Buddhabrot に計算資源を譲る
   try {
-    if (typeof fractal !== 'undefined' && fractal) {
+    if (!preserveSourceRender && typeof fractal !== 'undefined' && fractal) {
       fractal._revokeJobToken?.()
       // 古い CPU タスクが再実行されないようキューを空にする
       if (Array.isArray(fractal.taskqueue)) fractal.taskqueue.length = 0
@@ -4304,6 +4304,9 @@ async function startBuddhaRender() {
     // 両モードとも画面で選択された Band Mode を使用する。
     buddhaBandMode: DOM.buddha.bandMode?.value === 'perPoint' ? 'perPoint' : 'perTrajectory',
   }
+  // Source navigation needs partial images before the configured sample
+  // budget completes; keep the budget and all numerical settings unchanged.
+  renderParams.interactive = preserveSourceRender
   lastBuddhaRenderParams = renderParams
   if (continuous) {
     finishBuddhabrotProgress(target.kind, { showRenderTime: false })
@@ -5645,13 +5648,17 @@ async function redraw(resetCaches, cooldown) {
       fractal.render(resetCaches)
       redrawTimeout = null
       // Julia が有効なら待機後にそちらも再描画する
-      if (juliaState.active && !isJuliaCanvasInteractionBlockedByBuddhabrot()) redrawJulia()
+      if (juliaState.active) redrawJulia()
       if (detailEnabled) _renderDetailIndicator()
     }, cooldown)
   } else {
+    // Start Julia Buddhabrot alongside the source render. Waiting for the
+    // source render to finish delays updates (or starves them during a drag).
+    const juliaBuddhabrotVisible = isBuddhabrotViewShownOnJulia()
+    if (juliaBuddhabrotVisible) redrawJulia()
     await fractal.render(resetCaches)
-    // Julia が有効なら、現在の中心を c としてあわせて描画する
-    if (juliaState.active && !isJuliaCanvasInteractionBlockedByBuddhabrot()) redrawJulia()
+    // Ordinary Julia keeps its existing redraw behavior.
+    if (juliaState.active && !juliaBuddhabrotVisible) redrawJulia()
     if (detailEnabled) _renderDetailIndicator()
   }
 }
@@ -5662,12 +5669,37 @@ function showZoomFactor() {
   refreshCoordinateGrid()
 }
 
+let juliaBuddhabrotSourceRedrawFrame = null
+
+function scheduleJuliaBuddhabrotSourceRedraw() {
+  // Coalesce same-frame events without waiting for navigation to stop.
+  if (juliaBuddhabrotSourceRedrawFrame !== null) return
+  juliaBuddhabrotSourceRedrawFrame = requestAnimationFrame(() => {
+    juliaBuddhabrotSourceRedrawFrame = null
+    if (!juliaState.active || !isBuddhabrotViewShownOnJulia()) return
+    const c = getCurrentJuliaCFromMain()
+    if (lastBuddhaRenderParams?.juliaRe === c.re && lastBuddhaRenderParams?.juliaIm === c.im) return
+    // The main view and Julia Buddhabrot render independently. Keep the main
+    // render running while replacing the Julia image for the latest source c.
+    const rendering = startBuddhaRender({ preserveSourceRender: true })
+    const generation = buddhaRenderRequestGeneration
+    rendering.catch((error) => {
+      if (generation === buddhaRenderRequestGeneration) buddhaRenderPending = false
+      console.warn('Could not redraw Julia Buddhabrot after source navigation:', error)
+    })
+  })
+}
+
 /**
  * 現在の Mandelbrot 中心を c として Julia 集合を描画する。
  * 反復回数、スムーズ描画、パレット設定はメイン表示と同期する。
  */
 function redrawJulia() {
   if (!juliaState.active || !juliaState.renderer) return
+  if (isBuddhabrotViewShownOnJulia()) {
+    scheduleJuliaBuddhabrotSourceRedraw()
+    return
+  }
   if (isJuliaCanvasInteractionBlockedByBuddhabrot()) return
   const synced = syncJuliaRendererSettingsFromMain()
   if (!synced) return
@@ -6282,8 +6314,8 @@ function flushGpuInteractiveRedraw() {
 function zoomWithFactor(factor, cooldown, options = {}) {
   const buddhaOnJuliaView = isBuddhabrotViewShownOnJulia()
   if (isMainCanvasInteractionBlockedByBuddhabrot()) return
-  // Changing the source view changes Julia c, invalidating its Buddhabrot image.
-  invalidateJuliaBuddhabrotView({ clearVisible: true })
+  // Keep a visible Julia Buddhabrot; redrawJulia() updates it for the new c.
+  if (!buddhaOnJuliaView) invalidateJuliaBuddhabrotView({ clearVisible: true })
   // stopBuddhaPreserveDisplay は runner が実行中のときだけ呼ぶ。
   // 停止済みで呼ぶと density バッファが同期描画され、ズームのたびに
   // Buddhabrot が一瞬フラクタルの上へ重なって見えてしまう。
@@ -7532,7 +7564,7 @@ function onMouseMove(evt) {
     const dx = lastX - dragStart[0]
     const dy = lastY - dragStart[1]
     if (dx === 0 && dy === 0) return
-    invalidateJuliaBuddhabrotView({ clearVisible: true })
+    if (!buddhaOnJuliaView) invalidateJuliaBuddhabrotView({ clearVisible: true })
     if (detailEnabled) _renderDetailIndicator()
     // stopBuddhaPreserveDisplay は runner 実行中だけ呼ぶ。
     // 停止後に呼ぶと density がキャンバスへ描かれ、パンのたびに
@@ -8991,7 +9023,7 @@ function initListeners() {
         // ピンチは GPU の対話描画経路では zoomWithFactor() を通らない。
         // View を OFF にした後でも、表示位置や倍率を変えた時点で復元対象を
         // 無効にしておかないと、Buddhabrot View が再び有効のまま残ってしまう。
-        if (dx !== 0 || dy !== 0 || factor !== 1) {
+        if (!isBuddhabrotViewShownOnJulia() && (dx !== 0 || dy !== 0 || factor !== 1)) {
           invalidateJuliaBuddhabrotView({ clearVisible: true })
           buddhaLockedByFractalChange = true
           buddhaPreservedDisplay = false

@@ -726,6 +726,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         buffer.unmap()
       } finally { buffer.destroy() }
     }
+    const displayInterval = params.interactive ? 0 : 1000
     let lastDisplay = performance.now()
     let samplesRemaining = totalSamples
     try {
@@ -806,9 +807,9 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         const processed = samplesThisBatch
         samplesRemaining -= processed
         this.onProgress({ delta: processed, total: totalSamples })
-        if (continuous && performance.now() - lastDisplay >= 1000) {
+        if ((continuous || params.interactive) && performance.now() - lastDisplay >= displayInterval) {
           await readDensity()
-          this.onChunk({ continuous: true })
+          this.onChunk({ continuous })
           lastDisplay = performance.now()
         }
       }

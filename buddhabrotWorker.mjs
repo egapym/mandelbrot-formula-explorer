@@ -605,6 +605,7 @@ async function runSampling(opts) {
   // Yield often enough for Stop/live controls, without paying a timer roundtrip
   // for every 100 cheap samples. This clock controls scheduling only.
   let sliceStarted = Date.now()
+  const displayInterval = opts.interactive ? 0 : SAMPLING_CONFIG.FULL_SPEED_DISPLAY_INTERVAL_MS
   let lastDensityFlush = sliceStarted
 
   while (jobCtx.isActive() && (nextSample < samples || trajectories.length > 0)) {
@@ -624,7 +625,7 @@ async function runSampling(opts) {
       ) {
         // Finite and continuous jobs share the same hot loop and display cadence.
         // Always flush the final remainder after the loop, even for short jobs.
-        if (Date.now() - lastDensityFlush >= SAMPLING_CONFIG.FULL_SPEED_DISPLAY_INTERVAL_MS) {
+        if (Date.now() - lastDensityFlush >= displayInterval) {
           flushSparse(jobCtx)
           lastDensityFlush = Date.now()
         }

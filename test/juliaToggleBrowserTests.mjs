@@ -27,8 +27,11 @@ function hasRenderedPixels(doc, id) {
 
 try {
   const passed = []
-  for (const gpu of [false, true]) {
-    for (const width of [1500, 500]) {
+  const params = new URLSearchParams(location.search)
+  const gpuModes = params.has('gpu') ? [params.get('gpu') === 'true'] : [false, true]
+  const widths = params.has('width') ? [Number(params.get('width'))] : [1500, 500]
+  for (const gpu of gpuModes) {
+    for (const width of widths) {
       const frame = document.createElement('iframe')
       frame.style.cssText = `width:${width}px;height:900px;border:0;display:block`
       frame.src = '../index.html'
@@ -56,8 +59,7 @@ try {
           const viewToggle = doc.getElementById('buddha-toggle')
           if (viewToggle.checked || !viewToggle.disabled) throw new Error('Buddhabrot view was not cleared')
         }
-        // A Julia Buddhabrot belongs to the main view's current c. Changing
-        // that source view must clear the image and lock its View toggle.
+        // Source navigation updates Julia c while keeping Buddhabrot visible.
         doc.getElementById('buddha-iterations').value = '512'
         const canvas = doc.getElementById('mandelbrot-canvas')
         const win = doc.defaultView
@@ -75,8 +77,10 @@ try {
           const viewToggle = doc.getElementById('buddha-toggle')
           await waitFor(() => viewToggle.checked && !viewToggle.disabled, 'Julia Buddhabrot did not complete')
           const rect = canvas.getBoundingClientRect()
-          const x = rect.x + rect.width / 2
+          const x = rect.x + rect.width * 0.6
           const y = rect.y + rect.height / 2
+          const juliaCanvas = doc.getElementById('julia-canvas')
+          const previousImage = juliaCanvas.toDataURL()
           mouse('mousemove', x, y)
           if (!viewToggle.checked || viewToggle.disabled) throw new Error('Hover cleared Buddhabrot')
           if (gesture === 'wheel') {
@@ -94,10 +98,37 @@ try {
             touch('touchmove', [[x - 30, y], [x + 30, y]])
             touch('touchend', [])
           }
-          if (viewToggle.checked || !viewToggle.disabled) throw new Error(`${gesture}: View was not locked OFF`)
+          if (!viewToggle.checked) throw new Error(`${gesture}: Buddhabrot View was turned OFF`)
           await delay(750)
-          await waitFor(() => hasRenderedPixels(doc, 'mandelbrot-canvas') && hasRenderedPixels(doc, 'julia-canvas'), `${gesture}: normal fractals were not restored`)
-          if (viewToggle.checked || !viewToggle.disabled) throw new Error(`${gesture}: stale completion re-enabled View`)
+          await waitFor(() => viewToggle.checked && !viewToggle.disabled && juliaCanvas.toDataURL() !== previousImage, `${gesture}: Julia Buddhabrot was not updated`)
+          await waitFor(() => hasRenderedPixels(doc, 'mandelbrot-canvas'), `${gesture}: source fractal render missing`)
+          if (!viewToggle.checked) throw new Error(`${gesture}: Buddhabrot View was not preserved`)
+        }
+        // Keep moving more frequently than the old 150ms debounce. Julia must
+        // update repeatedly before mouseup, even while source renders restart.
+        {
+          // A full sample budget must also present partial density during drag.
+          doc.getElementById('buddha-iterations').value = '3000000'
+          const rect = canvas.getBoundingClientRect()
+          const x = rect.x + rect.width / 2
+          const y = rect.y + rect.height / 2
+          const juliaCanvas = doc.getElementById('julia-canvas')
+          let previousImage = juliaCanvas.toDataURL()
+          let updatesDuringDrag = 0
+          mouse('mousedown', x, y, 1)
+          try {
+            for (let step = 1; step <= 20; step++) {
+              mouse('mousemove', x + step * 2, y + step, 1)
+              await delay(60)
+              const image = juliaCanvas.toDataURL()
+              if (image !== previousImage) updatesDuringDrag++
+              previousImage = image
+            }
+          } finally {
+            mouse('mouseup', x + 40, y + 20)
+          }
+          if (updatesDuringDrag < 2) throw new Error(`Continuous drag: only ${updatesDuringDrag} Julia updates before mouseup`)
+          passed.push(`PASS: ${width}px, GPU ${gpu ? 'ON' : 'OFF'}, ${updatesDuringDrag} updates during sustained drag`)
         }
         setToggle(doc, 'julia-toggle', false)
         await delay(750)
