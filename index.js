@@ -2291,6 +2291,7 @@ class ProgressMonitor {
   constructor(canvas, timeElementId = 'renderTimeValue') {
     this.canvas = canvas
     this.timeElementId = timeElementId
+    this.activeTimeElementId = timeElementId
     this.ctx = canvas.getContext('2d')
     this.ctx.fillStyle = 'black'
     this.ctx.fillRect(0, 0, canvas.width, canvas.height)
@@ -2306,7 +2307,8 @@ class ProgressMonitor {
     this.canvas.style.display = 'none'
   }
 
-  start(tasks) {
+  start(tasks, { timeElementId = this.timeElementId } = {}) {
+    this.activeTimeElementId = timeElementId
     this.tasks = tasks
     this.done = 0
     this.completed = false
@@ -2317,8 +2319,8 @@ class ProgressMonitor {
     this._draw(0)
     this._showWithCooldown()
     // 描画中は render time を隠す
-    if (this.timeElementId) {
-      const el = document.getElementById(this.timeElementId)
+    if (this.activeTimeElementId) {
+      const el = document.getElementById(this.activeTimeElementId)
       if (el) el.style.visibility = 'hidden'
     }
   }
@@ -2351,8 +2353,8 @@ class ProgressMonitor {
     if (this.finishedAt === null) this.finishedAt = Date.now()
     // 完了後に描画時間を表示し、進捗表示を隠す
     const jobTime = this.finishedAt - this.startTime
-    if (showRenderTime && this.timeElementId) {
-      const renderTimeElement = document.getElementById(this.timeElementId)
+    if (showRenderTime && this.activeTimeElementId) {
+      const renderTimeElement = document.getElementById(this.activeTimeElementId)
       if (renderTimeElement) {
         renderTimeElement.innerText = `${jobTime.toFixed(0)}ms`
         renderTimeElement.style.visibility = 'visible'
@@ -4186,7 +4188,8 @@ async function startBuddhaRender({ preserveSourceRender = false } = {}) {
       hideInactiveBuddhabrotProgress(target.kind)
       // ProgressMonitor はタスク数前提なので、sample 数をそのまま使う
       const progress = getBuddhabrotProgressMonitor(target.kind)
-      progress?.start(samples)
+      // Julia normally has no time label; Buddhabrot uses the shared Render time.
+      progress?.start(samples, { timeElementId: 'renderTimeValue' })
       // Continuous has no percentage, but still measures elapsed render time.
       if (continuous) hideProgressMonitor(progress)
     }
