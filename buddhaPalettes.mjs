@@ -46,6 +46,16 @@ export const BUDDHA_PALETTES = [
       { color: [255, 255, 0], ratio: 0.3 },
     ],
   },
+  {
+    id: 'Preset-05',
+    name: 'Preset-05',
+    bands: [
+      { color: [0, 0, 0], ratio: 0.05 },
+      { color: [0, 179, 167], ratio: 0.3 },
+      { color: [204, 197, 0], ratio: 0.3 },
+      { color: [230, 20, 10], ratio: 0.35 },
+    ],
+  },
 ]
 
 /**

@@ -107,30 +107,74 @@ const requestHandler = appSource.slice(
   appSource.indexOf('function transformRealtimeBuddhaView('),
 )
 for (const gpu of [true, false]) {
-  let requested
-  const context = {
-    lastBuddhaRenderParams: { gpu: !gpu, samplingZoom: 1 },
-    DOM: { buddha: { gpu: { checked: gpu }, iterations: { value: '8192' }, renderSpeed: { value: '0' } } },
-    getCpuBuddhabrotRenderDelay: () => 0,
-    syncBuddhaPointBatchSize: () => 64,
-    updateCoordinateInputs() {}, showZoomFactor() {}, refreshCoordinateGrid() {},
-    drag: {
-      kind: 'main', canvas: { width: 800, height: 600 },
-      renderer: {
-        supersampling: 2, max_iter: 1000,
-        center: [{ toNumber: () => -0.5 }, { toNumber: () => 0 }],
-        zoom: { toNumber: () => 1 },
+  for (const kind of ['main', 'julia']) {
+    let requested
+    const context = {
+      lastBuddhaRenderParams: { gpu: !gpu, samplingZoom: 1, maxIter: 1000 },
+      fractal: { max_iter: 2500 },
+      DOM: { buddha: { gpu: { checked: gpu }, iterations: { value: '8192' }, renderSpeed: { value: '0' } } },
+      getCpuBuddhabrotRenderDelay: () => 0,
+      syncBuddhaPointBatchSize: () => 64,
+      updateCoordinateInputs() {}, showZoomFactor() {}, refreshCoordinateGrid() {},
+      drag: {
+        kind, canvas: { width: 800, height: 600 },
+        renderer: {
+          supersampling: 2, max_iter: 1000,
+          center: [{ toNumber: () => -0.5 }, { toNumber: () => 0 }],
+          zoom: { toNumber: () => 1 },
+        },
+        rendering: { request: (params) => { requested = params } },
       },
-      rendering: { request: (params) => { requested = params } },
-    },
+    }
+    runInNewContext(`${requestHandler}\nrequestRealtimeBuddhaFrame(drag)`, context)
+    assert.equal(requested.gpu, gpu, 'Navigation must use the current GPU toggle, not the saved render snapshot')
+    assert.equal(requested.samples, 32768)
+    assert.equal(requested.width, 800)
+    assert.equal(requested.supersampling, 2)
+    assert.equal(requested.maxIter, 2500, `${kind} navigation must use the latest Max iterations`)
   }
-  runInNewContext(`${requestHandler}\nrequestRealtimeBuddhaFrame(drag)`, context)
-  assert.equal(requested.gpu, gpu, 'Navigation must use the current GPU toggle, not the saved render snapshot')
-  assert.equal(requested.samples, 32768)
-  assert.equal(requested.width, 800)
-  assert.equal(requested.supersampling, 2)
 }
 console.log('PASS: CPU/GPU switches update navigation requests without reducing quality')
+
+// A settings change is deferred until the next render request, including a
+// source refresh with the same Julia c. Do not mutate the active density job.
+let refreshFrame
+let refreshed = 0
+const settingsContext = {
+  fractal: { max_iter: 1000, initPallete() {} },
+  DOM: { iterations: { value: '1000' } },
+  buddhaRunner: { maxIter: 1000 },
+  updatePermalink() {},
+  juliaState: { active: true },
+  isBuddhabrotViewShownOnJulia: () => true,
+  getCurrentJuliaCFromMain: () => ({ re: -0.5, im: 0 }),
+  lastBuddhaRenderParams: { juliaRe: -0.5, juliaIm: 0, maxIter: 1000 },
+  requestAnimationFrame: (callback) => { refreshFrame = callback; return 1 },
+  startBuddhaRender: (options) => {
+    assert.equal(options.preserveSourceRender, true)
+    refreshed++
+    return Promise.resolve()
+  },
+  buddhaRenderRequestGeneration: 0,
+  console,
+}
+runInNewContext(appSource.slice(
+  appSource.indexOf('function setIterations(value) {'),
+  appSource.indexOf('/**\n * 入力欄の座標', appSource.indexOf('function setIterations(value) {')),
+) + appSource.slice(
+  appSource.indexOf('let juliaBuddhabrotSourceRedrawFrame = null'),
+  appSource.indexOf('/**\n * 現在の Mandelbrot 中心', appSource.indexOf('let juliaBuddhabrotSourceRedrawFrame = null')),
+), settingsContext)
+settingsContext.scheduleJuliaBuddhabrotSourceRedraw()
+refreshFrame()
+assert.equal(refreshed, 0, 'Unchanged settings and Julia c must skip duplicate refreshes')
+assert.equal(settingsContext.setIterations(2500), true)
+assert.equal(refreshed, 0, 'Changing Max iterations must not restart Buddhabrot on its own')
+assert.equal(settingsContext.buddhaRunner.maxIter, 1000, 'Active job must retain its original iteration limit')
+settingsContext.scheduleJuliaBuddhabrotSourceRedraw()
+refreshFrame()
+assert.equal(refreshed, 1, 'The next source refresh must apply Max iterations even with the same Julia c')
+console.log('PASS: deferred Max iterations changes refresh Julia without mixing active sampling settings')
 
 const continuousViews = [], continuousDraws = []
 const navigation = new BuddhabrotRealtimeRenderer({

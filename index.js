@@ -3533,7 +3533,9 @@ function requestRealtimeBuddhaFrame(drag) {
     samples: !DOM.buddha.continuous?.checked && supersampling > 1
       ? Math.floor(samples * supersampling * supersampling) : samples,
     supersampling,
-    maxIter: renderer.max_iter,
+    // Julia's renderer may still hold the value from the previous render.
+    // Max iterations is shared with the main view; read the latest setting.
+    maxIter: fractal.max_iter,
     renderDelay: getCpuBuddhabrotRenderDelay(DOM.buddha.renderSpeed.value),
     renderPointBatchSize: syncBuddhaPointBatchSize(),
     center: { x: renderer.center[0].toNumber(), y: renderer.center[1].toNumber() },
@@ -5704,7 +5706,10 @@ function scheduleJuliaBuddhabrotSourceRedraw() {
     juliaBuddhabrotSourceRedrawFrame = null
     if (!juliaState.active || !isBuddhabrotViewShownOnJulia()) return
     const c = getCurrentJuliaCFromMain()
-    if (lastBuddhaRenderParams?.juliaRe === c.re && lastBuddhaRenderParams?.juliaIm === c.im) return
+    if (
+      lastBuddhaRenderParams?.juliaRe === c.re && lastBuddhaRenderParams?.juliaIm === c.im &&
+      lastBuddhaRenderParams?.maxIter === fractal.max_iter
+    ) return
     // The main view and Julia Buddhabrot render independently. Keep the main
     // render running while replacing the Julia image for the latest source c.
     const rendering = startBuddhaRender({ preserveSourceRender: true })
@@ -6653,12 +6658,8 @@ function setIterations(value) {
     fractal.max_iter = newIter
     fractal.initPallete()
     DOM.iterations.value = fractal.max_iter
-    // Buddhabrot の runner があれば maxIter だけ更新し、以後のサンプリングや
-    // 再開時に新しい値を使う。Buddhabrot の実行中や表示中は描画を抑止しているため、
-    // ここでは再描画を発火しない。
-    if (typeof buddhaRunner !== 'undefined' && buddhaRunner && 'maxIter' in buddhaRunner) {
-      buddhaRunner.maxIter = fractal.max_iter
-    }
+    // Buddhabrot は次の描画要求時に最新値を読む。実行中の runner は変更せず、
+    // 異なる反復上限のサンプルが同じ density に混ざることを防ぐ。
     // 反復回数の変更をパーマリンクへすぐ反映する
     updatePermalink()
 
