@@ -12,7 +12,7 @@ const context = {
   DOM: { buddha: {
     iterations: { value: '1000' }, palette: { value: 'Preset-01' },
     mode: { value: 'buddha' }, bandMode: { value: 'perTrajectory' },
-    samplingRange: { value: 'current' },
+    samplingRange: { value: 'current' }, gpu: { checked: false },
   } },
   buddhaActive: false,
   BuddhabrotState: { isViewEnabled: () => shown },
@@ -56,18 +56,25 @@ assert.equal(renders, 5, 'A stopped but displayed Buddhabrot must redraw on pale
 assert.ok(!source.includes("iterations?.addEventListener('input', redrawBuddhaForRenderSettingChange)"))
 
 context.DOM.buddha.continuous = { checked: true }
-change()
-assert.equal(renders, 5, 'Continuous ON must not trigger a rerender')
+context.redrawBuddhaForExecutionSettingChange()
+assert.equal(renders, 6, 'Continuous ON must immediately restart a visible Buddhabrot')
 context.DOM.buddha.continuous.checked = false
-change()
-assert.equal(renders, 5, 'Continuous OFF must not trigger a rerender')
+context.redrawBuddhaForExecutionSettingChange()
+assert.equal(renders, 7, 'Continuous OFF must immediately restart a visible Buddhabrot')
 context.DOM.buddha.continuous.checked = true
 context.DOM.buddha.iterations.value = '1000000'
 change()
-assert.equal(renders, 5, 'Computed sample totals must not trigger continuous rerenders')
+assert.equal(renders, 7, 'Computed sample totals must not trigger continuous rerenders')
 context.DOM.buddha.mode.value = 'buddha'
 change()
-assert.equal(renders, 6, 'Other render settings must still restart continuous mode')
+assert.equal(renders, 8, 'Other render settings must still restart continuous mode')
+
+context.DOM.buddha.gpu.checked = true
+context.redrawBuddhaForExecutionSettingChange()
+assert.equal(renders, 9, 'GPU ON must immediately restart a visible Buddhabrot')
+context.DOM.buddha.gpu.checked = false
+context.redrawBuddhaForExecutionSettingChange()
+assert.equal(renders, 10, 'GPU OFF must immediately restart a visible Buddhabrot')
 
 context.buddhaRenderPending = true
 context.startBuddhaRender = () => Promise.reject(new Error('Older request failed'))

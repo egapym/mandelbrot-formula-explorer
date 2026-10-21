@@ -3246,7 +3246,7 @@ function disableBuddhabrotGpuForCpuOnlySetting() {
 if (buddhaGpuToggle) {
   buddhaGpuToggle.addEventListener('change', (_e) => {
     try {
-      if (!buddhaGpuToggle.checked) disableBuddhabrotGpuForCpuOnlySetting()
+      redrawBuddhaForExecutionSettingChange()
     } catch (e) {
       console.warn('Error handling buddha-gpu toggle change:', e)
     }
@@ -3798,6 +3798,24 @@ function redrawBuddhaForRenderSettingChange() {
   rendering.catch((error) => {
     if (generation === buddhaRenderRequestGeneration) buddhaRenderPending = false
     console.warn('Could not redraw Buddhabrot after a setting change:', error)
+  })
+}
+
+// GPU / Continuous は実行方法を変えるため、現在表示している Buddhabrot を
+// 直ちに新しい runner で描画し直す。Samples と違い、描画品質そのものを変更せず
+// に CPU/GPU または有限/Continuous の実行モードだけを切り替える。
+function redrawBuddhaForExecutionSettingChange() {
+  if (!buddhaActive && !BuddhabrotState.isViewEnabled()) return
+  const sampleValue = DOM.buddha.iterations?.value?.trim()
+  const samples = Number(sampleValue)
+  // Continuous へ切り替える際は、syncBuddhaContinuousModeUi() が 0 を表示する。
+  // 有限描画へ戻す際は復元済みの値を検証して、不完全な入力で表示を消さない。
+  if (!DOM.buddha.continuous?.checked && (!sampleValue || !Number.isSafeInteger(samples) || samples < 0)) return
+  const rendering = startBuddhaRender()
+  const generation = buddhaRenderRequestGeneration
+  rendering.catch((error) => {
+    if (generation === buddhaRenderRequestGeneration) buddhaRenderPending = false
+    console.warn('Could not redraw Buddhabrot after an execution setting change:', error)
   })
 }
 
@@ -9649,7 +9667,10 @@ function initListeners() {
   if (DOM.buddha.continuous) {
     DOM.buddha.continuous.checked = false
     syncBuddhaContinuousModeUi()
-    DOM.buddha.continuous.addEventListener('change', syncBuddhaContinuousModeUi)
+    DOM.buddha.continuous.addEventListener('change', () => {
+      syncBuddhaContinuousModeUi()
+      redrawBuddhaForExecutionSettingChange()
+    })
   }
 
   // Render-affecting controls apply immediately only while Buddhabrot is shown.
