@@ -37,4 +37,9 @@ assert.match(appSource, /const spec = \{ \.\.\.p\.orbitTrap\.trapSpec \}[\s\S]*d
   'Legacy permalink bitmap data must be ignored')
 assert.doesNotMatch(appSource, /encodeBytes\(spec\.bitmapData\)|decodeBytes\(spec\.bitmapData\)/,
   'Bitmap bytes must not be encoded into or decoded from permalinks')
-console.log('PASS: all settings controls audited, restore/reset, legacy links, and bitmap exclusion')
+assert.match(appSource, /const selectedPresetValue = DOM\.fractalTypeSelect\.value[\s\S]*const selectedPreset = functionPresets\[selectedPresetIndex\]/,
+  'Reset All must derive its defaults from the selected Fractal Type')
+const resetSource = appSource.slice(appSource.indexOf('function reset() {'), appSource.indexOf('function resetPosition() {'))
+assert.doesNotMatch(resetSource, /normalizeFractalTypeParams\(/,
+  'Reset All must not replace the selected Fractal Type with the global default')
+console.log('PASS: all settings controls audited, reset preserves Fractal Type, legacy links, and bitmap exclusion')

@@ -107,7 +107,7 @@ JavaScript モジュール、BigInt、Web Workers に対応したブラウザを
 
 ### 全体をやり直す
 
-- `Reset All Settings`: フラクタル種別・反復式・表示切替・Buddhabrot・Animation を含む全設定を初期状態に戻す。Orbit Trap のアップロード画像も消去する
+- `Reset All Settings`: 選択中の Fractal Type は維持し、そのほかの設定を初期状態に戻す。Orbit Trap のアップロード画像も消去する
 - `Reset Coordinates`: 位置と拡大率だけ初期状態に戻す
 
 ### URL で設定を保存・共有

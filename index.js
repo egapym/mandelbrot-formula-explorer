@@ -10226,25 +10226,34 @@ function reset() {
     buddhaActive = false
     buddhaLockedByFractalChange = false
     _clearPinnedOrbits()
-    const defaults = normalizeFractalTypeParams()
-    fractal.fractalType = defaults.fractalType
-    fractal.iterationFunction = defaults.iterationFunction
-    fractal.dataPresetIndex = defaults.fractalDataPresetIndex
-    fractal.label = functionPresets[0].label
-    DOM.fractalTypeSelect.value = defaults.fractalDataPresetIndex
-    DOM.iterationFunctionInput.value = defaults.iterationFunction
+    // Keep the selected Fractal Type. Presets reset their formula and initial
+    // values; a custom formula remains selected and keeps its expression.
+    const selectedPresetValue = DOM.fractalTypeSelect.value
+    const selectedPresetIndex = Number.parseInt(selectedPresetValue.split(':')[1], 10)
+    const selectedPreset = functionPresets[selectedPresetIndex]
+    if (selectedPreset) {
+      fractal.fractalType = selectedPreset.fractalType || 'custom'
+      fractal.iterationFunction = selectedPreset.expr || String(selectedPreset)
+      fractal.dataPresetIndex = selectedPresetValue
+      fractal.label = selectedPreset.label || selectedPreset.expr
+      DOM.iterationFunctionInput.value = fractal.iterationFunction
+    }
     setIterationFunctionLabelError(false)
-    lastIterationFunctionValue = defaults.iterationFunction
+    lastIterationFunctionValue = fractal.iterationFunction
     fractal.max_iter = DEFAULT_ITERATIONS
     DOM.iterations.value = DEFAULT_ITERATIONS
     fractal.smooth = DOM.smoothToggle.checked = true
     fractal.escapeRadius = 4
     DOM.escapeRadius.value = '4'
-    fractal.z0Real = fractal.z0Imag = 0
-    DOM.z0Real.value = DOM.z0Imag.value = '0'
+    const initialZ0Real = selectedPreset?.z0Real ?? 0
+    const initialZ0Imag = selectedPreset?.z0Imag ?? 0
+    fractal.z0Real = initialZ0Real
+    fractal.z0Imag = initialZ0Imag
+    DOM.z0Real.value = String(initialZ0Real)
+    DOM.z0Imag.value = String(initialZ0Imag)
     fractal.setZoom(getInitialFractalZoom(fractal.precision))
-    fractal.setCenter([fxp.fromNumber(functionPresets[0].coordX || 0),
-      fxp.fromNumber(functionPresets[0].coordY || 0)])
+    fractal.setCenter([fxp.fromNumber(selectedPreset?.coordX || 0),
+      fxp.fromNumber(selectedPreset?.coordY || 0)])
     paletteComponent.setPalette(palette.getPalette('mandelbrot'))
     paletteComponent.setDensity(1)
     paletteComponent.setRotate(0)
