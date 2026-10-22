@@ -1,0 +1,240 @@
+{
+  "date": "2026-10-22",
+  "baselineRevision": "4396f85",
+  "scope": "Production general GPU queues; no Mandelbrot-specific interior rejection",
+  "variantLabels": {
+    "current": "optimized production renderer",
+    "candidate-1": "original renderer at baseline revision"
+  },
+  "measurement": "100,000,000 samples; maxIter 1000; 800x600; one warmup excluded, three measured rounds; exact equality for every RGB density entry",
+  "functionParity": {
+    "status": "PASS: exact RGB density parity",
+    "passed": 400,
+    "skipped": [],
+    "presets": 44,
+    "historyBoundaryExpressions": 6
+  },
+  "gpuProfile": {
+    "status": "PASS: exact RGB density parity and sample counts",
+    "samples": 100000000,
+    "rounds": 3,
+    "adapter": {
+      "vendor": "apple",
+      "architecture": "metal-3",
+      "device": "",
+      "description": ""
+    },
+    "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/155.0.0.0 Safari/537.36",
+    "timestamps": true,
+    "rows": [
+      {
+        "case": "provided",
+        "variant": "current",
+        "submits": 211,
+        "waits": 27,
+        "dispatches": 627,
+        "pipelines": 3,
+        "pipelineMs": 0,
+        "readWaitMs": 0.8,
+        "densityCopyMs": 2.7,
+        "samplerMs": 457.6,
+        "gpuMs": 445.615,
+        "colorMs": 5.3
+      },
+      {
+        "case": "provided",
+        "variant": "candidate-1",
+        "submits": 211,
+        "waits": 209,
+        "dispatches": 209,
+        "pipelines": 1,
+        "pipelineMs": 0,
+        "readWaitMs": 1,
+        "densityCopyMs": 3.3,
+        "samplerMs": 1164.7,
+        "gpuMs": 1098.592,
+        "colorMs": 5.1
+      },
+      {
+        "case": "anti",
+        "variant": "current",
+        "submits": 211,
+        "waits": 27,
+        "dispatches": 627,
+        "pipelines": 3,
+        "pipelineMs": 0,
+        "readWaitMs": 0.9,
+        "densityCopyMs": 3.1,
+        "samplerMs": 1250.6,
+        "gpuMs": 1235.739,
+        "colorMs": 4.2
+      },
+      {
+        "case": "anti",
+        "variant": "candidate-1",
+        "submits": 211,
+        "waits": 209,
+        "dispatches": 209,
+        "pipelines": 1,
+        "pipelineMs": 0,
+        "readWaitMs": 0.8,
+        "densityCopyMs": 3.4,
+        "samplerMs": 3196,
+        "gpuMs": 3129.955,
+        "colorMs": 4.2
+      },
+      {
+        "case": "julia",
+        "variant": "current",
+        "submits": 211,
+        "waits": 27,
+        "dispatches": 627,
+        "pipelines": 3,
+        "pipelineMs": 0,
+        "readWaitMs": 0.8,
+        "densityCopyMs": 3.2,
+        "samplerMs": 328.6,
+        "gpuMs": 314.206,
+        "colorMs": 5
+      },
+      {
+        "case": "julia",
+        "variant": "candidate-1",
+        "submits": 211,
+        "waits": 209,
+        "dispatches": 209,
+        "pipelines": 1,
+        "pipelineMs": 0,
+        "readWaitMs": 0.8,
+        "densityCopyMs": 3.3,
+        "samplerMs": 1040.1,
+        "gpuMs": 984.898,
+        "colorMs": 4.5
+      },
+      {
+        "case": "custom",
+        "variant": "current",
+        "submits": 211,
+        "waits": 27,
+        "dispatches": 627,
+        "pipelines": 3,
+        "pipelineMs": 0,
+        "readWaitMs": 0.7,
+        "densityCopyMs": 3.4,
+        "samplerMs": 459.3,
+        "gpuMs": 433.674,
+        "colorMs": 4.8
+      },
+      {
+        "case": "custom",
+        "variant": "candidate-1",
+        "submits": 211,
+        "waits": 209,
+        "dispatches": 209,
+        "pipelines": 1,
+        "pipelineMs": 0,
+        "readWaitMs": 0.8,
+        "densityCopyMs": 1,
+        "samplerMs": 1187.9,
+        "gpuMs": 1123.918,
+        "colorMs": 4.8
+      },
+      {
+        "case": "history",
+        "variant": "current",
+        "submits": 211,
+        "waits": 27,
+        "dispatches": 627,
+        "pipelines": 3,
+        "pipelineMs": 0,
+        "readWaitMs": 0.8,
+        "densityCopyMs": 3,
+        "samplerMs": 558.7,
+        "gpuMs": 544.817,
+        "colorMs": 4.8
+      },
+      {
+        "case": "history",
+        "variant": "candidate-1",
+        "submits": 211,
+        "waits": 209,
+        "dispatches": 209,
+        "pipelines": 1,
+        "pipelineMs": 0,
+        "readWaitMs": 0.7,
+        "densityCopyMs": 1.2,
+        "samplerMs": 1747.7,
+        "gpuMs": 1693.639,
+        "colorMs": 5
+      }
+    ]
+  },
+  "ui": {
+    "timesMs": [
+      466,
+      475,
+      470
+    ],
+    "medianMs": 470,
+    "rgbaFnv1aHashes": [
+      619485428,
+      619485428,
+      619485428,
+      619485428
+    ]
+  },
+  "interactionChecks": [
+    {
+      "testCase": {
+        "preset": "preset:1",
+        "julia": false
+      },
+      "fixed": true,
+      "running": {
+        "samples": 76800000,
+        "unfixed": true,
+        "fallback": false
+      },
+      "stopped": {
+        "running": false,
+        "time": "665ms",
+        "nonzero": true
+      }
+    },
+    {
+      "testCase": {
+        "preset": "preset:20",
+        "julia": false
+      },
+      "fixed": true,
+      "running": {
+        "samples": 65280000,
+        "unfixed": true,
+        "fallback": false
+      },
+      "stopped": {
+        "running": false,
+        "time": "664ms",
+        "nonzero": true
+      }
+    },
+    {
+      "testCase": {
+        "preset": "preset:20",
+        "julia": true
+      },
+      "fixed": true,
+      "running": {
+        "samples": 63333088,
+        "unfixed": true,
+        "fallback": false
+      },
+      "stopped": {
+        "running": false,
+        "time": "664ms",
+        "nonzero": true
+      }
+    }
+  ],
+  "queueCleanup": "Verified both sample queues destroyed exactly once after finite Stop and Continuous Stop; partial pipeline setup failure tested separately"
+}

@@ -98,6 +98,16 @@ At very high resolutions, switching can happen at different zoom levels to reduc
 - CPU points-per-batch slider (default 64, maximum is min(Samples, 1024), or 1024 in Continuous mode) for concurrent trajectories across all workers; each advances one step per render delay, with reset button
 - Render and Stop actions
 
+GPU Buddhabrot uses fast/slow sample queues for every GPU-supported iteration
+function, including Julia, Anti-Buddhabrot, iteration-dependent expressions and
+`zAt`/`zDelay` history. Classification evaluates the original formula for up to
+32 steps; it only schedules original sample IDs. Replay reinitializes the full
+iteration/history state and determines every orbit hit and palette band using
+the configured iteration limit. No Mandelbrot-specific interior approximation
+is used. Small jobs and device limits retain a single-pass GPU path. Completion
+waits are grouped with a bounded queued-work budget; interactive density readback
+is grouped into 16ms intervals, and the final result is always read back.
+
 Enable **Continuous**, then select **Render Buddhabrot** to keep adding samples
 without a finite limit. Changing Continuous does not restart or stop the current
 render; the selection applies to the next Render, navigation or render-setting

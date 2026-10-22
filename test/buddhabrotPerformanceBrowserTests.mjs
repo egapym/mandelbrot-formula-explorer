@@ -11,15 +11,17 @@ async function run() {
   assert(adapter, 'WebGPU unavailable')
   const timestamps = adapter.features.has('timestamp-query')
   const device = await adapter.requestDevice({ requiredFeatures: timestamps ? ['timestamp-query'] : [] })
-  const querySet = timestamps ? device.createQuerySet({ type: 'timestamp', count: 2 }) : null
+  const querySet = timestamps ? device.createQuerySet({ type: 'timestamp', count: 16 }) : null
   const resolveBuffer = timestamps
-    ? device.createBuffer({ size: 16, usage: GPUBufferUsage.QUERY_RESOLVE | GPUBufferUsage.COPY_SRC })
+    ? device.createBuffer({ size: 128, usage: GPUBufferUsage.QUERY_RESOLVE | GPUBufferUsage.COPY_SRC })
     : null
   const readBuffer = timestamps
-    ? device.createBuffer({ size: 16, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ })
+    ? device.createBuffer({ size: 128, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ })
     : null
   const shaderKinds = new WeakMap()
   let usedSampler = false
+  let timestampCount = 0
+  let captureTimestamps = false
   const queue = new Proxy(device.queue, {
     get(target, key) {
       if (key === 'writeBuffer')
@@ -56,11 +58,13 @@ async function run() {
           return new Proxy(encoder, {
             get(object, name) {
               if (name === 'beginComputePass')
-                return (descriptor = {}) =>
-                  object.beginComputePass({
-                    ...descriptor,
-                    timestampWrites: { querySet, beginningOfPassWriteIndex: 0, endOfPassWriteIndex: 1 },
+                return (descriptor = {}) => {
+                  if (!captureTimestamps) return object.beginComputePass(descriptor)
+                  const index = timestampCount++ * 2
+                  return object.beginComputePass({ ...descriptor,
+                    timestampWrites: { querySet, beginningOfPassWriteIndex: index, endOfPassWriteIndex: index + 1 },
                   })
+                }
               const value = Reflect.get(object, name, object)
               return typeof value === 'function' ? value.bind(object) : value
             },
@@ -109,6 +113,8 @@ async function run() {
           }
           const start = performance.now()
           usedSampler = false
+          timestampCount = 0
+          captureTimestamps = true
           await runner.start({
             width: 640,
             height: 640,
@@ -121,17 +127,20 @@ async function run() {
             mode: 'buddha',
             ...options,
           })
+          captureTimestamps = false
           const elapsed = performance.now() - start
           assert(!failure && !runner._cpuRunner && usedSampler, failure || 'Sampler did not run on GPU')
           let gpuMs = 0
           if (timestamps) {
             const encoder = device.createCommandEncoder()
-            encoder.resolveQuerySet(querySet, 0, 2, resolveBuffer, 0)
-            encoder.copyBufferToBuffer(resolveBuffer, 0, readBuffer, 0, 16)
+            encoder.resolveQuerySet(querySet, 0, timestampCount * 2, resolveBuffer, 0)
+            encoder.copyBufferToBuffer(resolveBuffer, 0, readBuffer, 0, timestampCount * 16)
             device.queue.submit([encoder.finish()])
             await readBuffer.mapAsync(GPUMapMode.READ)
-            const values = new BigUint64Array(readBuffer.getMappedRange())
-            gpuMs = Number(values[1] - values[0]) / 1e6
+            const values = new BigUint64Array(readBuffer.getMappedRange(0, timestampCount * 16))
+            let total = 0n
+            for (let i = 0; i < values.length; i += 2) total += values[i + 1] - values[i]
+            gpuMs = Number(total) / 1e6
             readBuffer.unmap()
           }
           if (round >= 2) {
@@ -177,20 +186,21 @@ async function run() {
     try {
       for (const mode of ['buddha', 'antibuddha']) {
         let expected
+        const targetSamples = 4096 * 16
         for (const continuous of [false, true]) {
           const runner = new BuddhabrotWebGPU({ devicePromise: Promise.resolve(probe) })
           let count = 0, frames = 0, failure
           runner.onProgress = data => {
             count += data.delta
             if (continuous) elapsedDisplayTime += 1001
-            if (continuous && count >= 16384) runner.stop()
+            if (continuous && count >= targetSamples) runner.stop()
           }
           runner.onChunk = () => frames++
           runner.onComplete = result => { if (result.error) failure = result.error }
-          await runner.start({ width: 64, height: 64, samples: 16384, maxIter: 1000,
+          await runner.start({ width: 64, height: 64, samples: targetSamples, maxIter: 1000,
             center: { x: 0, y: 0 }, zoom: 1, escapeRadius: 4, gpu: true, mode, continuous })
           assert(!failure && !runner._cpuRunner, failure || 'Continuous test fell back to CPU')
-          assert(count === 16384, 'Continuous Stop counted the wrong sample total')
+          assert(count === targetSamples, 'Continuous Stop counted the wrong sample total')
           const channels = [runner.densityR, runner.densityG, runner.densityB]
           if (!continuous) expected = channels.map(channel => channel.slice())
           else {

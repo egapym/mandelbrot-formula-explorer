@@ -1,0 +1,540 @@
+{
+  "date": "2026-10-22",
+  "revision": "4396f85",
+  "scope": "Experimental prototypes only; production renderer unchanged",
+  "providedSettings": {
+    "samples": 100000000,
+    "maxIter": 1000,
+    "width": 800,
+    "height": 600,
+    "center": {
+      "x": -0.5,
+      "y": 0
+    },
+    "zoom": 1,
+    "mode": "buddha",
+    "fractalType": "mandelbrot",
+    "iterationFunction": "z*z + c",
+    "palette": "Preset-01",
+    "bandMode": "perTrajectory",
+    "brightness": 1.2,
+    "gamma": 4.8,
+    "escapeRadius": 4,
+    "z0": [
+      0,
+      0
+    ],
+    "continuous": false,
+    "fixedSamples": false
+  },
+  "methodology": "One warmup excluded. Variants alternated each round. All dispatch GPU timestamps summed. Every RGB density entry compared exactly with the baseline. UI times: three measured runs after one warmup per variant.",
+  "initialExperiments": {
+    "status": "PASS: exact RGB density parity and sample counts",
+    "samples": 100000000,
+    "rounds": 5,
+    "adapter": {
+      "vendor": "apple",
+      "architecture": "metal-3",
+      "device": "",
+      "description": ""
+    },
+    "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/155.0.0.0 Safari/537.36",
+    "timestamps": true,
+    "rows": [
+      {
+        "case": "provided",
+        "variant": "current",
+        "submits": 211,
+        "waits": 209,
+        "dispatches": 209,
+        "pipelines": 1,
+        "pipelineMs": 0,
+        "readWaitMs": 0.9,
+        "densityCopyMs": 2.4,
+        "samplerMs": 1162.3,
+        "gpuMs": 1097.292,
+        "colorMs": 5
+      },
+      {
+        "case": "provided",
+        "variant": "candidate-1",
+        "submits": 211,
+        "waits": 209,
+        "dispatches": 209,
+        "pipelines": 1,
+        "pipelineMs": 0,
+        "readWaitMs": 0.8,
+        "densityCopyMs": 2.7,
+        "samplerMs": 549.3,
+        "gpuMs": 497.894,
+        "colorMs": 5.1
+      },
+      {
+        "case": "provided",
+        "variant": "candidate-2",
+        "submits": 211,
+        "waits": 209,
+        "dispatches": 209,
+        "pipelines": 1,
+        "pipelineMs": 0,
+        "readWaitMs": 0.8,
+        "densityCopyMs": 2.8,
+        "samplerMs": 540.9,
+        "gpuMs": 490.623,
+        "colorMs": 5.3
+      },
+      {
+        "case": "provided",
+        "variant": "candidate-3",
+        "submits": 211,
+        "waits": 27,
+        "dispatches": 209,
+        "pipelines": 1,
+        "pipelineMs": 0,
+        "readWaitMs": 0.8,
+        "densityCopyMs": 2.5,
+        "samplerMs": 512.2,
+        "gpuMs": 498.955,
+        "colorMs": 5
+      },
+      {
+        "case": "provided",
+        "variant": "candidate-4",
+        "submits": 211,
+        "waits": 27,
+        "dispatches": 209,
+        "pipelines": 1,
+        "pipelineMs": 0,
+        "readWaitMs": 0.8,
+        "densityCopyMs": 2.4,
+        "samplerMs": 502.2,
+        "gpuMs": 491.279,
+        "colorMs": 5
+      }
+    ]
+  },
+  "compactionExperiment": {
+    "status": "PASS: exact RGB density parity and sample counts",
+    "samples": 100000000,
+    "rounds": 7,
+    "adapter": {
+      "vendor": "apple",
+      "architecture": "metal-3",
+      "device": "",
+      "description": ""
+    },
+    "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/155.0.0.0 Safari/537.36",
+    "timestamps": true,
+    "rows": [
+      {
+        "case": "provided",
+        "variant": "current",
+        "submits": 211,
+        "waits": 209,
+        "dispatches": 209,
+        "pipelines": 1,
+        "pipelineMs": 0,
+        "readWaitMs": 0.8,
+        "densityCopyMs": 2.7,
+        "samplerMs": 1164.2,
+        "gpuMs": 1097.612,
+        "colorMs": 5.1
+      },
+      {
+        "case": "provided",
+        "variant": "candidate-1",
+        "submits": 211,
+        "waits": 27,
+        "dispatches": 209,
+        "pipelines": 1,
+        "pipelineMs": 0,
+        "readWaitMs": 0.8,
+        "densityCopyMs": 2.7,
+        "samplerMs": 511.7,
+        "gpuMs": 498.771,
+        "colorMs": 5
+      },
+      {
+        "case": "provided",
+        "variant": "candidate-2",
+        "submits": 211,
+        "waits": 27,
+        "dispatches": 627,
+        "pipelines": 3,
+        "pipelineMs": 0,
+        "readWaitMs": 0.8,
+        "densityCopyMs": 2.5,
+        "samplerMs": 308.4,
+        "gpuMs": 295.124,
+        "colorMs": 5
+      }
+    ]
+  },
+  "compatibility": {
+    "status": "PASS: exact RGB density parity and sample counts",
+    "samples": 1000000,
+    "rounds": 3,
+    "adapter": {
+      "vendor": "apple",
+      "architecture": "metal-3",
+      "device": "",
+      "description": ""
+    },
+    "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/155.0.0.0 Safari/537.36",
+    "timestamps": true,
+    "rows": [
+      {
+        "case": "anti",
+        "variant": "current",
+        "submits": 5,
+        "waits": 3,
+        "dispatches": 3,
+        "pipelines": 1,
+        "pipelineMs": 0,
+        "readWaitMs": 1,
+        "densityCopyMs": 2.1,
+        "samplerMs": 36.5,
+        "gpuMs": 31.309,
+        "colorMs": 4.6
+      },
+      {
+        "case": "anti",
+        "variant": "candidate-1",
+        "submits": 5,
+        "waits": 1,
+        "dispatches": 3,
+        "pipelines": 1,
+        "pipelineMs": 0,
+        "readWaitMs": 1.2,
+        "densityCopyMs": 1.8,
+        "samplerMs": 35.6,
+        "gpuMs": 31.257,
+        "colorMs": 5.3
+      },
+      {
+        "case": "julia",
+        "variant": "current",
+        "submits": 5,
+        "waits": 3,
+        "dispatches": 3,
+        "pipelines": 1,
+        "pipelineMs": 0,
+        "readWaitMs": 0.8,
+        "densityCopyMs": 1.2,
+        "samplerMs": 13.3,
+        "gpuMs": 9.68,
+        "colorMs": 4.4
+      },
+      {
+        "case": "julia",
+        "variant": "candidate-1",
+        "submits": 5,
+        "waits": 1,
+        "dispatches": 3,
+        "pipelines": 1,
+        "pipelineMs": 0,
+        "readWaitMs": 0.8,
+        "densityCopyMs": 1.1,
+        "samplerMs": 12.3,
+        "gpuMs": 9.678,
+        "colorMs": 4.4
+      },
+      {
+        "case": "custom",
+        "variant": "current",
+        "submits": 5,
+        "waits": 3,
+        "dispatches": 3,
+        "pipelines": 1,
+        "pipelineMs": 0,
+        "readWaitMs": 0.9,
+        "densityCopyMs": 2.7,
+        "samplerMs": 17.2,
+        "gpuMs": 11.124,
+        "colorMs": 4.5
+      },
+      {
+        "case": "custom",
+        "variant": "candidate-1",
+        "submits": 5,
+        "waits": 1,
+        "dispatches": 3,
+        "pipelines": 1,
+        "pipelineMs": 0,
+        "readWaitMs": 0.8,
+        "densityCopyMs": 1,
+        "samplerMs": 13.9,
+        "gpuMs": 11.093,
+        "colorMs": 4.3
+      },
+      {
+        "case": "history",
+        "variant": "current",
+        "submits": 5,
+        "waits": 3,
+        "dispatches": 3,
+        "pipelines": 1,
+        "pipelineMs": 0,
+        "readWaitMs": 0.8,
+        "densityCopyMs": 2.8,
+        "samplerMs": 22.3,
+        "gpuMs": 17.021,
+        "colorMs": 4.6
+      },
+      {
+        "case": "history",
+        "variant": "candidate-1",
+        "submits": 5,
+        "waits": 1,
+        "dispatches": 3,
+        "pipelines": 1,
+        "pipelineMs": 0,
+        "readWaitMs": 1,
+        "densityCopyMs": 1.3,
+        "samplerMs": 20.2,
+        "gpuMs": 17.103,
+        "colorMs": 4.5
+      },
+      {
+        "case": "lowEscape",
+        "variant": "current",
+        "submits": 5,
+        "waits": 3,
+        "dispatches": 3,
+        "pipelines": 1,
+        "pipelineMs": 0,
+        "readWaitMs": 0.8,
+        "densityCopyMs": 1.4,
+        "samplerMs": 14.5,
+        "gpuMs": 10.108,
+        "colorMs": 4.7
+      },
+      {
+        "case": "lowEscape",
+        "variant": "candidate-1",
+        "submits": 5,
+        "waits": 1,
+        "dispatches": 3,
+        "pipelines": 1,
+        "pipelineMs": 0,
+        "readWaitMs": 1,
+        "densityCopyMs": 1.2,
+        "samplerMs": 13.3,
+        "gpuMs": 10.17,
+        "colorMs": 4.7
+      },
+      {
+        "case": "nonzeroZ0",
+        "variant": "current",
+        "submits": 5,
+        "waits": 3,
+        "dispatches": 3,
+        "pipelines": 1,
+        "pipelineMs": 0,
+        "readWaitMs": 0.8,
+        "densityCopyMs": 2,
+        "samplerMs": 15.8,
+        "gpuMs": 11.001,
+        "colorMs": 4.6
+      },
+      {
+        "case": "nonzeroZ0",
+        "variant": "candidate-1",
+        "submits": 5,
+        "waits": 1,
+        "dispatches": 3,
+        "pipelines": 1,
+        "pipelineMs": 0,
+        "readWaitMs": 0.9,
+        "densityCopyMs": 1.1,
+        "samplerMs": 13.6,
+        "gpuMs": 10.694,
+        "colorMs": 5.1
+      },
+      {
+        "case": "zoom",
+        "variant": "current",
+        "submits": 5,
+        "waits": 3,
+        "dispatches": 3,
+        "pipelines": 1,
+        "pipelineMs": 0,
+        "readWaitMs": 0.8,
+        "densityCopyMs": 2.7,
+        "samplerMs": 30.6,
+        "gpuMs": 25.584,
+        "colorMs": 7
+      },
+      {
+        "case": "zoom",
+        "variant": "candidate-1",
+        "submits": 5,
+        "waits": 1,
+        "dispatches": 9,
+        "pipelines": 3,
+        "pipelineMs": 0,
+        "readWaitMs": 0.9,
+        "densityCopyMs": 1.1,
+        "samplerMs": 13.1,
+        "gpuMs": 9.921,
+        "colorMs": 6.8
+      }
+    ]
+  },
+  "ui": {
+    "rows": [
+      {
+        "variant": "current",
+        "times": [
+          1192,
+          1188,
+          1185
+        ],
+        "median": 1188
+      },
+      {
+        "variant": "compact",
+        "times": [
+          324,
+          332,
+          321
+        ],
+        "median": 324
+      }
+    ],
+    "canvasHashes": [
+      619485428,
+      619485428,
+      619485428,
+      619485428,
+      619485428,
+      619485428,
+      619485428,
+      619485428
+    ],
+    "hashAlgorithm": "FNV-1a 32-bit RGBA"
+  },
+  "sources": [
+    "https://gpuweb.github.io/gpuweb/",
+    "https://math.bu.edu/DYSYS/explorer/def.html"
+  ],
+  "interactiveReadback": {
+    "status": "PASS: exact RGB density parity and sample counts",
+    "samples": 100000000,
+    "rounds": 3,
+    "adapter": {
+      "vendor": "apple",
+      "architecture": "metal-3",
+      "device": "",
+      "description": ""
+    },
+    "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/155.0.0.0 Safari/537.36",
+    "timestamps": true,
+    "rows": [
+      {
+        "case": "interactive",
+        "variant": "current",
+        "submits": 420,
+        "waits": 209,
+        "dispatches": 209,
+        "pipelines": 1,
+        "pipelineMs": 0,
+        "readWaitMs": 169.5,
+        "densityCopyMs": 158.7,
+        "samplerMs": 1571.4,
+        "gpuMs": 1156.596,
+        "colorMs": 5
+      },
+      {
+        "case": "interactive",
+        "variant": "candidate-1",
+        "submits": 420,
+        "waits": 209,
+        "dispatches": 627,
+        "pipelines": 3,
+        "pipelineMs": 0,
+        "readWaitMs": 158.4,
+        "densityCopyMs": 163.6,
+        "samplerMs": 715.5,
+        "gpuMs": 327.157,
+        "colorMs": 5.1
+      }
+    ]
+  },
+  "interactiveFrameCadence": {
+    "status": "PASS: exact RGB density parity and sample counts",
+    "samples": 100000000,
+    "rounds": 5,
+    "adapter": {
+      "vendor": "apple",
+      "architecture": "metal-3",
+      "device": "",
+      "description": ""
+    },
+    "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/155.0.0.0 Safari/537.36",
+    "timestamps": true,
+    "rows": [
+      {
+        "case": "interactive",
+        "variant": "current",
+        "submits": 420,
+        "waits": 209,
+        "dispatches": 209,
+        "pipelines": 1,
+        "pipelineMs": 0,
+        "readWaitMs": 166.8,
+        "densityCopyMs": 155.1,
+        "samplerMs": 1513.8,
+        "gpuMs": 1105.767,
+        "colorMs": 5
+      },
+      {
+        "case": "interactive",
+        "variant": "candidate-1",
+        "submits": 420,
+        "waits": 209,
+        "dispatches": 627,
+        "pipelines": 3,
+        "pipelineMs": 0,
+        "readWaitMs": 152.3,
+        "densityCopyMs": 153,
+        "samplerMs": 687.1,
+        "gpuMs": 316.461,
+        "colorMs": 5
+      },
+      {
+        "case": "interactive",
+        "variant": "candidate-2",
+        "submits": 232,
+        "waits": 209,
+        "dispatches": 627,
+        "pipelines": 3,
+        "pipelineMs": 0,
+        "readWaitMs": 15.9,
+        "densityCopyMs": 17.7,
+        "samplerMs": 391.1,
+        "gpuMs": 296.003,
+        "colorMs": 4.9
+      }
+    ]
+  },
+  "variantDescriptions": {
+    "initialExperiments": {
+      "candidate-1": "guarded cardioid/period-2 interior rejection",
+      "candidate-2": "interior rejection + exact cycle detection",
+      "candidate-3": "interior rejection + fence every eight batches",
+      "candidate-4": "interior + exact cycle + eight-batch fences"
+    },
+    "compactionExperiment": {
+      "candidate-1": "interior rejection + eight-batch fences",
+      "candidate-2": "interior rejection + 32-step fast/slow GPU queues + eight-batch fences"
+    },
+    "compatibility": {
+      "candidate-1": "compaction; generic fallback for ineligible formulas/modes"
+    },
+    "interactiveFrameCadence": {
+      "candidate-1": "compaction; readback on every batch",
+      "candidate-2": "compaction; readback at 16ms cadence"
+    }
+  }
+}

@@ -5,6 +5,7 @@
  */
 
 import { getBuddhabrotSampleSeed } from './buddhabrotSampling.mjs'
+import { createGpuSamplingPipelines } from './buddhabrotGpuSampling.mjs'
 import { CUSTOM_FUNCTION_WGSL_HELPERS } from './wgslCompiler.mjs'
 import { getBuddhabrotProjection, getBuddhabrotProjectionWGSL } from './buddhabrotProjection.mjs'
 
@@ -249,6 +250,53 @@ export class BuddhabrotWebGPU {
       clearDelayHistory('historyReset'),
     ].join('\n')
 
+    const maxGroups = device.limits?.maxComputeWorkgroupsPerDimension || 65535
+    const compactSamples = this.maxIter > 32 && (params.samples || this.samples) >= 32768 &&
+      len <= maxGroups * 64 && len * 8 <= (device.limits?.maxStorageBufferBindingSize || 134217728)
+    const sampleCoordinates = `  var state: u32 = ((id * 747796405u) ^ u.seed) + 2891336453u;
+  let spt = u.samplesPerThread;
+  // Uniform-only values are constant throughout sampling.
+  let iterationLimit = u.maxIter;
+  let escapeRadiusSquared = u.escapeRadius * u.escapeRadius;
+  // サンプリングで繰り返し使う不変値を先に計算しておく
+  let scale_local = u.samplingZoom * f32(u.width);
+  let invDenom_local = 4.0 / scale_local;
+  let halfW = f32(u.width) / 2.0;
+  let halfH = u.samplingHeight / 2.0;
+    for (var si: u32 = 0u; si < spt; si = si + 1u) {
+	    let rpx = rand(&state) * f32(u.width);
+	    let rpy = rand(&state) * u.samplingHeight;
+	  let rx = (rpx - halfW) * invDenom_local + u.samplingCenterX;
+	  let ry = (rpy - halfH) * invDenom_local + u.samplingCenterY;
+	    let sample = vec2<f32>(rx, ry);
+	    let c = select(sample, vec2<f32>(u.juliaCr, u.juliaCi), u.isJulia != 0u);
+	    var z = select(vec2<f32>(u.z0x, u.z0y), sample, u.isJulia != 0u);
+	    // An already escaped initial point contributes no density in either mode.
+	    if (!(dot(z, z) <= escapeRadiusSquared)${componentLimit('z')}) { continue; }
+`
+    const escapePass = (limit) => `	    var escaped = false;
+	    var iter: u32 = 0u;
+${historyDeclarations}
+${historyInitialize}
+    // カスタム式で反復する。式は vec2<f32> を返す必要がある
+    loop {
+      if (iter >= ${limit}) { break; }
+      // 一度一時変数へ入れてから妥当性を確認する
+      let n = f32(iter);
+${historyBefore('iter')}
+      let _tmp_iter = ${customWGSLIteration};
+${historyAfter('iter')}
+      let zzq = dot(_tmp_iter, _tmp_iter);
+      // Negated <= catches NaN as well as a point outside the escape radius.
+      if (!(zzq <= escapeRadiusSquared)${componentLimit('_tmp_iter')}) {
+        escaped = true;
+        break;
+      }
+      z = _tmp_iter;
+      iter = iter + 1u;
+	    }
+`
+
     // customWGSLIteration を使って統一形式の WGSL カーネルを作る
     let wgsl
 
@@ -309,51 +357,40 @@ fn convergenceIndex(x: f32, y: f32) -> vec2<f32> {
   return vec2<f32>(fx, fy);
 }
 
+${compactSamples ? `
+@group(0) @binding(6) var<storage, read_write> sampleIds: array<u32>;
+@group(0) @binding(7) var<storage, read_write> sampleCounts: array<atomic<u32>>;
+override queueKind: u32 = 0u;
 @compute @workgroup_size(64)
-fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+fn classify(@builtin(global_invocation_id) gid: vec3<u32>) {
   let id = gid.x + u.invocationOffset;
   if (id >= u.invocations) { return; }
-  var state: u32 = ((id * 747796405u) ^ u.seed) + 2891336453u;
-  let spt = u.samplesPerThread;
-  // Uniform-only values are constant throughout sampling.
-  let iterationLimit = u.maxIter;
-  let escapeRadiusSquared = u.escapeRadius * u.escapeRadius;
-  // サンプリングで繰り返し使う不変値を先に計算しておく
-  let scale_local = u.samplingZoom * f32(u.width);
-  let invDenom_local = 4.0 / scale_local;
-  let halfW = f32(u.width) / 2.0;
-  let halfH = u.samplingHeight / 2.0;
-    for (var si: u32 = 0u; si < spt; si = si + 1u) {
-	    let rpx = rand(&state) * f32(u.width);
-	    let rpy = rand(&state) * u.samplingHeight;
-	  let rx = (rpx - halfW) * invDenom_local + u.samplingCenterX;
-	  let ry = (rpy - halfH) * invDenom_local + u.samplingCenterY;
-	    let sample = vec2<f32>(rx, ry);
-	    let c = select(sample, vec2<f32>(u.juliaCr, u.juliaCi), u.isJulia != 0u);
-	    var z = select(vec2<f32>(u.z0x, u.z0y), sample, u.isJulia != 0u);
-	    // An already escaped initial point contributes no density in either mode.
-	    if (!(dot(z, z) <= escapeRadiusSquared)${componentLimit('z')}) { continue; }
-	    var escaped = false;
-	    var iter: u32 = 0u;
-${historyDeclarations}
-${historyInitialize}
-    // カスタム式で反復する。式は vec2<f32> を返す必要がある
-    loop {
-      if (iter >= iterationLimit) { break; }
-      // 一度一時変数へ入れてから妥当性を確認する
-      let n = f32(iter);
-${historyBefore('iter')}
-      let _tmp_iter = ${customWGSLIteration};
-${historyAfter('iter')}
-      let zzq = dot(_tmp_iter, _tmp_iter);
-      // Negated <= catches NaN as well as a point outside the escape radius.
-      if (!(zzq <= escapeRadiusSquared)${componentLimit('_tmp_iter')}) {
-        escaped = true;
-        break;
-      }
-      z = _tmp_iter;
-      iter = iter + 1u;
-	    }
+${sampleCoordinates}
+${escapePass('min(32u, iterationLimit)')}
+  // Classification only schedules work; replay alone decides whether to draw.
+  if (escaped || iter >= iterationLimit) {
+    let slot = atomicAdd(&sampleCounts[0], 1u);
+    sampleIds[slot] = id;
+  } else {
+    let slot = atomicAdd(&sampleCounts[1], 1u);
+    sampleIds[u.width * u.height + slot] = id;
+  }
+  }
+}
+` : ''}
+
+@compute @workgroup_size(64)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+${compactSamples ? `
+  let slot = gid.x + u.invocationOffset;
+  if (slot >= atomicLoad(&sampleCounts[queueKind])) { return; }
+  let id = sampleIds[slot + queueKind * u.width * u.height];
+` : `
+  let id = gid.x + u.invocationOffset;
+  if (id >= u.invocations) { return; }
+` }
+${sampleCoordinates}
+${escapePass('iterationLimit')}
 	    if (!((escaped && u.mode == 0u) || (!escaped && u.mode == 1u))) { continue; }
 	  // Compute the band denominator once per accepted orbit, outside replay.
 	  let iterationDenominator = f32(max(1u, iterationLimit));
@@ -509,38 +546,6 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 `
       }
     }
-
-    const module = device.createShaderModule({ code: wgsl })
-    // 取得できる環境ではシェーダーのコンパイルメッセージを出力する
-    try {
-      if (module && typeof module.compilationInfo === 'function') {
-        module.compilationInfo().then((info) => {
-          for (const msg of info.messages) {
-            const prefix = `buddhabrotWebGPU shader ${msg.type}:`
-            if (msg.type === 'error') console.error(prefix, msg.message)
-            else console.warn(prefix, msg.message)
-          }
-        })
-      }
-    } catch (e) {
-      console.warn('buddhabrotWebGPU: compilationInfo not available or failed', e)
-    }
-    const pipeline = device.createComputePipeline({
-      layout: 'auto',
-      compute: { module, entryPoint: 'main' },
-    })
-
-    const bindGroup = device.createBindGroup({
-      layout: pipeline.getBindGroupLayout(0),
-      entries: [
-        { binding: 0, resource: { buffer: uniformBuf } },
-        { binding: 1, resource: { buffer: rBuf } },
-        { binding: 2, resource: { buffer: gBuf } },
-        { binding: 3, resource: { buffer: bBuf } },
-        { binding: 4, resource: { buffer: bandBuf } },
-        { binding: 5, resource: { buffer: bandContribBuf } },
-      ],
-    })
 
     // uniform へ width, height, maxIter, samplesPerThread などを書き込む
     const continuous = !!params.continuous
@@ -763,10 +768,18 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         buffer.unmap()
       } finally { buffer.destroy() }
     }
-    const displayInterval = params.interactive ? 0 : 1000
+    const displayInterval = params.interactive ? 16 : 1000
     let lastDisplay = performance.now()
     let sampleBatchIndex = 0
     let samplesRemaining = totalSamples
+    // At 800x600/1000 iterations this allows eight batches. Larger or deeper
+    // jobs queue fewer batches so Stop does not inherit an unbounded backlog.
+    const completionBatchCount = params.interactive ? 1 : Math.max(1, Math.min(8,
+      Math.floor(3_840_000_000 / (invocations * Math.max(1000, this.maxIter)))))
+    let pendingSamples = 0
+    let queuedBatches = 0
+    const sampling = createGpuSamplingPipelines(device, wgsl,
+      [uniformBuf, rBuf, gBuf, bBuf, bandBuf, bandContribBuf], len, compactSamples)
     try {
       while (samplesRemaining > 0 && this.running) {
         // このバッチで処理するサンプル数を決める
@@ -799,25 +812,34 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         while (remaining > 0) {
           const thisChunk = Math.min(remaining, maxPerDimSafe)
           const encoder = device.createCommandEncoder()
-          const pass = encoder.beginComputePass()
-          pass.setPipeline(pipeline)
-          // invocationOffset を uniform buffer の index 7 へ書き込む
           const offView = new Uint32Array([invocationOffset])
           device.queue.writeBuffer(uniformBuf, 4 * 7, offView.buffer, 0, 4)
-          pass.setBindGroup(0, bindGroup)
-          pass.dispatchWorkgroups(thisChunk)
-          pass.end()
+          if (sampling.counts) encoder.clearBuffer(sampling.counts)
+          for (const { pipeline, group } of sampling.passes) {
+            const pass = encoder.beginComputePass()
+            pass.setPipeline(pipeline)
+            pass.setBindGroup(0, group)
+            pass.dispatchWorkgroups(thisChunk)
+            pass.end()
+          }
           device.queue.submit([encoder.finish()])
 
           remaining -= thisChunk
           invocationOffset += thisChunk * 64
         }
 
-        // 次のバッチへ進む前に完了待ちする。
-        // uniform の上書きや読み戻しの競合を防ぎ、進捗通知の区切りにもなる。
+        pendingSamples += samplesThisBatch
+        queuedBatches++
+        // writeBuffer/submit are ordered on the queue. Bound queued work to keep
+        // Stop responsive while avoiding a host round trip for every dispatch.
+        if (queuedBatches < completionBatchCount && samplesRemaining > samplesThisBatch) {
+          samplesRemaining -= samplesThisBatch
+          continue
+        }
+
+        // Notify progress after this bounded group completes. Queue ordering
+        // already preserves uniform writes and dispatches between batches.
         if (device.queue && typeof device.queue.onSubmittedWorkDone === 'function') {
-          // 次のバッチへ進む前に完了待ちする。
-          // uniform の上書きや読み戻しの競合を防ぎ、進捗通知の区切りにもなる。
           // GPU 完了待ちと abort を競合させ、stop() で中断できるようにする
           const waitRes = await Promise.race([device.queue.onSubmittedWorkDone(), this._abortPromise])
           if (waitRes === 'abort' || !this.running) {
@@ -827,7 +849,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
               await readDensity()
               // The readback is queued after every dispatch in this batch;
               // successful mapping proves these submitted samples finished.
-              this.onProgress({ delta: samplesThisBatch, total: totalSamples })
+              this.onProgress({ delta: pendingSamples, total: totalSamples })
             } catch (abortReadErr) {
               console.warn(
                 'buddhabrotWebGPU: failed to read back density on abort:',
@@ -845,15 +867,17 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         }
 
         // このバッチで実際に処理したサンプル数を反映する
-        const processed = samplesThisBatch
-        samplesRemaining -= processed
-        this.onProgress({ delta: processed, total: totalSamples })
+        samplesRemaining -= samplesThisBatch
+        this.onProgress({ delta: pendingSamples, total: totalSamples })
+        pendingSamples = 0
+        queuedBatches = 0
         if ((continuous || params.interactive) && performance.now() - lastDisplay >= displayInterval) {
           await readDensity()
           this.onChunk({ continuous })
           lastDisplay = performance.now()
         }
       }
+      await readDensity()
     } catch (e) {
       console.error('buddhabrotWebGPU: dispatchWorkgroups threw', e?.message ? e.message : e)
       this.running = false
@@ -864,9 +888,11 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         error: 'dispatchWorkgroups failed',
       })
       return
+    } finally {
+      // Includes Stop/readback errors; GPU queue IDs are never retained by a
+      // cancelled navigation renderer or a later render generation.
+      sampling.destroy()
     }
-
-    await readDensity()
 
     return
   }
