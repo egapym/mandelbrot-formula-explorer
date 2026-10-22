@@ -14,6 +14,7 @@ import { CpuDensityColorMap } from './buddhabrotCpuColorMap.mjs'
 import { DEFAULT_RENDER_POINT_BATCH_SIZE, getRenderPointBatchLimit, normalizeRenderPointBatchSize } from './buddhabrotRenderConfig.mjs'
 import { BUDDHA_PALETTES, buildBuddhaStops, getBuddhaPalette } from './buddhaPalettes.mjs'
 import { compileIterationFunction, getIterationHistoryRequirements, getParsedExpression, usesIterationHistory } from './customFunctionParser.mjs'
+import { readSettingsControls, writeSettingsControls, encodeSettings, decodeSettings } from './settingsState.mjs'
 import * as favorites from './favorites.js'
 import { functionPresets } from './functionPresets.mjs'
 import * as fxp from './fxp.mjs'
@@ -4135,6 +4136,7 @@ async function startBuddhaRender({ preserveSourceRender = false } = {}) {
             toggle.disabled = false
             toggle.checked = true
           }
+          updatePermalink()
           // 通常フラクタルへ戻せるよう、savedFractalImageData は保持したままにする
 
           // 途中停止後は古い画像を掴んでいることがあるため、ここで取り直しておく
@@ -5729,6 +5731,7 @@ function scheduleJuliaBuddhabrotSourceRedraw() {
  */
 function redrawJulia() {
   if (!juliaState.active || !juliaState.renderer) return
+  updatePermalink()
   if (isBuddhabrotViewShownOnJulia()) {
     scheduleJuliaBuddhabrotSourceRedraw()
     return
@@ -9191,7 +9194,7 @@ function initListeners() {
     if (!buddhaActive && !buddhaPreservedDisplay) redraw(true) // supersampling 切替時はキャッシュも更新する
   })
   // 不要な再描画を避けるため、最後に適用した反復式を覚えておく
-  let lastIterationFunctionValue = DOM.iterationFunctionInput ? DOM.iterationFunctionInput.value : ''
+  lastIterationFunctionValue = DOM.iterationFunctionInput ? DOM.iterationFunctionInput.value : ''
 
   DOM.fractalTypeSelect.addEventListener('change', (event) => {
     // プリセット選択なら、その値を先に反映する
@@ -10131,284 +10134,108 @@ function initListeners() {
   }
 }
 
-function reset() {
-  if (DOM.buddha.continuous) {
+let initialSettingsControls = null
+let applyingSettings = false
+let lastIterationFunctionValue = ''
+
+function captureSettingsControls() {
+  const controls = readSettingsControls(document)
+  // Continuous displays progress in Samples; save the configured finite limit.
+  if (DOM.buddha.continuous?.checked && buddhaFiniteSampleValue !== null) {
+    controls['buddha-iterations'] = buddhaFiniteSampleValue
+  }
+  return controls
+}
+
+function applySettingsControls(controls) {
+  if (!controls) return
+  // Restore Samples before enabling Continuous so its finite limit is retained.
+  if (DOM.buddha.continuous.checked) {
     DOM.buddha.continuous.checked = false
     syncBuddhaContinuousModeUi()
   }
-  // 実行中の Buddhabrot はすぐ停止する
-  try {
-    stopAndClearBuddha()
-      } catch (e) {
-    console.warn('Error stopping/clearing buddha in reset():', e?.message ? e.message : e)
-  }
-  buddhaActive = false
-
-  fractal.setZoom(getInitialFractalZoom(fractal.precision))
-  // リセット時の既定中心座標
-  let resetCenterX = 0
-  let resetCenterY = 0
-  const fractalTypeSelect = document.getElementById('fractalType')
-  const val = fractalTypeSelect?.value || ''
-  // プリセット選択時の値は preset:<index> 形式
-  const presetIndex = parseInt(val.split(':')[1], 10)
-  const p = functionPresets[presetIndex]
-  resetCenterX = p?.coordX || 0
-  resetCenterY = p?.coordY || 0
-
-  const coordXEl = document.getElementById('coordX')
-  const coordYEl = document.getElementById('coordY')
-  if (coordXEl) coordXEl.value = String(resetCenterX)
-  // UI 表示は「上=正の虚数」規則のため符号を反転して表示する
-  if (coordYEl) coordYEl.value = String(-resetCenterY)
-
-  fractal.setCenter([fxp.fromNumber(resetCenterX), fxp.fromNumber(resetCenterY)])
-
-  // z0 も既定値へ戻す（0 またはプリセット値）
-  try {
-    const z0RealValue = p?.z0Real !== undefined ? p.z0Real : 0
-    const z0ImagValue = p?.z0Imag !== undefined ? p.z0Imag : 0
-
-    const z0RealEl = document.getElementById('z0-real')
-    const z0ImagEl = document.getElementById('z0-imag')
-    if (z0RealEl) z0RealEl.value = String(z0RealValue)
-    if (z0ImagEl) z0ImagEl.value = String(z0ImagValue)
-
-    fractal.z0Real = z0RealValue
-    fractal.z0Imag = z0ImagValue
-  } catch (e) {
-    console.warn('Error resetting z0 in reset():', e?.message ? e.message : e)
-  }
-
-  paletteComponent.setDensity(1)
-  paletteComponent.setRotate(0)
-  // Buddhabrot の UI も既定値へ戻す
-  const buddhaModeEl = document.getElementById('buddhaMode')
-  if (buddhaModeEl) buddhaModeEl.value = 'buddha'
-  const buddhaBandModeEl = document.getElementById('buddha-bandmode')
-  if (buddhaBandModeEl) buddhaBandModeEl.value = 'perTrajectory'
-  if (DOM.buddha.samplingRange) DOM.buddha.samplingRange.value = 'current'
-
-  const buddhaIterEl = document.getElementById('buddha-iterations')
-  if (buddhaIterEl) buddhaIterEl.value = '3000000'
-
-  const buddhaPalEl = document.getElementById('buddha-palette')
-  if (buddhaPalEl?.options && buddhaPalEl.options.length > 0) {
-    buddhaPalEl.selectedIndex = 0
-  }
-
-  try {
-    applyDefaultAndRefresh('buddha-brightness', UI_DEFAULTS.buddhaBrightness, {
-      onApply: (val) => {
-        const fval = parseFloat(val)
-        const el = document.getElementById('buddha-brightness')
-        if (el) el.value = String(val)
-        if (buddhaRunner) {
-          buddhaRunner.brightness = fval
-        }
-      },
-    })
-  } catch (e) {
-    console.warn('Error resetting buddha-brightness in reset():', e?.message ? e.message : e)
-  }
-  try {
-    applyDefaultAndRefresh('buddha-gamma', UI_DEFAULTS.buddhaGamma, {
-      onApply: (val) => {
-        const fval = parseFloat(val)
-        const el = document.getElementById('buddha-gamma')
-        if (el) el.value = String(val)
-        if (buddhaRunner) {
-          buddhaRunner.gamma = fval
-          drawBuddhaDensityChannels(
-            buddhaRunner.densityR,
-            buddhaRunner.densityG,
-            buddhaRunner.densityB,
-            buddhaRunner.width,
-            buddhaRunner.height,
-            buddhaRunner.palette,
-            buddhaRunner.brightness,
-            buddhaRunner.gamma,
-          )
-        }
-      },
-    })
-  } catch (e) {
-    console.warn('Error resetting buddha-gamma in reset():', e?.message ? e.message : e)
-  }
-
-  // Update the range before assigning 64, otherwise the old maximum clamps it.
+  const changed = writeSettingsControls(document, controls)
+  fractal.useGpu = DOM.gpuToggle.checked
+  fractal.supersampling = Number(DOM.supersamplingToggle.value)
+  syncBuddhaContinuousModeUi()
+  // The old slider maximum may have clamped the restored batch size.
   syncBuddhaPointBatchSize()
-  applyDefaultAndRefresh('buddha-point-batch-size', UI_DEFAULTS.buddhaPointBatchSize, {
-    onApply: () => syncBuddhaPointBatchSize(),
-  })
-
-  // Render Slowdown（buddha-draw-speed）を既定値へ戻す
-  try {
-    applyDefaultAndRefresh('buddha-draw-speed', UI_DEFAULTS.buddhaRenderSpeed, {
-      onApply: (val) => {
-        const el = document.getElementById('buddha-draw-speed')
-        if (el) el.value = String(val)
-        const valueDisplay = document.getElementById('buddha-draw-speed-value')
-        if (valueDisplay) valueDisplay.textContent = String(val)
-      },
-    })
-  } catch (e) {
-    console.warn('Error resetting buddha-draw-speed in reset():', e?.message ? e.message : e)
+  if (controls['buddha-point-batch-size'] !== undefined) {
+    DOM.buddha.pointBatchSize.value = controls['buddha-point-batch-size']
+    syncBuddhaPointBatchSize()
   }
+  for (const id of ['orbit-toggle', 'orbit-mode', 'orbit-gradient-toggle',
+    'coordinate-grid-toggle', 'detail-toggle', 'julia-toggle']) {
+    if (changed.includes(id)) document.getElementById(id).dispatchEvent(new Event('change'))
+  }
+  for (const id of ['buddha-brightness', 'buddha-gamma', 'buddha-draw-speed']) {
+    const output = document.getElementById(`${id}-value`)
+    if (output) output.textContent = document.getElementById(id).value
+  }
+  resizeToCanvasSize()
+  updateAnimationUi()
+}
 
-  // メインフラクタルのパレットを mandelbrot に戻す
+function reset() {
+  applyingSettings = true
   try {
-    const mandelbrotPalette = palette.getPalette('mandelbrot')
-    if (mandelbrotPalette) {
-      paletteComponent.setPalette(mandelbrotPalette)
-      const paletteDropdown = document.getElementById('palette-dropdown')
-      if (paletteDropdown) paletteDropdown.value = 'mandelbrot'
-      // custom パレットでなくなったので Orbit trap パネルは閉じる
-      paletteComponent._updateOrbitTrapPanel('mandelbrot')
-      // Bitmap Image はリセット対象外とする（ot-reset ボタンと同じ挙動）
-      // resetTrapSpec() で shape 等を初期値に戻す前にビットマップ関連データを退避し、
-      // リセット後に復元することでアップロード済み画像を維持する。
-      if (palette.CUSTOM_ORBIT_TRAP_PALETTE) {
-        const customOTP = palette.CUSTOM_ORBIT_TRAP_PALETTE
-        const savedBitmapData = customOTP.trapSpec?.bitmapData
-        const savedBitmapWidth = customOTP.trapSpec?.bitmapWidth
-        const savedBitmapHeight = customOTP.trapSpec?.bitmapHeight
-        const savedBitmapVersion = customOTP.trapSpec?.bitmapVersion
-
-        customOTP.resetTrapSpec()
-
-        // ビットマップデータを復元する
-        if (savedBitmapData) {
-          customOTP.updateTrapSpec({
-            bitmapData: savedBitmapData,
-            bitmapWidth: savedBitmapWidth,
-            bitmapHeight: savedBitmapHeight,
-            bitmapVersion: savedBitmapVersion,
-          })
-          // プレビューキャンバスも復元する
-          try {
-            const preview = document.getElementById('ot-bitmap-preview')
-            if (preview && savedBitmapWidth > 0 && savedBitmapHeight > 0) {
-              _drawOrbitTrapBitmapPreviewFromImageData(
-                preview,
-                savedBitmapData,
-                savedBitmapWidth,
-                savedBitmapHeight,
-                _getOrbitTrapBitmapBackgroundColor(customOTP.trapSpec)
-              )
-            }
-          } catch (previewErr) {
-            console.warn('Error restoring bitmap preview in reset():', previewErr)
-          }
-        }
-      }
+    invalidateAnimation()
+    clearPendingInteractiveRedrawState()
+    stopAndClearBuddha()
+    buddhaActive = false
+    buddhaLockedByFractalChange = false
+    _clearPinnedOrbits()
+    const defaults = normalizeFractalTypeParams()
+    fractal.fractalType = defaults.fractalType
+    fractal.iterationFunction = defaults.iterationFunction
+    fractal.dataPresetIndex = defaults.fractalDataPresetIndex
+    fractal.label = functionPresets[0].label
+    DOM.fractalTypeSelect.value = defaults.fractalDataPresetIndex
+    DOM.iterationFunctionInput.value = defaults.iterationFunction
+    setIterationFunctionLabelError(false)
+    lastIterationFunctionValue = defaults.iterationFunction
+    fractal.max_iter = DEFAULT_ITERATIONS
+    DOM.iterations.value = DEFAULT_ITERATIONS
+    fractal.smooth = DOM.smoothToggle.checked = true
+    fractal.escapeRadius = 4
+    DOM.escapeRadius.value = '4'
+    fractal.z0Real = fractal.z0Imag = 0
+    DOM.z0Real.value = DOM.z0Imag.value = '0'
+    fractal.setZoom(getInitialFractalZoom(fractal.precision))
+    fractal.setCenter([fxp.fromNumber(functionPresets[0].coordX || 0),
+      fxp.fromNumber(functionPresets[0].coordY || 0)])
+    paletteComponent.setPalette(palette.getPalette('mandelbrot'))
+    paletteComponent.setDensity(1)
+    paletteComponent.setRotate(0)
+    const custom = palette.CUSTOM_ORBIT_TRAP_PALETTE
+    // Reset All also clears the uploaded image; the panel reset remains separate.
+    custom.trapSpec = {}
+    custom.resetTrapSpec()
+    _applyOrbitTrapSpecToUI(custom.trapSpec, custom._colorPatternId)
+    document.getElementById('ot-bitmap-file').value = ''
+    const preview = document.getElementById('ot-bitmap-preview')
+    preview.getContext('2d').clearRect(0, 0, preview.width, preview.height)
+    preview.classList.add('d-none')
+    queryOrbitTrapBitmapState.autoApplied = true
+    paletteComponent._updateOrbitTrapPanel('mandelbrot')
+    enforceMainGpuState(fractal.fractalType)
+    applySettingsControls(initialSettingsControls)
+    const jumpTo = document.getElementById('jump-to')
+    if (jumpTo) jumpTo.selectedIndex = 0
+    if (juliaState.renderer) {
+      juliaState.renderer.setZoom(fxp.fromNumber(1, juliaState.renderer.precision))
+      juliaState.renderer.center = [fxp.fromNumber(0, juliaState.renderer.precision),
+        fxp.fromNumber(0, juliaState.renderer.precision)]
     }
-  } catch (e) {
-    console.warn('Error resetting palette in reset():', e?.message ? e.message : e)
-  }
-
-  // Smooth を既定値 true へ戻す
-  try {
-    fractal.smooth = true
-    const smoothToggle = document.getElementById('smooth')
-    if (smoothToggle) smoothToggle.checked = true
-  } catch (e) {
-    console.warn('Error resetting smooth in reset():', e?.message ? e.message : e)
-  }
-
-  // Escape Radius を既定値 4.0 へ戻す
-  try {
-    fractal.escapeRadius = 4.0
-    const escapeRadiusEl = document.getElementById('escape-radius')
-    if (escapeRadiusEl) escapeRadiusEl.value = '4'
-  } catch (e) {
-    console.warn('Error resetting escape radius in reset():', e?.message ? e.message : e)
-  }
-
-  // Hi DPI（fullres）をオフへ戻す
-  try {
-    const fullresToggle = document.getElementById('fullres')
-    if (fullresToggle) {
-      fullresToggle.checked = false
-      // fullres の変更を反映するため resize する
-      resizeToCanvasSize()
-    }
-  } catch (e) {
-    console.warn('Error resetting fullres in reset():', e?.message ? e.message : e)
-  }
-
-  // WebGPU が使えるなら Fractal GPU をオンへ戻す
-  try {
-    const gpuToggle = document.getElementById('gpu')
-    if (gpuToggle && !gpuToggle.disabled) {
-      gpuToggle.checked = true
-      // リセット内容がすぐ反映されるよう内部状態も更新する
-      fractal.useGpu = true
-    }
-  } catch (e) {
-    console.warn('Error resetting gpu in reset():', e?.message ? e.message : e)
-  }
-
-  // Supersampling を 0（OFF）へ戻す
-  try {
-    const supersamplingSelect = document.getElementById('supersampling')
-    if (supersamplingSelect) {
-      supersamplingSelect.value = '0'
-      // リセット内容がすぐ反映されるよう内部状態も更新する
-      fractal.supersampling = 0
-    }
-  } catch (e) {
-    console.warn('Error resetting supersampling in reset():', e?.message ? e.message : e)
-  }
-
-  // Buddhabrot GPU は、WebGPU が使えればオン、なければオフへ戻す
-  try {
-    const buddhaGpuToggle = document.getElementById('buddha-gpu')
-    if (buddhaGpuToggle) {
-      if (typeof navigator !== 'undefined' && 'gpu' in navigator) {
-        buddhaGpuToggle.checked = true
-      } else {
-        buddhaGpuToggle.checked = false
-      }
-    }
-  } catch (e) {
-    console.warn('Error resetting buddha-gpu in reset():', e?.message ? e.message : e)
-  }
-
-  // Reset で表示が変わるので保存済みの通常フラクタル画像を無効化する
-  savedFractalImageData = null
-
-  // custom モードなら現在の反復式入力値を維持する
-  if (fractal.fractalType === 'custom') {
-    const iterationFunctionInput = document.getElementById('iterationFunction')
-    if (iterationFunctionInput?.value) {
-      fractal.iterationFunction = iterationFunctionInput.value
-    }
-  }
-
-  // 反復回数が変わっていても Reset で座標と UI 状態を確実に戻せるよう、
-  // 既定の反復回数を必ず適用して再描画する。
-  setIterations(DEFAULT_ITERATIONS)
-
-  // リセット後の値でパレットを再初期化し、表示へ確実に反映する
-  try {
+    savedFractalImageData = null
     fractal.initPallete(false)
-  } catch (e) {
-    console.warn('Error re-initializing palette in reset():', e?.message ? e.message : e)
+    updateCoordinateInputs()
+  } finally {
+    applyingSettings = false
   }
-
-  // Julia キャンバスの位置とズームも初期値へ戻す
-  if (juliaState.renderer) {
-    juliaState.renderer.setZoom(fxp.fromNumber(1, juliaState.renderer.precision))
-    juliaState.renderer.center = [
-      fxp.fromNumber(0, juliaState.renderer.precision),
-      fxp.fromNumber(0, juliaState.renderer.precision),
-    ]
-  }
-
-  // すべての設定が反映されるよう resetCaches=true で再描画する
   redraw(true)
   _refreshActiveOrbitOverlays()
+  updatePermalink()
 }
 
 /**
@@ -10529,6 +10356,7 @@ function _flushPendingPermalinkUpdate() {
 }
 
 function updatePermalink() {
+  if (applyingSettings) return
   const url = new URL(window.location)
   const p = url.searchParams
   const params = {
@@ -10551,21 +10379,26 @@ function updatePermalink() {
       rotate: paletteComponent.rotate,
     },
     escapeRadius: fractal.escapeRadius,
+    controls: captureSettingsControls(),
+    juliaView: juliaState.renderer ? {
+      center: juliaState.renderer.center, zoom: juliaState.renderer.zoom,
+    } : null,
+    buddhaView: BuddhabrotState.isViewEnabled(),
   }
 
-  // OrbitTrap の custom パレットなら、bitmapData を除いた trapSpec と color pattern を含める
-  if (params.palette.id === 'orbit_trap_custom') {
-    const custom = paletteComponent.palette
-    const spec = Object.assign({}, custom.trapSpec)
-    // UI 互換のため、Infinity の threshold は 0 に戻して保存する
-    if (spec.threshold === Infinity) spec.threshold = 0
-    delete spec.bitmapData
-    delete spec.bitmapVersion
-    params.palette.trapSpec = spec
-    params.palette.colorPattern = custom._colorPatternId
-  }
+  // Preserve custom settings even while a different palette is selected.
+  const custom = palette.CUSTOM_ORBIT_TRAP_PALETTE
+  // The selected image is intentionally local-only. It can make a URL huge and
+  // must not be included when a permalink is copied or shared.
+  const spec = { ...custom.trapSpec }
+  delete spec.bitmapData
+  delete spec.bitmapWidth
+  delete spec.bitmapHeight
+  delete spec.bitmapVersion
+  if (spec.threshold === Infinity) spec.threshold = 0
+  params.orbitTrap = { trapSpec: spec, colorPattern: custom._colorPatternId }
 
-  p.set('params', btoa(JSON.stringify(params)))
+  p.set('params', encodeSettings(params))
   pendingPermalinkHref = url.toString()
   _flushPendingPermalinkUpdate()
 }
@@ -10734,7 +10567,10 @@ function saveCanvasAsPNG() {
 }
 
 // 読み込み時に URL のパーマリンクを確認する
-function init() {
+async function init() {
+  // Capture the incoming link before initialization can update browser history.
+  const params = new URL(window.location).searchParams.get('params')
+  applyingSettings = true
   initUI()
   _ensureQueryOrbitTrapBitmapLoaded()
   // resizeTmpCanvas()
@@ -10742,11 +10578,18 @@ function init() {
   fractal.initPallete()
   // パラメータ復元より先にリスナーを初期化する
   initListeners()
+  initialSettingsControls = captureSettingsControls()
+  // Record every setting edit, including controls whose handlers only update UI.
+  document.addEventListener('click', (event) => {
+    if (event.target.closest?.('button')) setTimeout(updatePermalink, 0)
+  })
+  for (const type of ['input', 'change']) document.addEventListener(type, (event) => {
+    if (event.target.matches?.('input, select') && !event.target.readOnly) updatePermalink()
+  })
 
-  const url = new URL(window.location)
-  const params = url.searchParams.get('params')
+  let restoredParams
   if (params) {
-    initFromParams(params)
+    restoredParams = initFromParams(params)
   } else {
     // HTML のフォールバック option は無効な "custom" なので、クエリなしでは
     // 既定値を明示的に適用する。これにより、先頭 option を選択状態として保持する
@@ -10767,6 +10610,7 @@ function init() {
       container.setAttribute('title', 'Initial z0 for iteration')
     }
   }
+  applyingSettings = false
   DOM.iterations.value = fractal.max_iter
   DOM.smoothToggle.checked = fractal.smooth
   DOM.iterationFunctionInput.value = fractal.iterationFunction
@@ -10774,15 +10618,20 @@ function init() {
   updateGpuVisibility(fractal.fractalType)
   // 現在の fractalType に応じてメイン GPU トグル状態を整える
   enforceMainGpuState(fractal.fractalType)
-  redraw()
+  fractal.useGpu = DOM.gpuToggle.checked
+  fractal.supersampling = Number(DOM.supersamplingToggle.value)
+  await redraw()
+  if (restoredParams?.buddhaView) await startBuddhaRender()
 }
 
 function initFromParams(params) {
   try {
-    const p = JSON.parse(atob(decodeURIComponent(params)))
+    const p = decodeSettings(params)
+    applyingSettings = true
     fractal.setZoom(applyEmbeddedInitialZoomCorrection(fxp.fromJSON(p.zoom)))
     fractal.setCenter(p.center.map(fxp.fromJSON))
     const normalizedFractalParams = normalizeFractalTypeParams(p)
+    fractal.label = p.fractalLabel || functionPresets[0].label
     fractal.max_iter = p.max_iter
     fractal.smooth = p.smooth
     fractal.fractalType = normalizedFractalParams.fractalType
@@ -10852,10 +10701,32 @@ function initFromParams(params) {
       if (escapeRadiusEl) escapeRadiusEl.value = String(fractal.escapeRadius)
     }
 
+    if (p.orbitTrap) {
+      const custom = palette.CUSTOM_ORBIT_TRAP_PALETTE
+      // Ignore image data embedded by a permalink created before image data was
+      // excluded from URLs. Uploads stay local to the browser session.
+      const spec = { ...p.orbitTrap.trapSpec }
+      delete spec.bitmapData
+      delete spec.bitmapWidth
+      delete spec.bitmapHeight
+      delete spec.bitmapVersion
+      if (spec.threshold === 0) spec.threshold = Infinity
+      custom.updateTrapSpec(spec)
+      if (p.orbitTrap.colorPattern) custom.setColorPattern(p.orbitTrap.colorPattern)
+      _applyOrbitTrapSpecToUI(custom.trapSpec, custom._colorPatternId)
+    }
+    applySettingsControls(p.controls)
+    if (p.juliaView && juliaState.renderer) {
+      juliaState.renderer.setZoom(fxp.fromJSON(p.juliaView.zoom))
+      juliaState.renderer.center = p.juliaView.center.map(fxp.fromJSON)
+    }
     DOM.iterations.value = fractal.max_iter
     DOM.smoothToggle.checked = fractal.smooth
+    return p
   } catch (e) {
-    console.warn('Error restoring z0 from params:', e?.message ? e.message : e)
+    console.warn('Error restoring settings from params:', e?.message ? e.message : e)
+  } finally {
+    applyingSettings = false
   }
 }
 

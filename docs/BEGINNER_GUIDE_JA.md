@@ -107,8 +107,12 @@ JavaScript モジュール、BigInt、Web Workers に対応したブラウザを
 
 ### 全体をやり直す
 
-- `Reset All Settings`: すべて初期状態に戻す
+- `Reset All Settings`: フラクタル種別・反復式・表示切替・Buddhabrot・Animation を含む全設定を初期状態に戻す。Orbit Trap のアップロード画像も消去する
 - `Reset Coordinates`: 位置と拡大率だけ初期状態に戻す
+
+### URL で設定を保存・共有
+
+設定変更はアドレスバーの URL に反映されます。この URL をブックマークするかコピーすると、GPU・Hi DPI・Supersampling、軌道・グリッド・Details、Julia の表示と位置・拡大率、Buddhabrot、Animation、Orbit Trap の各設定を復元できます。Orbit Trap にアップロードした画像は URL へ保存しません。Continuous の Samples は、表示中の累計ではなく有限描画用の設定値を保存します。描画結果や準備済みの Animation フレームも保存せず、Buddhabrot の View がオンなら読み込み後に再描画します。
 
 ### 画像保存
 
