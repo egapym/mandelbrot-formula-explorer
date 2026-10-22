@@ -3211,7 +3211,9 @@ try {
             } else {
               // Buddhabrot 表示中に通常フラクタル設定が変わっている可能性があるので、
               // パレット設定を反映し直してから正規の再描画を行う。
-              fractal.initPallete(true)
+              // Navigation leaves ordinary offscreens at the previous view.
+              // Refresh palette data without presenting those stale pixels.
+              fractal.initPallete(false)
 
               redrawBuddhabrotSourceView(displayTargetKind)
             }
