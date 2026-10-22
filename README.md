@@ -89,10 +89,11 @@ At very high resolutions, switching can happen at different zoom levels to reduc
 - Continuous toggle: accumulate samples until Stop (CPU updates live; GPU display updates every second)
 - Fixed Samples toggle: lock the previous render’s sample sequence and sampling range across pan/zoom (separate main/Julia sequences); Render Buddhabrot reuses the seed; Regenerate seed chooses a new one
 - Sample count input (computed sample total in Continuous mode)
-- Sampling range selector: Current View (default) or Initial View; initial sampling uses the selected preset's reset position/zoom while orbit hits map to the current view, on both CPU and GPU
+- Sampling range selector: Current View (default) or Initial View; initial sampling uses the selected preset's reset position/zoom, switching to the current view when zoomed out below the initial zoom. Orbit hits map to the current view on both CPU and GPU.
 - Buddhabrot GPU toggle
 - Buddhabrot palette selector
 - Band mode selector for both Buddhabrot and Anti-Buddhabrot (per-trajectory / per-point; defaults to per-trajectory)
+- Automatic exposure meters occupied pixels to keep brightness stable across sample counts and density ranges, with the same mapping on CPU, GPU, and stopped frames. Black background is excluded; Default exposure keeps background noise dark and bright orbits visible. Brightness adjusts exposure (0.05–6, default 1.0); Gamma adjusts midtones and contrast (0.1–20, default 1.5) independently of automatic metering.
 - Brightness and gamma controls with reset buttons
 - CPU render speed delay slider with reset button
 - CPU points-per-batch slider (default 64, maximum is min(Samples, 1024), or 1024 in Continuous mode) for concurrent trajectories across all workers; each advances one step per render delay, with reset button

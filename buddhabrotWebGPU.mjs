@@ -4,6 +4,8 @@
  * Licensed under GPL-3.0.
  */
 
+import { BUDDHA_DEFAULT_BRIGHTNESS, BUDDHA_DEFAULT_GAMMA, BUDDHA_REFERENCE_BRIGHTNESS, getDensityExposure } from './buddhabrotExposure.mjs'
+
 import { getBuddhabrotSampleSeed } from './buddhabrotSampling.mjs'
 import { createGpuSamplingPipelines } from './buddhabrotGpuSampling.mjs'
 import { CUSTOM_FUNCTION_WGSL_HELPERS } from './wgslCompiler.mjs'
@@ -27,10 +29,10 @@ export class BuddhabrotWebGPU {
     this.densityG = new Float32Array(total)
     this.densityB = new Float32Array(total)
 
-    this.brightness = options.brightness ?? 1.8
+    this.brightness = options.brightness ?? BUDDHA_DEFAULT_BRIGHTNESS
     // GPU カーネル未対応の種別向けに CPU ランナーを内部で使えるようにしておく
     this._cpuRunner = null
-    this.gamma = options.gamma ?? 0.8
+    this.gamma = options.gamma ?? BUDDHA_DEFAULT_GAMMA
   }
 
   // GPU 上だけで乱択サンプリングと軌道加算を行う。
@@ -1309,7 +1311,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 
 // GPU で色変換を行い、3 本の float32 密度バッファを RGBA の ImageBitmap に変換する。
 // 主にハイブリッド経路向けで、CPU 側で作った densityR/G/B を GPU で着色する。
-export async function colorMapDensity({ rBuf, gBuf, bBuf, width, height, brightness = 1.8, gamma = 0.8 }) {
+export async function colorMapDensity({ rBuf, gBuf, bBuf, width, height, brightness = BUDDHA_DEFAULT_BRIGHTNESS, gamma = BUDDHA_DEFAULT_GAMMA }) {
   if (!navigator.gpu) {
     throw new Error('WebGPU not available')
   }
@@ -1350,7 +1352,7 @@ export async function colorMapDensity({ rBuf, gBuf, bBuf, width, height, brightn
 
   // compute shader: float 3 要素を読み、u32 に詰めた RGBA8 を書く
   const shader = `
-  struct Params { invLogDenom: f32, brightness: f32, gamma: f32, denomScale: f32, width: u32, height: u32 };
+  struct Params { densityScale: f32, brightness: f32, gamma: f32, padding: f32, width: u32, height: u32 };
     @group(0) @binding(0) var<storage, read> inBuf: array<f32>;
     @group(0) @binding(1) var<storage, read_write> outBuf: array<u32>;
     @group(0) @binding(2) var<uniform> params: Params;
@@ -1372,12 +1374,15 @@ export async function colorMapDensity({ rBuf, gBuf, bBuf, width, height, brightn
       let rv = inBuf[base + 0u];
       let gv = inBuf[base + 1u];
       let bv = inBuf[base + 2u];
-      let lr = log(1.0 + rv) / log(10.0) * params.invLogDenom;
-      let lg = log(1.0 + gv) / log(10.0) * params.invLogDenom;
-      let lb = log(1.0 + bv) / log(10.0) * params.invLogDenom;
-  let rn = min(1.0, pow((lr * params.brightness) / params.denomScale, params.gamma));
-  let gn = min(1.0, pow((lg * params.brightness) / params.denomScale, params.gamma));
-  let bn = min(1.0, pow((lb * params.brightness) / params.denomScale, params.gamma));
+      let values = max(vec3<f32>(rv, gv, bv), vec3<f32>(0.0)) * params.densityScale * (params.brightness / ${BUDDHA_REFERENCE_BRIGHTNESS});
+      // Match CPU expm1 near zero: subtraction loses faint detail at low Gamma.
+      let shoulder = select(vec3<f32>(1.0) - exp(-values),
+        values * (vec3<f32>(1.0) - values * 0.5 + values * values / 6.0),
+        values < vec3<f32>(0.001));
+      let mapped = pow(shoulder, vec3<f32>(params.gamma));
+      let rn = mapped.r;
+      let gn = mapped.g;
+      let bn = mapped.b;
       outBuf[idx] = toU32(rn, gn, bn);
     }
   `
@@ -1388,22 +1393,9 @@ export async function colorMapDensity({ rBuf, gBuf, bBuf, width, height, brightn
     compute: { module, entryPoint: 'main' },
   })
 
-  // uniform buffer を作る
-  // CPU 描画経路と同じく、RGB 合計の最大密度を基準にする。
-  // チャンネルごとの最大値を使うと palette の色比が崩れ、特にサンプル数が
-  // 多いときに一色だけが支配的に見える。また、展開演算子で巨大な密度配列を
-  // Math.max へ渡すとブラウザの引数数上限に達するため、1 回の走査で求める。
-  let maxVal = 0
-  for (let i = 0; i < len; i++) {
-    const total = (rBuf[i] || 0) + (gBuf[i] || 0) + (bBuf[i] || 0)
-    if (total > maxVal) maxVal = total
-  }
-  maxVal = Math.max(1, maxVal)
-  // drawBuddhaDensityChannels の CPU フォールバックと同じ露出にする。
-  const invLogDenom = 2 / Math.log10(1 + maxVal)
-  // denomScale は CPU 側と同じ考え方で、密度が大きいときの明るさを調整する
-  const denomScale = 1 + Math.log10(1 + maxVal) / 4
-  const uniformData = new Float32Array([invLogDenom, brightness, gamma, denomScale])
+  // Shared metering keeps GPU, CPU, and Stop-preserved frames at the same exposure.
+  const densityScale = getDensityExposure(rBuf, gBuf, bBuf)
+  const uniformData = new Float32Array([densityScale, brightness, gamma, 0])
   // 16 byte 境界に合わせつつ width / height も入れる
   const uniformBuffer = device.createBuffer({
     // Params は uniform address space で 16-byte alignment を持つ。

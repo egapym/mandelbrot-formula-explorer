@@ -106,33 +106,46 @@ const requestHandler = appSource.slice(
   appSource.indexOf('function requestRealtimeBuddhaFrame(drag) {'),
   appSource.indexOf('function transformRealtimeBuddhaView('),
 )
+const rangeHandler = appSource.slice(
+  appSource.indexOf('function getBuddhaSamplingRange('),
+  appSource.indexOf('function applyFixedBuddhaSamples('),
+)
 for (const gpu of [true, false]) {
   for (const kind of ['main', 'julia']) {
-    let requested
-    const context = {
-      lastBuddhaRenderParams: { gpu: !gpu, samplingZoom: 1, maxIter: 1000 },
-      fractal: { max_iter: 2500 },
-      applyFixedBuddhaSamples: params => params,
-      DOM: { buddha: { gpu: { checked: gpu }, iterations: { value: '8192' }, renderSpeed: { value: '0' } } },
-      getCpuBuddhabrotRenderDelay: () => 0,
-      syncBuddhaPointBatchSize: () => 64,
-      updateCoordinateInputs() {}, showZoomFactor() {}, refreshCoordinateGrid() {},
-      drag: {
-        kind, canvas: { width: 800, height: 600 },
-        renderer: {
-          supersampling: 2, max_iter: 1000,
-          center: [{ toNumber: () => -0.5 }, { toNumber: () => 0 }],
-          zoom: { toNumber: () => 1 },
+    for (const zoom of [0.5, 1, 2]) {
+      let requested
+      const context = {
+        lastBuddhaRenderParams: { gpu: !gpu, samplingZoom: 1, maxIter: 1000 },
+        fractal: { max_iter: 2500 },
+        applyFixedBuddhaSamples: params => params,
+        DOM: { buddha: { samplingRange: { value: 'initial' }, gpu: { checked: gpu }, iterations: { value: '8192' }, renderSpeed: { value: '0' } },
+          fractalTypeSelect: { value: 'preset:0' } },
+        functionPresets: [{ coordX: -0.5, coordY: 0 }],
+        getInitialFractalZoom: () => ({ toNumber: () => 1 }),
+        getCpuBuddhabrotRenderDelay: () => 0,
+        syncBuddhaPointBatchSize: () => 64,
+        updateCoordinateInputs() {}, showZoomFactor() {}, refreshCoordinateGrid() {},
+        drag: {
+          kind, canvas: { width: 800, height: 600 },
+          renderer: {
+            supersampling: 2, max_iter: 1000,
+            center: [{ toNumber: () => -0.5 }, { toNumber: () => 0 }],
+            zoom: { toNumber: () => zoom },
+          },
+          rendering: { request: (params) => { requested = params } },
         },
-        rendering: { request: (params) => { requested = params } },
-      },
+      }
+      runInNewContext(`${rangeHandler}\n${requestHandler}\nrequestRealtimeBuddhaFrame(drag)`, context)
+      assert.equal(requested.samplingZoom, zoom < 1 ? undefined : 1,
+        'Navigation must update the sampling range when crossing the initial zoom')
+      assert.deepEqual(requested.samplingCenter && { ...requested.samplingCenter }, zoom < 1 ? undefined
+        : { x: kind === 'julia' ? 0 : -0.5, y: 0 })
+      assert.equal(requested.gpu, gpu, 'Navigation must use the current GPU toggle, not the saved render snapshot')
+      assert.equal(requested.samples, 32768)
+      assert.equal(requested.width, 800)
+      assert.equal(requested.supersampling, 2)
+      assert.equal(requested.maxIter, 2500, `${kind} navigation must use the latest Max iterations`)
     }
-    runInNewContext(`${requestHandler}\nrequestRealtimeBuddhaFrame(drag)`, context)
-    assert.equal(requested.gpu, gpu, 'Navigation must use the current GPU toggle, not the saved render snapshot')
-    assert.equal(requested.samples, 32768)
-    assert.equal(requested.width, 800)
-    assert.equal(requested.supersampling, 2)
-    assert.equal(requested.maxIter, 2500, `${kind} navigation must use the latest Max iterations`)
   }
 }
 console.log('PASS: CPU/GPU switches update navigation requests without reducing quality')

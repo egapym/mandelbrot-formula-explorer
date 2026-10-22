@@ -4,6 +4,7 @@
  * Licensed under GPL-3.0.
  */
 
+import { BUDDHA_DEFAULT_BRIGHTNESS, BUDDHA_DEFAULT_GAMMA } from './buddhabrotExposure.mjs'
 import { getBuddhabrotSampleSeed } from './buddhabrotSampling.mjs'
 import { getRenderPointBatchLimit, normalizeRenderPointBatchSize } from './buddhabrotRenderConfig.mjs'
 import { createWorkerFrom } from './workerLoader.mjs'
@@ -45,8 +46,8 @@ const DEFAULT_CONFIG = {
   CENTER_X: -0.5,
   CENTER_Y: 0,
   ZOOM: 1,
-  BRIGHTNESS: 1.8,
-  GAMMA: 0.8,
+  BRIGHTNESS: BUDDHA_DEFAULT_BRIGHTNESS,
+  GAMMA: BUDDHA_DEFAULT_GAMMA,
   MODE: 'buddha',
   BAND_MODE: 'perPoint',
 }

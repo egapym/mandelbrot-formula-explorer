@@ -683,7 +683,7 @@
                       <select
                         id="buddha-sampling-range"
                         class="form-select form-select-sm py-0"
-                        title="Choose the range used to generate random coordinates. Orbits are drawn in the current view. Changes redraw immediately while Buddhabrot is shown."
+                        title="Choose the range used to generate random coordinates. Initial View uses the current view when zoomed out below the initial zoom. Orbits are drawn in the current view. Changes redraw immediately while Buddhabrot is shown."
                       >
                         <option value="current" selected>Current View</option>
                         <option value="initial">Initial View</option>
@@ -708,7 +708,7 @@
               <div class="mb-2 row">
                 <div class="col col-sm-6">
                   <div class="d-flex align-items-center">
-                    <label for="buddha-brightness" class="col-form-label py-0">Buddhabrot Brightness</label>
+                    <label for="buddha-brightness" class="col-form-label py-0">Buddhabrot Brightness: <span id="buddha-brightness-value">1.0</span></label>
                     <button
                       type="button"
                       id="reset-buddha-brightness"
@@ -722,16 +722,16 @@
                     id="buddha-brightness"
                     type="range"
                     class="form-range"
-                    min="1.0"
-                    max="3.0"
+                    min="0.05"
+                    max="6.0"
                     step="0.01"
-                    value="1.2"
-                    title="Adjust the brightness (exposure) of the Buddhabrot image"
+                    value="1.0"
+                    title="Adjust Buddhabrot exposure. Lower values darken the image; higher values brighten it. Default: 1.0."
                   />
                 </div>
                 <div class="col col-sm-6">
                   <div class="d-flex align-items-center">
-                    <label for="buddha-gamma" class="col-form-label py-0">Buddhabrot Gamma</label>
+                    <label for="buddha-gamma" class="col-form-label py-0">Buddhabrot Gamma: <span id="buddha-gamma-value">1.5</span></label>
                     <button
                       type="button"
                       id="reset-buddha-gamma"
@@ -745,11 +745,11 @@
                     id="buddha-gamma"
                     type="range"
                     class="form-range"
-                    min="0.3"
+                    min="0.1"
                     max="20"
                     step="0.01"
-                    value="4.8"
-                    title="Adjust the gamma correction of the Buddhabrot image. Lower values brighten dark areas."
+                    value="1.5"
+                    title="Adjust Buddhabrot midtones and contrast. Lower values reveal dark detail; higher values darken the background and emphasize bright orbits. Default: 1.5."
                   />
                 </div>
               </div>

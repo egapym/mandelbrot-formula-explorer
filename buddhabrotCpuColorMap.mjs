@@ -1,5 +1,7 @@
+import { DensityExposure, mapDensityChannel } from './buddhabrotExposure.mjs'
+
 // Incremental CPU exposure mapping. Density only grows between sparse updates;
-// a changed maximum or display setting still requires recoloring every pixel.
+// a changed exposure or display setting requires recoloring occupied pixels.
 export class CpuDensityColorMap {
   constructor(r, g, b, width, height, pixels) {
     this.r = r
@@ -9,6 +11,8 @@ export class CpuDensityColorMap {
     this.height = height
     this.pixels = pixels
     this.max = 0
+    this.meter = new DensityExposure()
+    this.peaks = new Float32Array(width * height)
     this.initialized = false
     this.active = new Set()
   }
@@ -40,17 +44,22 @@ export class CpuDensityColorMap {
         if (value > max) max = value
       }
     }
-    const full = !sparse || max !== this.max || brightness !== this.brightness || gamma !== this.gamma
-    const invLogDenom = max > 0 ? (1 / Math.log10(1 + max)) * 2 : 0
-    const denomScale = 1 + Math.log10(1 + max) / 4
+    if (!sparse) {
+      this.meter = new DensityExposure()
+      this.peaks.fill(0)
+    }
+    for (const i of sparse ? dirty : this.active) {
+      if (sparse) this.meter.add(this.peaks[i], -1)
+      this.peaks[i] = Math.max(r[i] || 0, g[i] || 0, b[i] || 0)
+      this.meter.add(this.peaks[i])
+    }
+    const scale = this.meter.scale()
+    const full = !sparse || scale !== this.scale || brightness !== this.brightness || gamma !== this.gamma
     const color = (i) => {
       const di = i * 4
-      const lr = Math.log10(1 + (r[i] || 0)) * invLogDenom
-      const lg = Math.log10(1 + (g[i] || 0)) * invLogDenom
-      const lb = Math.log10(1 + (b[i] || 0)) * invLogDenom
-      pixels[di] = (255 * Math.min(1, ((lr * brightness) / denomScale) ** gamma)) | 0
-      pixels[di + 1] = (255 * Math.min(1, ((lg * brightness) / denomScale) ** gamma)) | 0
-      pixels[di + 2] = (255 * Math.min(1, ((lb * brightness) / denomScale) ** gamma)) | 0
+      pixels[di] = (255 * mapDensityChannel(r[i] || 0, scale, brightness, gamma)) | 0
+      pixels[di + 1] = (255 * mapDensityChannel(g[i] || 0, scale, brightness, gamma)) | 0
+      pixels[di + 2] = (255 * mapDensityChannel(b[i] || 0, scale, brightness, gamma)) | 0
       pixels[di + 3] = 255
     }
     let x = width, y = height, right = 0, bottom = 0
@@ -76,6 +85,7 @@ export class CpuDensityColorMap {
       }
     }
     this.max = max
+    this.scale = scale
     this.brightness = brightness
     this.gamma = gamma
     this.initialized = true

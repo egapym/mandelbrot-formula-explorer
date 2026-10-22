@@ -11,6 +11,7 @@ import { BuddhabrotRunner, createBuddhaRunner } from './buddhabrot.mjs'
 import { BuddhabrotRealtimeRenderer, getBuddhabrotFrameTransform } from './buddhabrotRealtime.mjs'
 import { BuddhabrotContinuousRunner, CONTINUOUS_SAMPLES } from './buddhabrotContinuous.mjs'
 import { FixedBuddhabrotSamples } from './buddhabrotSampling.mjs'
+import { BUDDHA_DEFAULT_BRIGHTNESS, BUDDHA_DEFAULT_GAMMA } from './buddhabrotExposure.mjs'
 import { CpuDensityColorMap } from './buddhabrotCpuColorMap.mjs'
 import { DEFAULT_RENDER_POINT_BATCH_SIZE, getRenderPointBatchLimit, normalizeRenderPointBatchSize } from './buddhabrotRenderConfig.mjs'
 import { BUDDHA_PALETTES, buildBuddhaStops, getBuddhaPalette } from './buddhaPalettes.mjs'
@@ -368,8 +369,8 @@ const PRECISION_CONSTANTS = {
 const UI_DEFAULTS = {
   paletteDensity: 0,
   paletteRotate: 0,
-  buddhaBrightness: 1.2,
-  buddhaGamma: 4.8,
+  buddhaBrightness: BUDDHA_DEFAULT_BRIGHTNESS,
+  buddhaGamma: BUDDHA_DEFAULT_GAMMA,
   buddhaRenderSpeed: 0,
   buddhaPointBatchSize: DEFAULT_RENDER_POINT_BATCH_SIZE,
 }
@@ -666,6 +667,8 @@ function resetControlToDefault(id, defaultValue) {
     if (!el) return
     // 通常入力なら value を設定する
     el.value = String(defaultValue)
+    const output = document.getElementById(`${id}-value`)
+    if (output) output.textContent = el.value
   } catch (e) {
     console.warn(`Error resetting control ${id}:`, e)
   }
@@ -686,7 +689,7 @@ function applyDefaultAndRefresh(controlId, defaultValue, options = {}) {
     options.onApply?.(defaultValue)
 
     // Buddhabrot の状態に応じて再描画方法を切り替える
-    if (BuddhabrotState.active || BuddhabrotState.isViewEnabled()) {
+    if (BuddhabrotState.active || buddhaPreservedDisplay || BuddhabrotState.isViewEnabled()) {
       scheduleBuddhaRedraw()
     } else {
       redraw()
@@ -3017,6 +3020,20 @@ let buddhaLockedByFractalChange = false
 let lastBuddhaRenderParams = null
 const fixedBuddhaSamples = new FixedBuddhabrotSamples()
 
+function getBuddhaSamplingRange(renderer, kind) {
+  const initialZoom = kind === 'julia' ? 1 : getInitialFractalZoom(renderer.precision).toNumber()
+  // Zooming out must sample the whole current view, including its new center.
+  if (DOM.buddha.samplingRange?.value !== 'initial' || renderer.zoom.toNumber() < initialZoom) {
+    return { samplingCenter: undefined, samplingZoom: undefined }
+  }
+  const presetIndex = parseInt(DOM.fractalTypeSelect?.value?.split(':')[1], 10)
+  const preset = functionPresets[presetIndex]
+  return {
+    samplingCenter: kind === 'julia' ? { x: 0, y: 0 } : { x: preset?.coordX || 0, y: preset?.coordY || 0 },
+    samplingZoom: initialZoom,
+  }
+}
+
 function applyFixedBuddhaSamples(params, kind, baseline = params) {
   if (DOM.buddha.fixedSamples?.checked && !DOM.buddha.continuous?.checked) {
     return fixedBuddhaSamples.apply(params, kind, baseline)
@@ -3558,6 +3575,7 @@ function requestRealtimeBuddhaFrame(drag) {
     renderPointBatchSize: syncBuddhaPointBatchSize(),
     center: { x: renderer.center[0].toNumber(), y: renderer.center[1].toNumber() },
     zoom: renderer.zoom.toNumber(),
+    ...getBuddhaSamplingRange(renderer, drag.kind),
   }, drag.kind, lastBuddhaRenderParams))
   if (drag.kind === 'main') {
     updateCoordinateInputs()
@@ -3949,8 +3967,8 @@ async function startBuddhaRender({ preserveSourceRender = false, captureFractalI
   const rawPal = buildPaletteFromId(palId)
   const pal = Array.isArray(rawPal) ? { bands: rawPal } : rawPal
 
-  const brightness = parseFloat(document.getElementById('buddha-brightness')?.value) || 1.8
-  const gamma = parseFloat(document.getElementById('buddha-gamma')?.value) || 0.8
+  const brightness = parseFloat(document.getElementById('buddha-brightness')?.value) || BUDDHA_DEFAULT_BRIGHTNESS
+  const gamma = parseFloat(document.getElementById('buddha-gamma')?.value) || BUDDHA_DEFAULT_GAMMA
   const _rawRenderDelay = parseFloat(document.getElementById('buddha-draw-speed')?.value) || 0
   const renderDelay = getCpuBuddhabrotRenderDelay(_rawRenderDelay)
   const renderPointBatchSize = syncBuddhaPointBatchSize(samples)
@@ -4313,13 +4331,6 @@ async function startBuddhaRender({ preserveSourceRender = false, captureFractalI
   if (!runnerToStart || typeof runnerToStart.start !== 'function') {
     console.error('index.js: runnerToStart.start is not available', runnerToStart)
   }
-  const useInitialSamplingRange = DOM.buddha.samplingRange?.value === 'initial'
-  const presetIndex = parseInt(DOM.fractalTypeSelect?.value?.split(':')[1], 10)
-  const initialPreset = functionPresets[presetIndex]
-  // Match Reset Position, including the separate Julia view and embedded zoom correction.
-  const initialSamplingCenter = target.kind === 'julia'
-    ? { x: 0, y: 0 }
-    : { x: initialPreset?.coordX || 0, y: initialPreset?.coordY || 0 }
   const renderParams = applyFixedBuddhaSamples({
     renderDelay,
     samples: samples,
@@ -4332,10 +4343,7 @@ async function startBuddhaRender({ preserveSourceRender = false, captureFractalI
       y: targetRenderer.center[1].toNumber ? targetRenderer.center[1].toNumber() : 0,
     },
     zoom: targetRenderer.zoom.toNumber ? targetRenderer.zoom.toNumber() : 1,
-    samplingCenter: useInitialSamplingRange ? initialSamplingCenter : undefined,
-    samplingZoom: useInitialSamplingRange
-      ? (target.kind === 'julia' ? 1 : getInitialFractalZoom(targetRenderer.precision).toNumber())
-      : undefined,
+    ...getBuddhaSamplingRange(targetRenderer, target.kind),
     // Buddhabrot 専用 supersampling UI があれば読む
     supersampling: targetRenderer.supersampling,
     palette: pal,
@@ -4473,8 +4481,8 @@ function stopBuddhaPreserveDisplay() {
       const bBuf = buddhaRunner.densityB
       const width = buddhaRunner.width
       const height = buddhaRunner.height
-      const brightness = buddhaRunner.brightness || 1.8
-      const gamma = buddhaRunner.gamma || 0.8
+      const brightness = buddhaRunner.brightness ?? BUDDHA_DEFAULT_BRIGHTNESS
+      const gamma = buddhaRunner.gamma ?? BUDDHA_DEFAULT_GAMMA
       const len = width * height
 
       // 3 チャンネル合計で最大値を求める
@@ -4490,24 +4498,7 @@ function stopBuddhaPreserveDisplay() {
         off.height = height
         const offCtx = off.getContext('2d')
         const img = offCtx.createImageData(width, height)
-        const invLogDenom = (1 / Math.log10(1 + max)) * 2
-        const denomScale = 1 + Math.log10(1 + max) / 4
-        const data = img.data
-        for (let i = 0, di = 0; i < len; i++, di += 4) {
-          const rv = rBuf[i] || 0
-          const gv = gBuf[i] || 0
-          const bv = bBuf[i] || 0
-          const lr = Math.log10(1 + rv) * invLogDenom
-          const lg = Math.log10(1 + gv) * invLogDenom
-          const lb = Math.log10(1 + bv) * invLogDenom
-          const rn = Math.min(1, ((lr * brightness) / denomScale) ** gamma)
-          const gn = Math.min(1, ((lg * brightness) / denomScale) ** gamma)
-          const bn = Math.min(1, ((lb * brightness) / denomScale) ** gamma)
-          data[di] = (255 * rn) | 0
-          data[di + 1] = (255 * gn) | 0
-          data[di + 2] = (255 * bn) | 0
-          data[di + 3] = 255
-        }
+        new CpuDensityColorMap(rBuf, gBuf, bBuf, width, height, img.data).update(brightness, gamma)
 	        offCtx.putImageData(img, 0, 0)
 
 	        const mainCtx = displayCanvas.getContext('2d')
@@ -4603,7 +4594,7 @@ function stopBuddhaPreserveDisplay() {
 const cpuBuddhaColorMaps = new WeakMap()
 
 function drawBuddhaDensityChannels(
-  rBuf, gBuf, bBuf, width, height, _pal, brightness = 1.8, gamma = 0.8, synchronous = false, presentedChunks,
+  rBuf, gBuf, bBuf, width, height, _pal, brightness = BUDDHA_DEFAULT_BRIGHTNESS, gamma = BUDDHA_DEFAULT_GAMMA, synchronous = false, presentedChunks,
 ) {
   // Buddhabrot が非アクティブなら早めに抜ける
   // ただし保持表示モード中は、既存 density バッファの再マッピングだけ許可する
@@ -4721,25 +4712,7 @@ function drawBuddhaDensityChannels(
   if (!usedGpu) {
     const img = cpuFrame?.img || offCtx.createImageData(width, height)
     if (!cpuFrame) {
-      const invLogDenom = (1 / Math.log10(1 + max)) * 2
-      // 密度が大きいときは brightness の効きを少し抑え、サンプル増加で急に白飛びしないようにする
-      const denomScale = 1 + Math.log10(1 + max) / 4 // tunable divisor
-      const data = img.data
-      for (let i = 0, di = 0; i < len; i++, di += 4) {
-        const rv = rBuf[i] || 0
-        const gv = gBuf[i] || 0
-        const bv = bBuf[i] || 0
-        const lr = Math.log10(1 + rv) * invLogDenom
-        const lg = Math.log10(1 + gv) * invLogDenom
-        const lb = Math.log10(1 + bv) * invLogDenom
-        const rn = Math.min(1, ((lr * brightness) / denomScale) ** gamma)
-        const gn = Math.min(1, ((lg * brightness) / denomScale) ** gamma)
-        const bn = Math.min(1, ((lb * brightness) / denomScale) ** gamma)
-        data[di] = (255 * rn) | 0
-        data[di + 1] = (255 * gn) | 0
-        data[di + 2] = (255 * bn) | 0
-        data[di + 3] = 255
-      }
+      new CpuDensityColorMap(rBuf, gBuf, bBuf, width, height, img.data).update(brightness, gamma)
     }
 
     if (cpuUpdate) {
@@ -5432,9 +5405,9 @@ function scheduleBuddhaRedraw() {
   const generation = buddhaRunnerGeneration
   requestAnimationFrame(() => {
     buddhaRedrawScheduled = false
-    // Buddhabrot 表示がオフなら再描画しない。
+    // Stop keeps the last density visible even though View is switched off.
     const toggle = document.getElementById('buddha-toggle')
-    if (toggle && !toggle.checked) return
+    if (toggle && !toggle.checked && !buddhaPreservedDisplay) return
 
     const runner = buddhaRunner
     if (!runner || buddhaRunnerGeneration !== generation) return
@@ -9578,6 +9551,7 @@ function initListeners() {
     if (buddhaBrightnessEl) {
       buddhaBrightnessEl.addEventListener('input', () => {
         const val = parseFloat(buddhaBrightnessEl.value)
+        document.getElementById('buddha-brightness-value').textContent = buddhaBrightnessEl.value
         // Buddhabrot 表示中なら runner と表示を更新する
         if (buddhaRunner) {
           buddhaRunner.brightness = val
@@ -9596,6 +9570,7 @@ function initListeners() {
       buddhaGammaEl.addEventListener('input', () => {
         try {
           const val = parseFloat(buddhaGammaEl.value)
+          document.getElementById('buddha-gamma-value').textContent = buddhaGammaEl.value
           if (buddhaRunner) {
             buddhaRunner.gamma = val
             // 重い処理を即時実行せず、再描画を予約する

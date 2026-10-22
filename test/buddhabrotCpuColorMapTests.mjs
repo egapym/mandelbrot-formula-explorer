@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict'
 import { CpuDensityColorMap } from '../buddhabrotCpuColorMap.mjs'
+import { getDensityExposure, mapDensityChannel } from '../buddhabrotExposure.mjs'
 
-// Independent full-image reference matching the existing CPU display formula.
+// Full-image reference checks incremental exposure statistics and recoloring.
 function reference(r, g, b, brightness, gamma) {
   const pixels = new Uint8ClampedArray(r.length * 4)
   let max = 0
@@ -10,12 +11,10 @@ function reference(r, g, b, brightness, gamma) {
     for (let i = 3; i < pixels.length; i += 4) pixels[i] = 255
     return pixels
   }
-  const invLogDenom = (1 / Math.log10(1 + max)) * 2
-  const denomScale = 1 + Math.log10(1 + max) / 4
+  const scale = getDensityExposure(r, g, b)
   for (let i = 0; i < r.length; i++) {
     for (const [channel, buf] of [r, g, b].entries()) {
-      const linear = Math.log10(1 + buf[i]) * invLogDenom
-      pixels[i * 4 + channel] = (255 * Math.min(1, ((linear * brightness) / denomScale) ** gamma)) | 0
+      pixels[i * 4 + channel] = (255 * mapDensityChannel(buf[i], scale, brightness, gamma)) | 0
     }
     pixels[i * 4 + 3] = 255
   }
@@ -45,8 +44,8 @@ r[0] = 20
 check(1.2, 4.8, [{ x: 0, y: 0, indices: [0] }])
 g[width + 3] = 0.25
 const small = check(1.2, 4.8, [{ x: 3, y: 1, indices: [0] }])
-assert.equal(small.full, false)
-assert.deepEqual([small.x, small.y, small.width, small.height], [3, 1, 1, 1])
+assert.equal(small.full, true)
+assert.deepEqual([small.x, small.y, small.width, small.height], [0, 0, width, height])
 
 for (let step = 0; step < 200; step++) {
   const i = (step * 37) % size, j = (step * 53 + 11) % size

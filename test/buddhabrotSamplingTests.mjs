@@ -40,6 +40,43 @@ assert.equal(inherited.apply(first, 'main').sampleSeed, refreshed.sampleSeed)
 
 // Exercise actual toggle synchronization, including restoring incompatible settings.
 const source = readFileSync(new URL('../index.js', import.meta.url), 'utf8')
+// Exercise the range selection used by both normal and realtime rendering.
+const samplingContext = {
+  DOM: { buddha: { samplingRange: { value: 'initial' } }, fractalTypeSelect: { value: 'preset:0' } },
+  functionPresets: [{ coordX: -0.5, coordY: 0 }],
+  getInitialFractalZoom: () => ({ toNumber: () => 1 }),
+}
+const samplingStart = source.indexOf('function getBuddhaSamplingRange(')
+runInNewContext(source.slice(samplingStart, source.indexOf('function applyFixedBuddhaSamples(', samplingStart)), samplingContext)
+function resolveRange(zoom, kind = 'main') {
+  const renderer = { precision: 64, zoom: { toNumber: () => zoom } }
+  const range = samplingContext.getBuddhaSamplingRange(renderer, kind)
+  // Mirror the runners' fallback to the current display when no override is set.
+  return {
+    center: { ...(range.samplingCenter || { x: 3, y: -2 }) },
+    zoom: range.samplingZoom || zoom,
+  }
+}
+for (const kind of ['main', 'julia']) {
+  assert.deepEqual(resolveRange(0.5172854246793117, kind), { center: { x: 3, y: -2 }, zoom: 0.5172854246793117 },
+    'Below the initial zoom, sample the current center and zoom')
+  const initialCenter = kind === 'julia' ? { x: 0, y: 0 } : { x: -0.5, y: 0 }
+  for (const zoom of [1, 2, 10]) {
+    assert.deepEqual(resolveRange(zoom, kind), { center: initialCenter, zoom: 1 })
+  }
+  assert.deepEqual(resolveRange(0.5, kind), { center: { x: 3, y: -2 }, zoom: 0.5 },
+    'Returning below the initial zoom must drop the initial range again')
+}
+samplingContext.getInitialFractalZoom = () => ({ toNumber: () => 1.5 })
+assert.deepEqual(resolveRange(1.2), { center: { x: 3, y: -2 }, zoom: 1.2 }, 'Use the embedded initial zoom threshold')
+assert.deepEqual(resolveRange(1.5), { center: { x: -0.5, y: 0 }, zoom: 1.5 })
+assert.deepEqual(resolveRange(1, 'julia'), { center: { x: 0, y: 0 }, zoom: 1 }, 'Julia retains its own initial zoom')
+samplingContext.DOM.buddha.samplingRange.value = 'current'
+for (const zoom of [0.5, 1, 10]) {
+  assert.deepEqual(resolveRange(zoom), { center: { x: 3, y: -2 }, zoom })
+}
+console.log('PASS: Initial View falls back to Current View below the initial zoom for main, Julia and embedded views')
+
 const context = {
   DOM: { buddha: {
     iterations: { value: '1000', readOnly: false },
