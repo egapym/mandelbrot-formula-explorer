@@ -5,7 +5,7 @@ export const SETTING_CONTROL_IDS = [
   'orbit-toggle', 'orbit-mode', 'orbit-gradient-toggle', 'coordinate-grid-toggle', 'detail-toggle',
   'julia-toggle', 'buddha-gpu', 'buddha-iterations', 'buddha-palette', 'buddhaMode',
   'buddha-bandmode', 'buddha-sampling-range', 'buddha-brightness', 'buddha-gamma',
-  'buddha-draw-speed', 'buddha-point-batch-size', 'buddha-continuous',
+  'buddha-draw-speed', 'buddha-point-batch-size', 'buddha-continuous', 'buddha-fixed-samples',
   'anim-speed', 'anim-fps', 'anim-auto-adjust', 'anim-min-iterations', 'anim-enable',
 ]
 

@@ -10,6 +10,7 @@ import { AnimationGpuSession } from './animationGpuSession.mjs'
 import { BuddhabrotRunner, createBuddhaRunner } from './buddhabrot.mjs'
 import { BuddhabrotRealtimeRenderer, getBuddhabrotFrameTransform } from './buddhabrotRealtime.mjs'
 import { BuddhabrotContinuousRunner, CONTINUOUS_SAMPLES } from './buddhabrotContinuous.mjs'
+import { FixedBuddhabrotSamples } from './buddhabrotSampling.mjs'
 import { CpuDensityColorMap } from './buddhabrotCpuColorMap.mjs'
 import { DEFAULT_RENDER_POINT_BATCH_SIZE, getRenderPointBatchLimit, normalizeRenderPointBatchSize } from './buddhabrotRenderConfig.mjs'
 import { BUDDHA_PALETTES, buildBuddhaStops, getBuddhaPalette } from './buddhaPalettes.mjs'
@@ -543,6 +544,7 @@ const DOM = {
     palette: document.getElementById('buddha-palette'),
     gpu: document.getElementById('buddha-gpu'),
     continuous: document.getElementById('buddha-continuous'),
+    fixedSamples: document.getElementById('buddha-fixed-samples'),
     brightness: document.getElementById('buddha-brightness'),
     gamma: document.getElementById('buddha-gamma'),
     renderSpeed: document.getElementById('buddha-draw-speed'),
@@ -3012,6 +3014,18 @@ let buddhaActive = false
 let buddhaPreservedDisplay = false
 let buddhaLockedByFractalChange = false
 let lastBuddhaRenderParams = null
+const fixedBuddhaSamples = new FixedBuddhabrotSamples()
+
+function applyFixedBuddhaSamples(params, kind, baseline = params) {
+  if (DOM.buddha.fixedSamples?.checked && !DOM.buddha.continuous?.checked) {
+    return fixedBuddhaSamples.apply(params, kind, baseline)
+  }
+  // Retain a replayable root seed even while unlocked, so enabling the lock
+  // can preserve the immediately preceding finite render's coordinates.
+  const { sampleSeed, samplingAspect, convergenceView, ...unlocked } = params
+  return { ...unlocked, sampleSeed: DOM.buddha.continuous?.checked
+    ? undefined : fixedBuddhaSamples.createSeed() }
+}
 let realtimeBuddhaDrag = null
 
 function syncBuddhaPointBatchSize(samplesOverride = null) {
@@ -3527,7 +3541,7 @@ function requestRealtimeBuddhaFrame(drag) {
     ? CONTINUOUS_SAMPLES : parseInt(DOM.buddha.iterations.value, 10) || 100000
   // Match normal rendering exactly: supersampling increases the sample budget,
   // while density buffers keep the canvas dimensions. No interaction quality cap.
-  drag.rendering.request({
+  drag.rendering.request(applyFixedBuddhaSamples({
     ...lastBuddhaRenderParams,
     // A saved CPU render can be followed by GPU navigation (and vice versa).
     // Keep the request mode consistent with the current runner selection.
@@ -3543,7 +3557,7 @@ function requestRealtimeBuddhaFrame(drag) {
     renderPointBatchSize: syncBuddhaPointBatchSize(),
     center: { x: renderer.center[0].toNumber(), y: renderer.center[1].toNumber() },
     zoom: renderer.zoom.toNumber(),
-  })
+  }, drag.kind, lastBuddhaRenderParams))
   if (drag.kind === 'main') {
     updateCoordinateInputs()
     showZoomFactor()
@@ -3758,6 +3772,13 @@ function updateBuddhaContinuousSamples(total, force = false) {
 function syncBuddhaContinuousModeUi() {
   const input = DOM.buddha.iterations
   const enabled = !!DOM.buddha.continuous?.checked
+  if (DOM.buddha.fixedSamples) {
+    if (enabled) {
+      DOM.buddha.fixedSamples.checked = false
+      fixedBuddhaSamples.clear()
+    }
+    DOM.buddha.fixedSamples.disabled = enabled
+  }
   if (enabled && !input.readOnly) {
     buddhaFiniteSampleValue = input.value
     updateBuddhaContinuousSamples(0, true)
@@ -4291,7 +4312,7 @@ async function startBuddhaRender({ preserveSourceRender = false } = {}) {
   const initialSamplingCenter = target.kind === 'julia'
     ? { x: 0, y: 0 }
     : { x: initialPreset?.coordX || 0, y: initialPreset?.coordY || 0 }
-  const renderParams = {
+  const renderParams = applyFixedBuddhaSamples({
     renderDelay,
     samples: samples,
     renderPointBatchSize: syncBuddhaPointBatchSize(samples),
@@ -4333,7 +4354,7 @@ async function startBuddhaRender({ preserveSourceRender = false } = {}) {
     })(),
     // 両モードとも画面で選択された Band Mode を使用する。
     buddhaBandMode: DOM.buddha.bandMode?.value === 'perPoint' ? 'perPoint' : 'perTrajectory',
-  }
+  }, target.kind)
   // Source navigation needs partial images before the configured sample
   // budget completes; keep the budget and all numerical settings unchanged.
   renderParams.interactive = preserveSourceRender
@@ -9670,6 +9691,14 @@ function initListeners() {
     reset()
   })
 
+  DOM.buddha.fixedSamples?.addEventListener('change', () => {
+    fixedBuddhaSamples.clear()
+    if (DOM.buddha.fixedSamples.checked && lastBuddhaRenderParams && BuddhabrotState.targetKind) {
+      fixedBuddhaSamples.apply(lastBuddhaRenderParams, BuddhabrotState.targetKind)
+    }
+    redrawBuddhaForExecutionSettingChange()
+  })
+
   if (DOM.buddha.continuous) {
     DOM.buddha.continuous.checked = false
     syncBuddhaContinuousModeUi()
@@ -9681,9 +9710,15 @@ function initListeners() {
 
   // Render-affecting controls apply immediately only while Buddhabrot is shown.
   for (const control of [DOM.buddha.palette, DOM.buddha.mode,
-    DOM.buddha.bandMode, DOM.buddha.samplingRange]) {
+    DOM.buddha.bandMode]) {
     control?.addEventListener('change', redrawBuddhaForRenderSettingChange)
   }
+
+  DOM.buddha.samplingRange?.addEventListener('change', () => {
+    if (DOM.buddha.fixedSamples) DOM.buddha.fixedSamples.checked = false
+    fixedBuddhaSamples.clear()
+    redrawBuddhaForRenderSettingChange()
+  })
 
   // Buddhabrot 実行ボタン
   try {
@@ -9691,6 +9726,9 @@ function initListeners() {
     if (buddhaBtn) {
       buddhaBtn.addEventListener('click', async () => {
         try {
+          if (DOM.buddha.fixedSamples?.checked && !DOM.buddha.continuous?.checked) {
+            fixedBuddhaSamples.reseed(getBuddhabrotTargetSnapshot().kind)
+          }
           await startBuddhaRender()
         } catch (e) {
           buddhaRenderPending = false
@@ -10149,6 +10187,7 @@ function captureSettingsControls() {
 
 function applySettingsControls(controls) {
   if (!controls) return
+  fixedBuddhaSamples.clear()
   // Restore Samples before enabling Continuous so its finite limit is retained.
   if (DOM.buddha.continuous.checked) {
     DOM.buddha.continuous.checked = false
@@ -10177,6 +10216,8 @@ function applySettingsControls(controls) {
 }
 
 function reset() {
+  fixedBuddhaSamples.clear()
+  if (DOM.buddha.fixedSamples) DOM.buddha.fixedSamples.checked = false
   applyingSettings = true
   try {
     invalidateAnimation()

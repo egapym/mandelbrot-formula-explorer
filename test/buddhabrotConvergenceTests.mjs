@@ -1,16 +1,17 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 
-// Execute the scalar integer operations extracted from the actual WGSL, rather
+// Execute the scalar operations extracted from the actual WGSL, rather
 // than maintaining a second implementation of the optimized state machine.
 const source = readFileSync(new URL('../buddhabrotWebGPU.mjs', import.meta.url), 'utf8')
 const extract = (name) => {
   const block = source.split(`// convergence ${name} begin`)[1]?.split(`// convergence ${name} end`)[0]
   assert.ok(block, `Missing convergence ${name} block`)
-  return block.replace(/:\s*i32/g, '').replace(/\b(\d+)u\b/g, '$1').replace(/i32\(oi\)/g, 'oi')
+  return block.replace(/:\s*(?:i32|f32)/g, '').replace(/\b(\d+)u\b/g, '$1').replace(/i32\(oi\)/g, 'oi')
 }
 const createTracker = new Function(`${extract('state')}
-  return (currentPixelIdx, oi, iter) => {
+  return (currentPixelIdx, oi, iter, currentPixelY = 0, locked = false) => {
+    const currentPixelValid = locked || currentPixelIdx >= 0;
     ${extract('update').replace(/break;/g, 'return true;')}
     return false;
   }`)
@@ -22,7 +23,7 @@ const extractCpu = (name) => {
   return block
 }
 const createCpuTracker = new Function(`${extractCpu('state')}
-  return (currentPixelIdx, k, trajLen) => {
+  return (currentPixelIdx, k, trajLen, currentPixelY = 0, convergenceView = false) => {
     const stepped = false;
     ${extractCpu('update').replace('if (stepped) yield false', '').replace(/\breturn\b/g, 'return true')}
     return false;
@@ -69,3 +70,21 @@ for (let trial = 0; trial < 2000; trial++) {
   }))
 }
 console.log(`PASS: ${checks} CPU/GPU convergence decisions match the 50-point Set oracle`)
+
+// Unbounded reference coordinates must not alias after flattening, nor be
+// discarded because they are negative or outside the original viewport.
+for (const coordinates of [
+  Array.from({ length: 1000 }, (_, i) => [-1000 + i * 3, 2 - i]),
+  Array.from({ length: 1000 }, (_, i) => [[-160, 1], [0, 0], [160, -1]][i % 3]),
+  Array.from({ length: 1000 }, (_, i) => [[-160, 1], [160, -1]][i % 2]),
+]) {
+  const gpu = createTracker(), cpu = createCpuTracker()
+  for (let i = 0; i < coordinates.length; i++) {
+    const expected = i >= 200 && i % 10 === 0 &&
+      new Set(coordinates.slice(Math.max(0, i - 49), i + 1).map(p => p.join(','))).size <= 2
+    const [x, y] = coordinates[i]
+    assert.equal(gpu(x, i, coordinates.length, y, true), expected)
+    assert.equal(cpu(x, i, coordinates.length, y, true), expected)
+  }
+}
+console.log('PASS: unbounded fixed-grid convergence preserves offscreen positions without coordinate aliasing')

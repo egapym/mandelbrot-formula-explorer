@@ -1,4 +1,5 @@
 import { BuddhabrotWebGPU } from '../buddhabrotWebGPU.mjs'
+import { getBuddhaPalette } from '../buddhaPalettes.mjs'
 
 const assert = (condition, message) => {
   if (!condition) throw new Error(message)
@@ -204,10 +205,54 @@ async function run() {
       if (clockDescriptor) Object.defineProperty(performance, 'now', clockDescriptor)
       else delete performance.now
     }
+    // A locked long orbit can enter a deep viewport after >200 offscreen
+    // steps. Its convergence grid must remain at the pre-zoom coordinates.
+    for (const zoom of [100, 1000]) {
+      let unlockedChannels
+      for (const locked of [false, true]) {
+        const runner = new BuddhabrotWebGPU({ devicePromise: Promise.resolve(probe) })
+        let failure
+        runner.onComplete = result => { if (result.error) failure = result.error }
+        const params = { gpu: true, width: 160, height: 90, samples: 16,
+          maxIter: 600, mode: 'antibuddha', iterationFunction: 'z+0.005', fractalType: 'custom',
+          z0Real: 0, escapeRadius: 4, center: { x: 1.5, y: 0 }, zoom,
+          sampleSeed: 12345, samplingCenter: { x: 0, y: 0 }, samplingZoom: 1 }
+        if (locked) params.convergenceView = { center: params.center, zoom, width: 160, height: 90 }
+        await runner.start(params)
+        assert(!failure && !runner._cpuRunner, failure || 'Deep zoom test fell back to CPU')
+        const channels = [runner.densityR, runner.densityG, runner.densityB]
+        assert(channels.some(channel => channel.some(value => value > 0)),
+          `Orbit disappeared at zoom ${zoom} before entering the viewport`)
+        if (!locked) unlockedChannels = channels.map(channel => channel.slice())
+        else assert(channels.every((channel, ch) => channel.every((value, i) => value === unlockedChannels[ch][i])),
+          'Enabling Fixed Samples added or removed orbit contributions')
+      }
+    }
+    // Preset-05 must retain late yellow/red bands outside the locked viewport.
+    let widePaletteChannels
+    for (const locked of [false, true]) {
+      const runner = new BuddhabrotWebGPU({ devicePromise: Promise.resolve(probe) })
+      let failure
+      runner.onComplete = result => { if (result.error) failure = result.error }
+      await runner.start({ gpu: true, width: 160, height: 90, samples: 16, maxIter: 600,
+        mode: 'antibuddha', iterationFunction: 'z+0.005', fractalType: 'custom',
+        z0Real: 0, escapeRadius: 4, center: { x: 1.5, y: 0 }, zoom: 1,
+        sampleSeed: 12345, samplingCenter: { x: 0, y: 0 }, samplingZoom: 1,
+        palette: getBuddhaPalette('Preset-05'), buddhaBandMode: 'perPoint',
+        convergenceView: locked ? { center: { x: 1.5, y: 0 }, zoom: 1000, width: 160, height: 90 } : undefined })
+      assert(!failure && !runner._cpuRunner, failure || 'Zoom-out palette test fell back to CPU')
+      const channels = [runner.densityR, runner.densityG, runner.densityB]
+      if (!locked) widePaletteChannels = channels.map(channel => channel.slice())
+      else {
+        assert(channels[0].some(value => value > 0), 'Preset-05 lost yellow/red outside the lock')
+        assert(channels.every((channel, ch) => channel.every((value, i) => value === widePaletteChannels[ch][i])),
+          'Zooming out of the fixed grid changed orbit hits or palette contributions')
+      }
+    }
     const error = await device.popErrorScope()
     assert(!error, error?.message)
     const validation = runners.length > 1 && compareDensity ? 'fixed-seed density parity' : 'fixed-seed sampling'
-    return `PASS: ${validation}; continuous readback/Stop density parity; median of 7 runs after 2 warmups\n${JSON.stringify(rows, null, 2)}`
+    return `PASS: ${validation}; continuous readback/Stop density parity; locked deep-zoom orbit retention; Preset-05 zoom-out palette parity; median of 7 runs after 2 warmups\n${JSON.stringify(rows, null, 2)}`
   } finally {
     for (const { runner } of runners) runner.stop()
     querySet?.destroy()

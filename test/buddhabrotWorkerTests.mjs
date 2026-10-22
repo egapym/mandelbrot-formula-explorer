@@ -129,6 +129,39 @@ function equalDensity(expected, actual, exact = false) {
   }
 }
 
+// Observe actual sampled coordinates: the same seed and saved sampling bounds
+// must survive display pan/zoom, even when the canvas aspect ratio changes.
+const seeded = await sample({ sampleSeed: 12345 })
+const replayed = await sample({ sampleSeed: 12345 })
+assert.deepEqual(seeded.sampledCoordinates, replayed.sampledCoordinates)
+const movedSeeded = await sample({ sampleSeed: 12345, center: { x: 10, y: 20 }, zoom: 8,
+  height: 80, samplingCenter: base.center, samplingZoom: base.zoom, samplingAspect: base.height / base.width })
+assert.deepEqual(seeded.sampledCoordinates, movedSeeded.sampledCoordinates)
+assert.notDeepEqual(seeded.sampledCoordinates, (await sample({ sampleSeed: 54321 })).sampledCoordinates)
+
+// A long orbit may enter a deep zoom only after its first 200 points.
+// Offscreen points in the current view must not truncate the locked orbit.
+const lateEntry = { samples: 1, maxIter: 600, mode: 'antibuddha',
+  iterationFunction: 'z+0.005', z0Real: 0, center: { x: 1.5, y: 0 }, zoom: 1000,
+  sampleSeed: 12345, samplingCenter: { x: 0, y: 0 }, samplingZoom: 1,
+  convergenceView: { center: { x: 0, y: 0 }, zoom: 1, width: 160, height: 90 } }
+assert.ok((await sample(lateEntry)).hits.size > 0, 'Deep zoom discarded an orbit before it entered the view')
+equalDensity(await sample({ ...lateEntry, convergenceView: undefined }), await sample(lateEntry))
+
+// Preset-05's yellow/red bands occur after the first 200 orbit steps.
+// Zooming OUT from a small locked grid must still color its offscreen steps.
+const zoomOutPalette = { samples: 1, maxIter: 600, mode: 'antibuddha',
+  iterationFunction: 'z+0.005', z0Real: 0, center: { x: 1.5, y: 0 }, zoom: 1,
+  sampleSeed: 12345, samplingCenter: { x: 0, y: 0 }, samplingZoom: 1,
+  paletteStops: BUDDHA_PALETTES[4], buddhaBandMode: 'perPoint' }
+const widePalette = await sample(zoomOutPalette)
+const lockedZoomOutPalette = await sample({ ...zoomOutPalette,
+  convergenceView: { center: { x: 1.5, y: 0 }, zoom: 1000, width: 160, height: 90 } })
+equalDensity(widePalette, lockedZoomOutPalette)
+equalDensity(widePalette, await sample({ ...zoomOutPalette,
+  convergenceView: { center: { x: 1.5, y: 0 }, zoom: 1000, width: 160, height: 90 } }, 10))
+assert.ok(lockedZoomOutPalette.contributions.R.some(value => value > 0), 'Preset-05 lost its yellow/red bands outside the locked view')
+
 const immediate = await sample()
 const interactiveImmediate = await sample({ interactive: true })
 equalDensity(immediate, interactiveImmediate)

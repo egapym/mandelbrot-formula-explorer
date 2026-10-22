@@ -87,6 +87,7 @@ At very high resolutions, switching can happen at different zoom levels to reduc
 - Buddhabrot view toggle
 - Always-on Realtime Navigation: drag, wheel/trackpad zoom, or two-finger pinch on a rendered main or Julia Buddhabrot
 - Continuous toggle: accumulate samples until Stop (CPU updates live; GPU display updates every second)
+- Fixed Samples toggle: lock the previous render’s sample sequence and sampling range across pan/zoom (separate main/Julia sequences); Render Buddhabrot chooses a new seed
 - Sample count input (computed sample total in Continuous mode)
 - Sampling range selector: Current View (default) or Initial View; initial sampling uses the selected preset's reset position/zoom while orbit hits map to the current view, on both CPU and GPU
 - Buddhabrot GPU toggle
@@ -111,6 +112,24 @@ Continuous render is stopped. Julia Buddhabrot uses the same Render time display
 finite renders update on completion and Continuous renders update on Stop. Turning Continuous off restores the prior finite
 sample limit. Render, navigation and render-setting changes start a fresh density
 map and reset the current render's count. Reset All Settings turns Continuous off.
+
+**Fixed Samples** retains the immediately preceding render’s random seed and
+sampling range when enabled (or initializes them on the first render if none
+exists). Pressing **Render Buddhabrot** while locked chooses a new seed but keeps
+the saved sampling range. Pan and zoom change only the display projection. Convergence checks retain the
+original display grid without clipping to its viewport. Unlocked rendering uses
+the same unbounded convergence algorithm, so enabling the lock preserves the
+existing orbit points as well as the seed. Offscreen positions
+remain distinct, preserving both late orbit points in deep zooms and later
+palette bands when zooming out of the locked area. CPU and GPU
+replay their own deterministic coordinate sequences without storing every pair.
+Fixed Samples is available only with Continuous OFF. Enabling Continuous turns
+Fixed Samples OFF and disables it; disabling Continuous makes it available again
+without automatically turning it back on.
+Increasing Samples evaluates more coordinates from the same sequence. Switching
+CPU/GPU uses that backend's sequence. Changing Sampling Range turns Fixed Samples
+OFF and clears the saved sequences and ranges for both main and Julia views so
+the selected range applies to the next render. Reset All Settings disables Fixed Samples.
 
 While Buddhabrot is shown (including a stopped image), changing Palette, Buddhabrot Mode,
 Band Mode or Sampling Range immediately starts a new render. Changing Samples

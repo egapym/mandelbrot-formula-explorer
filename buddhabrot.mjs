@@ -4,6 +4,7 @@
  * Licensed under GPL-3.0.
  */
 
+import { getBuddhabrotSampleSeed } from './buddhabrotSampling.mjs'
 import { getRenderPointBatchLimit, normalizeRenderPointBatchSize } from './buddhabrotRenderConfig.mjs'
 import { createWorkerFrom } from './workerLoader.mjs'
 
@@ -379,6 +380,9 @@ export class BuddhabrotRunner {
         zoom: this.zoom,
         samplingCenter: params.samplingCenter,
         samplingZoom: params.samplingZoom,
+        samplingAspect: params.samplingAspect,
+        convergenceView: params.convergenceView,
+        sampleSeed: params.sampleSeed === undefined ? undefined : getBuddhabrotSampleSeed(params.sampleSeed, i),
         mode: params.mode || DEFAULT_CONFIG.MODE,
         paletteStops: this.palette,
         iterationFunction: params.iterationFunction || null,

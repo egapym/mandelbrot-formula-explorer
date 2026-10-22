@@ -4,6 +4,7 @@
  * Licensed under GPL-3.0.
  */
 
+import { getBuddhabrotSampleSeed } from './buddhabrotSampling.mjs'
 import { CUSTOM_FUNCTION_WGSL_HELPERS } from './wgslCompiler.mjs'
 import { getBuddhabrotProjection, getBuddhabrotProjectionWGSL } from './buddhabrotProjection.mjs'
 
@@ -170,7 +171,7 @@ export class BuddhabrotWebGPU {
     let uniformBuf = this._cachedBuffers?.uniformBuf
     if (!uniformBuf) {
       uniformBuf = device.createBuffer({
-        size: 96,
+        size: 128,
         usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC,
       })
       this._cachedBuffers.uniformBuf = uniformBuf
@@ -267,7 +268,9 @@ struct Uniforms {
   isJulia: u32,
   juliaCr: f32,
   juliaCi: f32,
-  samplingCenterX: f32, samplingCenterY: f32, samplingZoom: f32,
+  samplingCenterX: f32, samplingCenterY: f32, samplingZoom: f32, samplingHeight: f32,
+  convergenceCenterX: f32, convergenceCenterY: f32, convergenceZoom: f32,
+  convergenceWidth: f32, convergenceHeight: f32,
 };
 @group(0) @binding(0) var<uniform> u: Uniforms;
 @group(0) @binding(1) var<storage, read_write> rAcc: array<atomic<u32>>;
@@ -298,6 +301,14 @@ fn coordToIndex(x: f32, y: f32) -> vec2<f32> {
   return vec2<f32>(fx, fy);
 }
 
+fn convergenceIndex(x: f32, y: f32) -> vec2<f32> {
+  let scale = u.convergenceZoom * u.convergenceWidth;
+  let fx = floor(((${displayCoordinates.real}) - u.convergenceCenterX) * scale / 4.0 + u.convergenceWidth / 2.0);
+  let fy = floor(((${displayCoordinates.imag}) - u.convergenceCenterY) * scale / 4.0 + u.convergenceHeight / 2.0);
+  // Do not clip to the original viewport or flatten unbounded coordinates.
+  return vec2<f32>(fx, fy);
+}
+
 @compute @workgroup_size(64)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   let id = gid.x + u.invocationOffset;
@@ -311,10 +322,10 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   let scale_local = u.samplingZoom * f32(u.width);
   let invDenom_local = 4.0 / scale_local;
   let halfW = f32(u.width) / 2.0;
-  let halfH = f32(u.height) / 2.0;
+  let halfH = u.samplingHeight / 2.0;
     for (var si: u32 = 0u; si < spt; si = si + 1u) {
 	    let rpx = rand(&state) * f32(u.width);
-	    let rpy = rand(&state) * f32(u.height);
+	    let rpy = rand(&state) * u.samplingHeight;
 	  let rx = (rpx - halfW) * invDenom_local + u.samplingCenterX;
 	  let ry = (rpy - halfH) * invDenom_local + u.samplingCenterY;
 	    let sample = vec2<f32>(rx, ry);
@@ -389,8 +400,10 @@ ${historyReset}
     // 直近の異なる 3 ピクセルの最終出現時刻だけで、50 点内に 3 種類あるか
     // 判定できる。3 番目の ID は不要（上位 2 種類以外の再出現は同じ更新）。
     // convergence state begin
-    var newestPixel: i32 = -1;
-    var secondPixel: i32 = -1;
+    var newestPixel: f32 = -1.0;
+    var secondPixel: f32 = -1.0;
+    var newestPixelY: f32 = 0.0;
+    var secondPixelY: f32 = 0.0;
     var newestAt: i32 = -1;
     var secondAt: i32 = -1;
     var thirdAt: i32 = -1;
@@ -410,12 +423,16 @@ ${historyAfter('oi')}
       let pcoords = coordToIndex(z.x, z.y);
       let fx_px = pcoords.x;
       let fy_py = pcoords.y;
-      var currentPixelIdx: i32 = -1;
+      var currentPixelIdx: f32 = -1.0;
+      var currentPixelY: f32 = 0.0;
+      var currentPixelValid = false;
       if (!(fx_px < 0.0 || fy_py < 0.0 || fx_px >= f32(u.width) || fy_py >= f32(u.height))) {
         let px = u32(fx_px);
         let py = u32(fy_py);
         let idx = py * u.width + px;
-        currentPixelIdx = i32(idx);
+        currentPixelIdx = f32(px);
+        currentPixelY = f32(py);
+        currentPixelValid = true;
         // CPU worker と同様に、軌道位置を [0..1] に正規化する
         var frac: f32 = 0.0;
         if (u.bandMode == 1u) {
@@ -442,21 +459,30 @@ ${historyAfter('oi')}
         atomicAdd(&bAcc[idx], contribVec.z);
       }
 
+      if (iter > 200u && u.convergenceWidth > 0.0) {
+        let convergencePoint = convergenceIndex(z.x, z.y);
+        currentPixelIdx = convergencePoint.x;
+        currentPixelY = convergencePoint.y;
+        currentPixelValid = true;
+      }
+
       // 200 点以下の軌道は従来の判定位置に達しないため追跡不要。
       // convergence update begin
       if (iter > 200u) {
-        if (currentPixelIdx >= 0) {
-          if (currentPixelIdx == newestPixel) {
+        if (currentPixelValid) {
+          if (currentPixelIdx == newestPixel && currentPixelY == newestPixelY) {
             newestAt = i32(oi);
           } else {
-            if (currentPixelIdx != secondPixel) { thirdAt = secondAt; }
+            if (currentPixelIdx != secondPixel || currentPixelY != secondPixelY) { thirdAt = secondAt; }
             secondPixel = newestPixel;
+            secondPixelY = newestPixelY;
             secondAt = newestAt;
             newestPixel = currentPixelIdx;
+            newestPixelY = currentPixelY;
             newestAt = i32(oi);
           }
         }
-        // ウィンドウは [oi - 49, oi]。画面外の点も時間を進めるが種類に数えない。
+        // ウィンドウは [oi - 49, oi]。固定 ON/OFF とも画面外も座標ペアで数える。
         if (oi >= 200u && oi % 10u == 0u && thirdAt <= i32(oi) - 50) { break; }
       }
       // convergence update end
@@ -573,8 +599,19 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
       samplingCenter?.x ?? 0.0,
       samplingCenter?.y ?? 0.0,
       params.samplingZoom || params.zoom || 1.0,
+      params.samplingAspect === undefined ? height : params.samplingAspect * width,
     ])
     device.queue.writeBuffer(uniformBuf, 80, samplingView.buffer, 0, samplingView.byteLength)
+    // The lock freezes a grid; it does not switch convergence algorithms.
+    const convergenceView = params.convergenceView || {
+      center: params.center || { x: 0, y: 0 }, zoom: params.zoom || 1, width, height,
+    }
+    const convergenceUniform = new Float32Array([
+      convergenceView?.center.x ?? 0, convergenceView?.center.y ?? 0,
+      convergenceView?.zoom ?? 1, convergenceView?.width ?? 0, convergenceView?.height ?? 0,
+    ])
+    device.queue.writeBuffer(uniformBuf, 96, convergenceUniform)
+
 
     // Mandelbrot 以外でも反復式を WGSL 化できるなら GPU 経路を使う。
     // 変換できない式だけは、上位で CPU フォールバックできるよう例外にする。
@@ -728,6 +765,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     }
     const displayInterval = params.interactive ? 0 : 1000
     let lastDisplay = performance.now()
+    let sampleBatchIndex = 0
     let samplesRemaining = totalSamples
     try {
       while (samplesRemaining > 0 && this.running) {
@@ -742,12 +780,15 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         // 新しい seed
         let batchSeed = 0
         try {
-          if (typeof crypto !== 'undefined' && crypto.getRandomValues)
+          if (params.sampleSeed !== undefined) batchSeed = 0
+          else if (typeof crypto !== 'undefined' && crypto.getRandomValues)
             batchSeed = crypto.getRandomValues(new Uint32Array(1))[0]
           else batchSeed = Math.floor(Math.random() * 0xffffffff)
         } catch (_e) {
           batchSeed = Math.floor(Math.random() * 0xffffffff)
         }
+        if (params.sampleSeed !== undefined) batchSeed = getBuddhabrotSampleSeed(params.sampleSeed, sampleBatchIndex)
+        sampleBatchIndex++
         u32view[8] = batchSeed
         // 更新分だけ uniform に反映する
         device.queue.writeBuffer(uniformBuf, 0, u32view.buffer, 0, u32view.byteLength)

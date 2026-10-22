@@ -112,6 +112,7 @@ for (const gpu of [true, false]) {
     const context = {
       lastBuddhaRenderParams: { gpu: !gpu, samplingZoom: 1, maxIter: 1000 },
       fractal: { max_iter: 2500 },
+      applyFixedBuddhaSamples: params => params,
       DOM: { buddha: { gpu: { checked: gpu }, iterations: { value: '8192' }, renderSpeed: { value: '0' } } },
       getCpuBuddhabrotRenderDelay: () => 0,
       syncBuddhaPointBatchSize: () => 64,

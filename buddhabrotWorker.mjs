@@ -274,10 +274,11 @@ async function runSampling(opts) {
   // Sampling may use the initial view while orbit hits still map to the current view.
   const samplingCenter = opts.samplingCenter || center
   const samplingZoom = opts.samplingZoom || zoom
+  const samplingAspect = opts.samplingAspect ?? aspect
   const sampleLeft = samplingCenter.x - SAMPLING_CONFIG.VIEW_SPAN / samplingZoom
-  const sampleTop = samplingCenter.y - (SAMPLING_CONFIG.VIEW_SPAN / samplingZoom) * aspect
+  const sampleTop = samplingCenter.y - (SAMPLING_CONFIG.VIEW_SPAN / samplingZoom) * samplingAspect
   const sampleRight = samplingCenter.x + SAMPLING_CONFIG.VIEW_SPAN / samplingZoom
-  const sampleBottom = samplingCenter.y + (SAMPLING_CONFIG.VIEW_SPAN / samplingZoom) * aspect
+  const sampleBottom = samplingCenter.y + (SAMPLING_CONFIG.VIEW_SPAN / samplingZoom) * samplingAspect
   const sampleWidth = sampleRight - sampleLeft
   const sampleHeight = sampleBottom - sampleTop
 
@@ -300,7 +301,8 @@ async function runSampling(opts) {
 
   // 軽量な xorshift32 乱数生成器を worker 実行ごとに 1 回だけ初期化する。
   // ホットループ内で Math.random() を何度も呼ばないための工夫。
-  let _prng_state = ((Math.random() * 0xffffffff) | 0) >>> 0
+  let _prng_state = opts.sampleSeed === undefined
+    ? ((Math.random() * 0xffffffff) | 0) >>> 0 : (opts.sampleSeed >>> 0) || 1
   function rand32() {
     _prng_state ^= _prng_state << 13
     _prng_state = _prng_state >>> 0
@@ -399,6 +401,17 @@ async function runSampling(opts) {
   }
 
   // 内側ループで頻繁に使う値をローカルへ退避する
+  // Use the same unbounded grid before/after locking. Locking retains this
+  // grid across navigation; it must never change which orbit steps are kept.
+  const convergenceView = opts.convergenceView || { center, zoom, width, height }
+  const convergenceHalfSpan = convergenceView ? 2 / convergenceView.zoom : 0
+  const convergenceLeft = convergenceView ? convergenceView.center.x - convergenceHalfSpan : 0
+  const convergenceTop = convergenceView
+    ? convergenceView.center.y - convergenceHalfSpan * (convergenceView.height / convergenceView.width) : 0
+  const convergenceInvWSpan = convergenceView
+    ? 1 / ((convergenceView.center.x + convergenceHalfSpan) - convergenceLeft) : 0
+  const convergenceInvHSpan = convergenceView
+    ? 1 / ((convergenceView.center.y + convergenceHalfSpan * (convergenceView.height / convergenceView.width)) - convergenceTop) : 0
   const invWSpan = 1 / (right - left)
   const invHSpan = 1 / (bottom - top)
   const chunkW_local = chunkW
@@ -515,6 +528,8 @@ async function runSampling(opts) {
     // convergence state begin
     let newestPixel = -1
     let secondPixel = -1
+    let newestPixelY = 0
+    let secondPixelY = 0
     let newestAt = -1
     let secondAt = -1
     let thirdAt = -1
@@ -543,6 +558,7 @@ async function runSampling(opts) {
       const px = Math.floor(fx * width_local)
       const py = Math.floor(fy * height_local)
 
+      let currentPixelY = 0
       let currentPixelIdx = -1 // 収束判定用に現在のピクセルを追跡
 
       if (px >= 0 && px < chunkW_local && py >= 0 && py < chunkH_local) {
@@ -573,17 +589,28 @@ async function runSampling(opts) {
         }
       }
 
-      // Offscreen points advance the window without counting as a pixel ID.
+      if (convergenceView && trajLen > 200) {
+        const cx = Math.floor((displayRe - convergenceLeft) * convergenceInvWSpan * convergenceView.width)
+        const cy = Math.floor((displayIm - convergenceTop) * convergenceInvHSpan * convergenceView.height)
+        // Keep the grid unbounded: points outside the original viewport are
+        // still distinct orbit positions and may carry later palette bands.
+        currentPixelIdx = cx
+        currentPixelY = cy
+      }
+
+      // All views track the unbounded grid, including offscreen orbit positions.
       // convergence update begin
       if (trajLen > 200) {
-        if (currentPixelIdx >= 0) {
-          if (currentPixelIdx === newestPixel) {
+        if (currentPixelIdx >= 0 || convergenceView) {
+          if (currentPixelIdx === newestPixel && currentPixelY === newestPixelY) {
             newestAt = k
           } else {
-            if (currentPixelIdx !== secondPixel) thirdAt = secondAt
+            if (currentPixelIdx !== secondPixel || currentPixelY !== secondPixelY) thirdAt = secondAt
             secondPixel = newestPixel
+            secondPixelY = newestPixelY
             secondAt = newestAt
             newestPixel = currentPixelIdx
+            newestPixelY = currentPixelY
             newestAt = k
           }
         }
