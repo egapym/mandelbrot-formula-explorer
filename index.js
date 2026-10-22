@@ -545,6 +545,7 @@ const DOM = {
     gpu: document.getElementById('buddha-gpu'),
     continuous: document.getElementById('buddha-continuous'),
     fixedSamples: document.getElementById('buddha-fixed-samples'),
+    regenerateSeed: document.getElementById('buddha-regenerate-seed'),
     brightness: document.getElementById('buddha-brightness'),
     gamma: document.getElementById('buddha-gamma'),
     renderSpeed: document.getElementById('buddha-draw-speed'),
@@ -3769,6 +3770,12 @@ function updateBuddhaContinuousSamples(total, force = false) {
   DOM.buddha.iterations.value = String(buddhaContinuousSampleCount)
 }
 
+function syncBuddhaFixedSamplesUi() {
+  if (DOM.buddha.regenerateSeed) {
+    DOM.buddha.regenerateSeed.disabled = !DOM.buddha.fixedSamples?.checked || !!DOM.buddha.continuous?.checked
+  }
+}
+
 function syncBuddhaContinuousModeUi() {
   const input = DOM.buddha.iterations
   const enabled = !!DOM.buddha.continuous?.checked
@@ -3779,6 +3786,7 @@ function syncBuddhaContinuousModeUi() {
     }
     DOM.buddha.fixedSamples.disabled = enabled
   }
+  syncBuddhaFixedSamplesUi()
   if (enabled && !input.readOnly) {
     buddhaFiniteSampleValue = input.value
     updateBuddhaContinuousSamples(0, true)
@@ -9692,6 +9700,7 @@ function initListeners() {
   })
 
   DOM.buddha.fixedSamples?.addEventListener('change', () => {
+    syncBuddhaFixedSamplesUi()
     fixedBuddhaSamples.clear()
     if (DOM.buddha.fixedSamples.checked && lastBuddhaRenderParams && BuddhabrotState.targetKind) {
       fixedBuddhaSamples.apply(lastBuddhaRenderParams, BuddhabrotState.targetKind)
@@ -9716,8 +9725,15 @@ function initListeners() {
 
   DOM.buddha.samplingRange?.addEventListener('change', () => {
     if (DOM.buddha.fixedSamples) DOM.buddha.fixedSamples.checked = false
+    syncBuddhaFixedSamplesUi()
     fixedBuddhaSamples.clear()
     redrawBuddhaForRenderSettingChange()
+  })
+
+  DOM.buddha.regenerateSeed?.addEventListener('click', () => {
+    if (!DOM.buddha.fixedSamples?.checked || DOM.buddha.continuous?.checked) return
+    fixedBuddhaSamples.reseed(getBuddhabrotTargetSnapshot().kind)
+    redrawBuddhaForExecutionSettingChange()
   })
 
   // Buddhabrot 実行ボタン
@@ -9726,9 +9742,6 @@ function initListeners() {
     if (buddhaBtn) {
       buddhaBtn.addEventListener('click', async () => {
         try {
-          if (DOM.buddha.fixedSamples?.checked && !DOM.buddha.continuous?.checked) {
-            fixedBuddhaSamples.reseed(getBuddhabrotTargetSnapshot().kind)
-          }
           await startBuddhaRender()
         } catch (e) {
           buddhaRenderPending = false
@@ -10218,6 +10231,7 @@ function applySettingsControls(controls) {
 function reset() {
   fixedBuddhaSamples.clear()
   if (DOM.buddha.fixedSamples) DOM.buddha.fixedSamples.checked = false
+  syncBuddhaFixedSamplesUi()
   applyingSettings = true
   try {
     invalidateAnimation()

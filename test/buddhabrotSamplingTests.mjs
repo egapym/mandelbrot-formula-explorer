@@ -43,6 +43,7 @@ const source = readFileSync(new URL('../index.js', import.meta.url), 'utf8')
 const context = {
   DOM: { buddha: {
     iterations: { value: '1000', readOnly: false },
+    regenerateSeed: { disabled: false },
     continuous: { checked: true }, fixedSamples: { checked: true, disabled: false },
   } },
   performance: { now: () => 0 }, fixedBuddhaSamples: fixed,
@@ -54,10 +55,14 @@ context.syncBuddhaContinuousModeUi()
 assert.equal(context.DOM.buddha.fixedSamples.checked, false)
 assert.equal(context.DOM.buddha.fixedSamples.disabled, true)
 assert.equal(fixed.views.size, 0)
+assert.equal(context.DOM.buddha.regenerateSeed.disabled, true)
 context.DOM.buddha.continuous.checked = false
 context.syncBuddhaContinuousModeUi()
 assert.equal(context.DOM.buddha.fixedSamples.disabled, false)
 assert.equal(context.DOM.buddha.fixedSamples.checked, false, 'Disabling Continuous must not restore the old lock')
+context.DOM.buddha.fixedSamples.checked = true
+context.syncBuddhaFixedSamplesUi()
+assert.equal(context.DOM.buddha.regenerateSeed.disabled, false)
 console.log('PASS: fixed sample ranges, deterministic streams, independent targets, reset and Continuous exclusion')
 
 // Sampling Range must release both targets before requesting a render, even when hidden.
@@ -72,6 +77,7 @@ const rangeContext = {
     } },
   } },
   fixedBuddhaSamples: fixed,
+  syncBuddhaFixedSamplesUi() {},
   redrawBuddhaForRenderSettingChange() {
     assert.equal(rangeContext.DOM.buddha.fixedSamples.checked, false)
     assert.equal(fixed.views.size, 0, 'Both main and Julia locks must clear before redraw')
@@ -88,3 +94,46 @@ assert.equal(rangeRedraws, 1)
 assert.deepEqual(fixed.apply({ ...first, zoom: 5 }, 'main').samplingZoom, 5,
   'A later lock must adopt the newly selected range')
 console.log('PASS: Sampling Range releases Fixed Samples and clears both target ranges before redraw')
+
+// Render replays the locked seed; only the explicit seed button changes it.
+const callbacks = {}
+const renderFixed = new FixedBuddhabrotSamples(() => seeds++)
+const locked = renderFixed.apply(first, 'main')
+const otherTarget = renderFixed.apply(first, 'julia')
+let rendered
+let redraws = 0
+const buttonContext = {
+  DOM: { buddha: {
+    fixedSamples: { checked: true }, continuous: { checked: false },
+    regenerateSeed: { addEventListener(event, callback) { callbacks.reseed = callback } },
+  } },
+  document: { getElementById() {
+    return { addEventListener(event, callback) { callbacks.render = callback } }
+  } },
+  fixedBuddhaSamples: renderFixed,
+  getBuddhabrotTargetSnapshot: () => ({ kind: 'main' }),
+  async startBuddhaRender() { rendered = renderFixed.apply(first, 'main') },
+  redrawBuddhaForExecutionSettingChange() { redraws++ },
+  console,
+}
+const buttonStart = source.indexOf("  DOM.buddha.regenerateSeed?.addEventListener('click'")
+runInNewContext(source.slice(buttonStart, source.indexOf('// Buddhabrot 停止ボタン', buttonStart)), buttonContext)
+await callbacks.render()
+await callbacks.render()
+assert.equal(rendered.sampleSeed, locked.sampleSeed, 'Repeated Render must keep the locked seed')
+callbacks.reseed()
+assert.equal(redraws, 1, 'Explicit reseeding requests a visible-view refresh')
+await callbacks.render()
+assert.notEqual(rendered.sampleSeed, locked.sampleSeed)
+assert.deepEqual(rendered.samplingCenter, locked.samplingCenter)
+assert.equal(renderFixed.apply(first, 'julia').sampleSeed, otherTarget.sampleSeed)
+const newSeed = rendered.sampleSeed
+await callbacks.render()
+assert.equal(rendered.sampleSeed, newSeed, 'Render must keep the manually regenerated seed')
+buttonContext.DOM.buddha.continuous.checked = true
+callbacks.reseed()
+buttonContext.DOM.buddha.continuous.checked = false
+buttonContext.DOM.buddha.fixedSamples.checked = false
+callbacks.reseed()
+assert.equal(redraws, 1, 'Reseeding requires Fixed Samples ON and Continuous OFF')
+console.log('PASS: Render retains locked seeds; explicit reseeding preserves range and the other target')

@@ -598,24 +598,6 @@
                       </div>
                     </div>
                     <div>
-                      <label for="buddha-continuous" class="col-form-label py-0 d-block">Continuous</label>
-                      <div class="d-flex align-items-center py-1">
-                        <div class="form-check form-switch m-0">
-                          <input id="buddha-continuous" class="form-check-input" type="checkbox" role="switch"
-                            title="Apply to the next render: accumulate samples until Stop; Samples shows the computed total" />
-                        </div>
-                      </div>
-                    </div>
-                    <div>
-                      <label for="buddha-fixed-samples" class="col-form-label py-0 d-block">Fixed Samples</label>
-                      <div class="d-flex align-items-center py-1">
-                        <div class="form-check form-switch m-0">
-                          <input id="buddha-fixed-samples" class="form-check-input" type="checkbox" role="switch"
-                            title="Available with Continuous OFF: lock the previous render's sampled coordinates while panning or zooming. Render Buddhabrot chooses a new seed." />
-                        </div>
-                      </div>
-                    </div>
-                    <div>
                       <label for="buddha-toggle" class="col-form-label py-0 d-block">View</label>
                       <div class="d-flex align-items-center py-1">
                         <div class="form-check form-switch m-0">
@@ -627,6 +609,15 @@
                             disabled
                             title="Show or hide the Buddhabrot overlay (enabled after rendering)"
                           />
+                        </div>
+                      </div>
+                    </div>
+                    <div>
+                      <label for="buddha-continuous" class="col-form-label py-0 d-block">Continuous</label>
+                      <div class="d-flex align-items-center py-1">
+                        <div class="form-check form-switch m-0">
+                          <input id="buddha-continuous" class="form-check-input" type="checkbox" role="switch"
+                            title="Apply to the next render: accumulate samples until Stop; Samples shows the computed total" />
                         </div>
                       </div>
                     </div>
@@ -686,15 +677,32 @@
                   </div>
                 </div>
                 <div class="col col-sm-6">
-                  <label for="buddha-sampling-range" class="col-form-label py-0 d-block">Sampling Range</label>
-                  <select
-                    id="buddha-sampling-range"
-                    class="form-select form-select-sm py-0"
-                    title="Choose the range used to generate random coordinates. Orbits are drawn in the current view. Changes redraw immediately while Buddhabrot is shown."
-                  >
-                    <option value="current" selected>Current View</option>
-                    <option value="initial">Initial View</option>
-                  </select>
+                  <div class="d-flex align-items-start gap-3">
+                    <div style="flex: 1">
+                      <label for="buddha-sampling-range" class="col-form-label py-0 d-block">Sampling Range</label>
+                      <select
+                        id="buddha-sampling-range"
+                        class="form-select form-select-sm py-0"
+                        title="Choose the range used to generate random coordinates. Orbits are drawn in the current view. Changes redraw immediately while Buddhabrot is shown."
+                      >
+                        <option value="current" selected>Current View</option>
+                        <option value="initial">Initial View</option>
+                      </select>
+                    </div>
+                    <div style="flex: 1">
+                      <label for="buddha-fixed-samples" class="col-form-label py-0 d-block">Fixed Samples</label>
+                      <div class="d-flex align-items-center gap-2 py-1">
+                        <div class="form-check form-switch m-0">
+                          <input id="buddha-fixed-samples" class="form-check-input" type="checkbox" role="switch"
+                            title="Available with Continuous OFF: lock the previous render's sampled coordinates while panning or zooming. Render Buddhabrot reuses the seed. Use Regenerate seed to choose a new one." />
+                        </div>
+                        <button type="button" id="buddha-regenerate-seed"
+                          class="btn btn-sm btn-outline-secondary rounded-pill py-0"
+                          title="Regenerate seed: choose a new sample sequence and redraw while Buddhabrot is shown"
+                          aria-label="Regenerate seed" disabled>↻</button>
+                      </div>
+                    </div>
+                  </div>
                 </div>
               </div>
               <div class="mb-2 row">

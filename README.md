@@ -87,7 +87,7 @@ At very high resolutions, switching can happen at different zoom levels to reduc
 - Buddhabrot view toggle
 - Always-on Realtime Navigation: drag, wheel/trackpad zoom, or two-finger pinch on a rendered main or Julia Buddhabrot
 - Continuous toggle: accumulate samples until Stop (CPU updates live; GPU display updates every second)
-- Fixed Samples toggle: lock the previous render’s sample sequence and sampling range across pan/zoom (separate main/Julia sequences); Render Buddhabrot chooses a new seed
+- Fixed Samples toggle: lock the previous render’s sample sequence and sampling range across pan/zoom (separate main/Julia sequences); Render Buddhabrot reuses the seed; Regenerate seed chooses a new one
 - Sample count input (computed sample total in Continuous mode)
 - Sampling range selector: Current View (default) or Initial View; initial sampling uses the selected preset's reset position/zoom while orbit hits map to the current view, on both CPU and GPU
 - Buddhabrot GPU toggle
@@ -125,8 +125,9 @@ map and reset the current render's count. Reset All Settings turns Continuous of
 
 **Fixed Samples** retains the immediately preceding render’s random seed and
 sampling range when enabled (or initializes them on the first render if none
-exists). Pressing **Render Buddhabrot** while locked chooses a new seed but keeps
-the saved sampling range. Pan and zoom change only the display projection. Convergence checks retain the
+exists). Pressing **Render Buddhabrot** while locked reuses the saved seed and sampling
+range. The **Regenerate seed** button to the right of Fixed Samples chooses a new
+seed while keeping the saved sampling range, and redraws if Buddhabrot is shown. Pan and zoom change only the display projection. Convergence checks retain the
 original display grid without clipping to its viewport. Unlocked rendering uses
 the same unbounded convergence algorithm, so enabling the lock preserves the
 existing orbit points as well as the seed. Offscreen positions
