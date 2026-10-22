@@ -1,5 +1,7 @@
 // Exercise the real toggle and GPU callbacks, including the synchronous frame
 // that used to repaint ordinary offscreens from before Buddhabrot navigation.
+import { decodeSettings, encodeSettings } from '../settingsState.mjs'
+
 const result = document.getElementById('result')
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 async function waitFor(check, message) {
@@ -14,6 +16,13 @@ function toggle(doc, id, checked) {
   input.checked = checked
   input.dispatchEvent(new doc.defaultView.Event('change', { bubbles: true }))
 }
+function hasColoredPixels(canvas) {
+  const pixels = canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height).data
+  for (let i = 0; i < pixels.length; i += 4) {
+    if (pixels[i + 3] && (pixels[i] !== pixels[i + 1] || pixels[i + 1] !== pixels[i + 2])) return true
+  }
+  return false
+}
 try {
   const passed = []
   const params = new URLSearchParams(location.search)
@@ -21,7 +30,7 @@ try {
   const gpuModes = [params.get('gpu') !== 'false']
   for (const gpu of gpuModes) {
     const frame = document.createElement('iframe')
-    frame.style.cssText = 'width:1000px;height:800px;border:0;display:block'
+    frame.style.cssText = `width:${params.get('width') || 1000}px;height:800px;border:0;display:block`
     frame.src = '../index.html'
     const loaded = new Promise((resolve) => frame.addEventListener('load', resolve, { once: true }))
     document.body.append(frame)
@@ -35,6 +44,39 @@ try {
     doc.getElementById('buddha-iterations').value = '8192'
     await delay(500)
     if (gpu && !await win.navigator.gpu?.requestAdapter()) throw new Error('GPU adapter unavailable')
+    // A fresh permalink starts Buddhabrot before ordinary worker/GPU jobs
+    // finish. View OFF must render the fractal instead of restoring that
+    // unfinished (possibly entirely transparent) initial canvas.
+    const settings = decodeSettings(new URL(win.location.href).searchParams.get('params'))
+    for (const julia of [false, true]) {
+      const linkedFrame = document.createElement('iframe')
+      linkedFrame.style.cssText = frame.style.cssText
+      const url = new URL('../index.html', location.href)
+      url.searchParams.set('params', encodeSettings({
+        ...settings,
+        buddhaView: true,
+        controls: { ...settings.controls, 'julia-toggle': julia },
+      }))
+      linkedFrame.src = url.href
+      const linkedLoaded = new Promise((resolve) => linkedFrame.addEventListener('load', resolve, { once: true }))
+      document.body.append(linkedFrame)
+      await linkedLoaded
+      const linkedDoc = linkedFrame.contentDocument
+      const view = linkedDoc.getElementById('buddha-toggle')
+      const targetCanvas = linkedDoc.getElementById(julia ? 'julia-canvas' : 'mandelbrot-canvas')
+      await waitFor(() => view.checked && !view.disabled, 'Permalink Buddhabrot did not complete')
+      for (let cycle = 0; cycle < 2; cycle++) {
+        toggle(linkedDoc, 'buddha-toggle', false)
+        await waitFor(() => !view.checked && hasColoredPixels(targetCanvas), `Permalink View OFF left ${julia ? 'Julia' : 'main'} canvas blank`)
+        if (cycle === 0) {
+          toggle(linkedDoc, 'buddha-toggle', true)
+          await waitFor(() => view.checked && hasColoredPixels(targetCanvas), 'View ON did not restore Buddhabrot')
+        }
+      }
+      passed.push(`PASS: GPU ${gpu ? 'ON' : 'OFF'}, ${julia ? 'Julia' : 'main'} permalink: View OFF restores colored fractal`)
+      result.textContent = passed.join('\n')
+      linkedFrame.remove()
+    }
     let draws = 0
     let cachedDraws = 0
     const prototype = win.CanvasRenderingContext2D.prototype

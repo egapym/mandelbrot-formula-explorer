@@ -3850,7 +3850,7 @@ function redrawBuddhaForExecutionSettingChange() {
  * @async
  * @throws {Error} 描画を開始できない場合
  */
-async function startBuddhaRender({ preserveSourceRender = false } = {}) {
+async function startBuddhaRender({ preserveSourceRender = false, captureFractalImage = true } = {}) {
   cancelRealtimeBuddhaDrag()
   const target = getBuddhabrotTargetSnapshot()
   buddhaRenderSettingsSignature = getBuddhaRenderSettingsSignature()
@@ -3957,7 +3957,7 @@ async function startBuddhaRender({ preserveSourceRender = false } = {}) {
   // 開始前に対象キャンバス上の描画を整理する
   const ctx = targetCanvas.getContext('2d')
   // 後で戻せるよう、通常フラクタル側の画像を必要時だけ保存する
-  if (!wasBuddhaActive) {
+  if (!wasBuddhaActive && captureFractalImage) {
     try {
       const currentState = FractalStateHelpers.getCurrentState(target.kind)
 
@@ -10662,7 +10662,9 @@ async function init() {
   fractal.useGpu = DOM.gpuToggle.checked
   fractal.supersampling = Number(DOM.supersamplingToggle.value)
   await redraw()
-  if (restoredParams?.buddhaView) await startBuddhaRender()
+  // redraw() queues worker/GPU jobs; it does not wait for their pixels.
+  // Do not cache the unfinished initial canvas as the View OFF image.
+  if (restoredParams?.buddhaView) await startBuddhaRender({ captureFractalImage: false })
 }
 
 function initFromParams(params) {
