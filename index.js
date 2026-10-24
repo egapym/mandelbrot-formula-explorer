@@ -3965,7 +3965,9 @@ async function startBuddhaRender({ preserveSourceRender = false, captureFractalI
   // Buddhabrot 専用パレットがあればそのまま渡し、なければ通常パレットから組み立てる
   // GPU と CPU で同じ累積バンド値になるよう、正規化済み stops は常に作る
   const rawPal = buildPaletteFromId(palId)
-  const pal = Array.isArray(rawPal) ? { bands: rawPal } : rawPal
+  const pal = Array.isArray(rawPal)
+    ? { bands: rawPal, gradient: getBuddhaPalette(palId)?.gradient === true }
+    : rawPal
 
   const brightness = parseFloat(document.getElementById('buddha-brightness')?.value) || BUDDHA_DEFAULT_BRIGHTNESS
   const gamma = parseFloat(document.getElementById('buddha-gamma')?.value) || BUDDHA_DEFAULT_GAMMA

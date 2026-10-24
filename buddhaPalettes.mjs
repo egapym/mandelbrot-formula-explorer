@@ -7,11 +7,14 @@
 /**
  * 定義済みの Buddhabrot カラーパレット。
  * 各パレットは色と比率を持つ band の配列で表す。
+ * gradient: true で各 band の ratio 区間をその色から次の色へ RGB 線形補間する。
+ * 最後の band は最後の色を維持する。false または省略時は従来の段階色。
  */
 export const BUDDHA_PALETTES = [
   {
     id: 'Preset-01',
     name: 'Preset-01',
+    gradient: true,
     bands: [
       { color: [0, 67, 112], ratio: 0.04 },
       { color: [0, 179, 167], ratio: 0.04 },
@@ -22,6 +25,7 @@ export const BUDDHA_PALETTES = [
   {
     id: 'Preset-02',
     name: 'Preset-02',
+    gradient: true,
     bands: [
       { color: [255, 255, 255], ratio: 0.02 },
       { color: [255, 200, 0], ratio: 0.18 },
@@ -31,6 +35,7 @@ export const BUDDHA_PALETTES = [
   {
     id: 'Preset-03',
     name: 'Preset-03',
+    gradient: true,
     bands: [
       { color: [0, 0, 0], ratio: 0.01 },
       { color: [255, 255, 255], ratio: 0.19 },
@@ -40,6 +45,7 @@ export const BUDDHA_PALETTES = [
   {
     id: 'Preset-04',
     name: 'Preset-04',
+    gradient: true,
     bands: [
       { color: [0, 0, 0], ratio: 0.05 },
       { color: [0, 255, 0], ratio: 0.65 },
@@ -49,11 +55,12 @@ export const BUDDHA_PALETTES = [
   {
     id: 'Preset-05',
     name: 'Preset-05',
+    gradient: true,
     bands: [
-      { color: [0, 0, 0], ratio: 0.05 },
-      { color: [0, 179, 167], ratio: 0.3 },
-      { color: [204, 197, 0], ratio: 0.3 },
-      { color: [230, 20, 10], ratio: 0.35 },
+      { color: [0, 67, 112], ratio: 0.25 },
+      { color: [0, 179, 167], ratio: 0.25 },
+      { color: [204, 197, 0], ratio: 0.25 },
+      { color: [230, 20, 10], ratio: 0.25 },
     ],
   },
 ]

@@ -63,6 +63,7 @@ export class BuddhabrotWebGPU {
         color: b.color ? b.color.slice(0, 3).map((c) => c / 255) : [0, 0, 0],
         // cum は number のときだけ採用する。0 などの偽値を安易に有効扱いしない
         cum: typeof b.cum === 'number' ? b.cum : null,
+        ratio: typeof b.ratio === 'number' ? b.ratio : null,
       }))
     }
     // band が無ければ既定の 3 band に戻す
@@ -329,6 +330,21 @@ struct Uniforms {
 @group(0) @binding(4) var<uniform> bands: array<Band, MAX_BANDS>;
 @group(0) @binding(5) var<uniform> bandContribs: array<vec4<u32>, MAX_BANDS>;
 
+${params.palette?.gradient === true ? `
+fn gradientContribution(bi: u32, frac: f32) -> vec4<u32> {
+  if (all(bands[bi].color.rgb == vec3<f32>(0.0))) { return vec4<u32>(0u); }
+  var start = 0.0;
+  if (bi > 0u) { start = bands[bi - 1u].color.a; }
+  let end = bands[bi].color.a;
+  var t = 0.0;
+  if (end > start) { t = clamp((frac - start) / (end - start), 0.0, 1.0); }
+  let next = min(bi + 1u, u.bandCount - 1u);
+  if (next == bi) { return bandContribs[bi]; }
+  let color = mix(bands[bi].color.rgb, bands[next].color.rgb, t);
+  return vec4<u32>(vec3<u32>(floor(color * f32(u.contrib) + vec3<f32>(0.5))), 0u);
+}
+` : ''}
+
 ${CUSTOM_FUNCTION_WGSL_HELPERS}
 
 // 注入したカスタムカーネルだけで完結するよう、
@@ -401,6 +417,7 @@ ${escapePass('iterationLimit')}
 ${historyReset}
     // bandMode == 1（perTrajectory）なら軌道全体で使う band を先に決める
     var trajBandIdx: u32 = 0u;
+    ${params.palette?.gradient === true ? 'var trajContrib = vec4<u32>(0u);' : ''}
     if (u.bandMode == 1u) {
       var denom_t: u32 = 1u;
       if (iter > 1u) { denom_t = iter - 1u; }
@@ -409,6 +426,7 @@ ${historyReset}
       while (bi_t < u.bandCount && fracTraj >= bands[bi_t].color.a) { bi_t = bi_t + 1u; }
       trajBandIdx = bi_t;
       if (trajBandIdx >= u.bandCount) { trajBandIdx = u.bandCount - 1u; }
+      ${params.palette?.gradient === true ? 'trajContrib = gradientContribution(trajBandIdx, fracTraj);' : ''}
     }
     if (u.isJulia != 0u && dot(sample, sample) <= escapeRadiusSquared) {
       let pcoords0 = coordToIndex(sample.x, sample.y);
@@ -427,7 +445,10 @@ ${historyReset}
           bandIdx0 = bi0;
           if (bandIdx0 >= u.bandCount) { bandIdx0 = u.bandCount - 1u; }
         }
-        let contribVec0 = bandContribs[bandIdx0];
+        ${params.palette?.gradient === true ? `
+        var contribVec0 = trajContrib;
+        if (u.bandMode != 1u) { contribVec0 = gradientContribution(bandIdx0, 0.0); }
+        ` : 'let contribVec0 = bandContribs[bandIdx0];'}
         atomicAdd(&rAcc[idx0], contribVec0.x);
         atomicAdd(&gAcc[idx0], contribVec0.y);
         atomicAdd(&bAcc[idx0], contribVec0.z);
@@ -492,7 +513,10 @@ ${historyAfter('oi')}
           if (bandIdx >= u.bandCount) { bandIdx = u.bandCount - 1u; }
         }
         // あらかじめ計算した整数寄与量を bandContribs から読む
-        let contribVec = bandContribs[bandIdx];
+        ${params.palette?.gradient === true ? `
+        var contribVec = trajContrib;
+        if (u.bandMode != 1u) { contribVec = gradientContribution(bandIdx, frac); }
+        ` : 'let contribVec = bandContribs[bandIdx];'}
         atomicAdd(&rAcc[idx], contribVec.x);
         atomicAdd(&gAcc[idx], contribVec.y);
         atomicAdd(&bAcc[idx], contribVec.z);

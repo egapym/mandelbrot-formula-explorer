@@ -368,3 +368,29 @@ const acknowledged = await sample({ ...batchOptions, waitForPresentation: true }
 equalDensity(pointwise, acknowledged)
 assert.equal(staleAcks, acknowledged.chunks)
 console.log(`PASS: ${cases} density comparisons; concurrent trajectories advance one step per Delay, live resize, ACK and Stop`)
+
+// A known orbit visits fractions 0, 1/4, 1/2, 3/4. A gray-to-white
+// gradient over the first half contributes 0.4, 0.8, 1.2, 1.2 per channel.
+const gradientBands = [{ color: [85, 85, 85], ratio: 1 }, { color: [255, 255, 255], ratio: 1 }]
+for (const [buddhaBandMode, iterationFunction, mode, expected] of [
+  ['perPoint', 'z+0.25', 'antibuddha', 3.6],
+  ['perTrajectory', 'z+2', 'buddha', 0.8],
+]) {
+  const options = { samples: 1, maxIter: 4, z0Real: 0, escapeRadius: 3, zoom: 0.5,
+    iterationFunction, mode, buddhaBandMode, paletteStops: { bands: gradientBands, gradient: true } }
+  const rendered = await sample(options)
+  for (const density of rendered.density) {
+    const total = density.reduce((a, b) => a + b, 0)
+    assert.ok(Math.abs(total - expected) < 1e-6, `${buddhaBandMode}: expected ${expected}, got ${total}`)
+  }
+  const omitted = await sample({ ...options, paletteStops: { bands: gradientBands } })
+  const disabled = await sample({ ...options, paletteStops: { bands: gradientBands, gradient: false } })
+  equalDensity(omitted, disabled, true)
+  assert.notDeepEqual(rendered.density, disabled.density, 'Gradient did not change band colors')
+  const blackBands = [{ color: [0, 0, 0], ratio: 1 }, gradientBands[1]]
+  const blackOptions = { ...options, paletteStops: { bands: blackBands, gradient: true } }
+  const blackGradient = await sample(blackOptions)
+  const blackStepped = await sample({ ...blackOptions, paletteStops: { bands: blackBands, gradient: false } })
+  equalDensity(blackStepped, blackGradient, true)
+}
+console.log('PASS: gradient midpoints, endpoints, final band, both band modes and disabled compatibility')

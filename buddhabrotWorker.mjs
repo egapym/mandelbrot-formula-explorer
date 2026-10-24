@@ -438,6 +438,19 @@ async function runSampling(opts) {
   }
 
   const useBands = bandsLen > 0
+  const gradient = paletteStops?.gradient === true
+  // Each band starts at its configured color and blends to the next color.
+  // Keep the final color constant, and skip zero-width bands via band selection.
+  const gradientColor = (bi, frac, channel) => {
+    const offset = bi * 3
+    if (bandColors[offset] === 0 && bandColors[offset + 1] === 0 && bandColors[offset + 2] === 0) return 0
+    const start = bi === 0 ? 0 : bandCums[bi - 1]
+    const end = bandCums[bi]
+    const next = Math.min(bi + 1, bandsLen - 1)
+    const t = end > start ? Math.max(0, Math.min(1, (frac - start) / (end - start))) : 0
+    const color = bandColors[bi * 3 + channel]
+    return (color + (bandColors[next * 3 + channel] - color) * t) * 1.2
+  }
   const perTrajectory = buddhaBandMode === 'perTrajectory'
   const iterationDenominator = Math.max(1, maxIter)
   const band1 = Math.max(1, Math.floor(maxIter * 0.01))
@@ -520,6 +533,12 @@ async function runSampling(opts) {
       colorR = (bandColors[offset] || 0) * 1.2
       colorG = (bandColors[offset + 1] || 0) * 1.2
       colorB = (bandColors[offset + 2] || 0) * 1.2
+      if (gradient) {
+        const band = Math.min(bi, bandsLen - 1)
+        colorR = gradientColor(band, fracTraj, 0)
+        colorG = gradientColor(band, fracTraj, 1)
+        colorB = gradientColor(band, fracTraj, 2)
+      }
     }
 
     // Track the last occurrences of the three most recent distinct pixels.
@@ -573,6 +592,12 @@ async function runSampling(opts) {
             colorR = bandColors[offset] * 1.2
             colorG = bandColors[offset + 1] * 1.2
             colorB = bandColors[offset + 2] * 1.2
+            if (gradient) {
+              const band = Math.min(pointBand, bandsLen - 1)
+              colorR = gradientColor(band, frac, 0)
+              colorG = gradientColor(band, frac, 1)
+              colorB = gradientColor(band, frac, 2)
+            }
           }
         } else {
           colorR = k < band1 ? 1.2 : 0
