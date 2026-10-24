@@ -953,6 +953,15 @@ footer {
     padding-inline: 0.58rem;
     font-size: 0.68rem;
   }
+
+  /* Keep paired selects and slider value rows stable when labels wrap. */
+  #buddhabrot-controls .buddha-select-label {
+    min-height: 3rem;
+  }
+
+  #buddhabrot-controls .buddha-value {
+    display: block;
+  }
 }
 
 @media (max-width: 1411px) {

@@ -582,7 +582,7 @@
             <div id="buddhabrot-controls" class="mb-2 g-1">
               <div class="mb-2 row">
                 <div class="col col-sm-6">
-                  <div class="d-flex align-items-start flex-wrap gap-3">
+                  <div class="d-flex align-items-start flex-wrap column-gap-3 row-gap-1">
                     <div>
                       <label for="buddha-gpu" class="col-form-label py-0 d-block">Buddhabrot GPU</label>
                       <div class="d-flex align-items-center py-1">
@@ -653,7 +653,7 @@
                 <div class="col col-sm-6">
                   <div class="d-flex align-items-start gap-3">
                     <div style="flex: 1">
-                      <label for="buddhaMode" class="col-form-label py-0 d-block">Buddhabrot Mode</label>
+                      <label for="buddhaMode" class="buddha-select-label col-form-label py-0 d-block">Buddhabrot Mode</label>
                       <select
                         id="buddhaMode"
                         class="form-select form-select-sm py-0"
@@ -664,7 +664,7 @@
                       </select>
                     </div>
                     <div style="flex: 1">
-                      <label for="buddha-bandmode" class="col-form-label py-0 d-block">Band Mode</label>
+                      <label for="buddha-bandmode" class="buddha-select-label col-form-label py-0 d-block">Band Mode</label>
                       <select
                         id="buddha-bandmode"
                         class="form-select form-select-sm py-0"
@@ -708,7 +708,7 @@
               <div class="mb-2 row">
                 <div class="col col-sm-6">
                   <div class="d-flex align-items-center">
-                    <label for="buddha-brightness" class="col-form-label py-0">Buddhabrot Brightness: <span id="buddha-brightness-value">1.0</span></label>
+                    <label for="buddha-brightness" class="col-form-label py-0">Buddhabrot Brightness: <span id="buddha-brightness-value" class="buddha-value">1.0</span></label>
                     <button
                       type="button"
                       id="reset-buddha-brightness"
@@ -731,7 +731,7 @@
                 </div>
                 <div class="col col-sm-6">
                   <div class="d-flex align-items-center">
-                    <label for="buddha-gamma" class="col-form-label py-0">Buddhabrot Gamma: <span id="buddha-gamma-value">1.5</span></label>
+                    <label for="buddha-gamma" class="col-form-label py-0">Buddhabrot Gamma: <span id="buddha-gamma-value" class="buddha-value">1.5</span></label>
                     <button
                       type="button"
                       id="reset-buddha-gamma"
@@ -757,7 +757,7 @@
                 <div class="col-6">
                   <div class="d-flex align-items-center">
                     <label for="buddha-point-batch-size" class="col-form-label py-0"
-                      >Points per Batch (CPU): <span id="buddha-point-batch-size-value">64</span></label
+                      >Points per Batch (CPU): <span id="buddha-point-batch-size-value" class="buddha-value">64</span></label
                     >
                     <button
                       type="button"
@@ -782,7 +782,7 @@
                 <div class="col-6">
                   <div class="d-flex align-items-center">
                     <label for="buddha-draw-speed" class="col-form-label py-0"
-                      >Render Slowdown (CPU): <span id="buddha-draw-speed-value">0</span></label
+                      >Render Slowdown (CPU): <span id="buddha-draw-speed-value" class="buddha-value">0</span></label
                     >
                     <button
                       type="button"
