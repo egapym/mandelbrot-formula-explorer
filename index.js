@@ -353,7 +353,7 @@ const ANIMATION_CONSTANTS = {
 }
 
 const PROGRESS_INDICATOR_CONSTANTS = {
-  MIN_HIDDEN_INTERVAL_MS: 300,
+  MIN_HIDDEN_INTERVAL_MS: 500,
   UPDATE_INTERVAL_MS: 100,
 }
 
@@ -999,6 +999,11 @@ class Mandelbrot {
     }
   }
 
+  get renderSupersampling() {
+    // Keep the selected quality for Julia and restore it on the main view after Julia OFF.
+    return juliaState.active ? 0 : this.supersampling
+  }
+
   // キャンバスサイズ変更時に offscreen バッファと精度関連状態を更新する
   resized() {
     try {
@@ -1175,7 +1180,7 @@ class Mandelbrot {
       // z0 入力を先に読み、全 CPU タスクで使うハッシュへ反映する
       const z0Real = document.getElementById('z0-real') ? parseFloat(document.getElementById('z0-real').value) || 0 : 0
       const z0Imag = document.getElementById('z0-imag') ? parseFloat(document.getElementById('z0-imag').value) || 0 : 0
-      const paramHash = `${this.max_iter}-${this.smooth}-${this.supersampling}-${this.fractalType}-${this.iterationFunction}-${this.escapeRadius}-${z0Real}-${z0Imag}`
+      const paramHash = `${this.max_iter}-${this.smooth}-${this.renderSupersampling}-${this.fractalType}-${this.iterationFunction}-${this.escapeRadius}-${z0Real}-${z0Imag}`
 
       const frameTopLeft = this.canvas2complex(0, 0)
       // 幅や高さがピクセルサイズで割り切れない場合に備えて切り上げる
@@ -1214,10 +1219,10 @@ class Mandelbrot {
             // ただし最終段で supersampling が有効な場合や特殊パレットでは無効にする。
             skipTopLeft:
               this.jobLevel > 0 &&
-              !(screen.scale === 1 && this.supersampling > 0) &&
+              !(screen.scale === 1 && this.renderSupersampling > 0) &&
               this.paletteComponent.palette.supportsSmooth !== false,
             smooth: this.smooth,
-            supersampling: screen.scale === 1 ? this.supersampling : 0, // Only on final pass
+            supersampling: screen.scale === 1 ? this.renderSupersampling : 0, // Only on final pass
             maxIter: this.max_iter,
             precision: this.precision,
             requiredPrecision: this.requiredPrecision,
@@ -1374,7 +1379,7 @@ class Mandelbrot {
     const z0Imag = document.getElementById('z0-imag') ? parseFloat(document.getElementById('z0-imag').value) || 0 : 0
     const trapSpec = this.paletteComponent?.palette?.trapSpec ?? null
     const colorPatternId = _orbitTrapColorPatternId(this.paletteComponent?.palette)
-    const paramHash = `${this.max_iter}-${this.smooth}-${this.supersampling}-${this.fractalType}-${this.iterationFunction}-${this.escapeRadius}-${z0Real}-${z0Imag}-${_trapSpecKey(trapSpec)}-${colorPatternId ?? ''}`
+    const paramHash = `${this.max_iter}-${this.smooth}-${this.renderSupersampling}-${this.fractalType}-${this.iterationFunction}-${this.escapeRadius}-${z0Real}-${z0Imag}-${_trapSpecKey(trapSpec)}-${colorPatternId ?? ''}`
 
     const task = {
       type: 'task',
@@ -1395,7 +1400,7 @@ class Mandelbrot {
       resetCaches,
       skipTopLeft: false,
       smooth: this.smooth,
-      supersampling: this.supersampling,
+      supersampling: this.renderSupersampling,
       maxIter: this.max_iter,
       precision: this.precision,
       requiredPrecision: this.requiredPrecision,
@@ -1424,7 +1429,7 @@ class Mandelbrot {
     const h = screen.buffer.height
 
     this.progress.start(w * h)
-    const paramHash = `${this.max_iter}-${this.smooth}-${this.supersampling}-${this.fractalType}-${this.iterationFunction}-${this.escapeRadius}`
+    const paramHash = `${this.max_iter}-${this.smooth}-${this.renderSupersampling}-${this.fractalType}-${this.iterationFunction}-${this.escapeRadius}`
     const frameTopLeft = this.canvas2complex(0, 0)
     // 幅や高さがピクセルサイズで割り切れない場合に備えて切り上げる
     const roundup = (value) => Math.ceil(value / screen.scale) * screen.scale
@@ -1449,7 +1454,7 @@ class Mandelbrot {
       resetCaches: resetCaches,
       skipTopLeft: false,
       smooth: this.smooth,
-      supersampling: this.supersampling,
+      supersampling: this.renderSupersampling,
       maxIter: this.max_iter,
       precision: this.precision,
       requiredPrecision: this.requiredPrecision,
@@ -1486,7 +1491,7 @@ class Mandelbrot {
     // z0 を UI から取得する
     const z0Real = document.getElementById('z0-real') ? parseFloat(document.getElementById('z0-real').value) || 0 : 0
     const z0Imag = document.getElementById('z0-imag') ? parseFloat(document.getElementById('z0-imag').value) || 0 : 0
-    const paramHash = `${this.max_iter}-${this.smooth}-${this.supersampling}-${this.fractalType}-${this.iterationFunction}-${this.escapeRadius}-${z0Real}-${z0Imag}`
+    const paramHash = `${this.max_iter}-${this.smooth}-${this.renderSupersampling}-${this.fractalType}-${this.iterationFunction}-${this.escapeRadius}-${z0Real}-${z0Imag}`
 
     const task = {
       type: 'task',
@@ -1507,7 +1512,7 @@ class Mandelbrot {
       resetCaches: resetCaches,
       skipTopLeft: false,
       smooth: this.smooth,
-      supersampling: this.supersampling,
+      supersampling: this.renderSupersampling,
       maxIter: this.max_iter,
       precision: this.precision,
       requiredPrecision: this.requiredPrecision,
@@ -8460,6 +8465,9 @@ function resizeToCanvasSize() {
           buddhaRunner.gamma,
         )
       } catch (_e) {}
+      // Julia Buddhabrot owns only the Julia canvas. Resizing the source canvas
+      // clears it too, so restart its ordinary render even while Buddhabrot is shown.
+      if (mainCanvasChanged) fractal.render()
       showZoomFactor()
       return mainCanvasChanged || juliaCanvasChanged
     }
@@ -8586,7 +8594,7 @@ function scheduleFullscreenBuddhabrotResizeRedraw() {
     fullscreenBuddhaResizeRedrawRafId = null
     requestAnimationFrame(() => {
       if (generation !== fullscreenBuddhaResizeRedrawGeneration || !isFullscreenActive()) return
-      startBuddhaRender({ captureFractalImage: false }).catch((e) => {
+      startBuddhaRender({ captureFractalImage: false, preserveSourceRender: juliaState.active }).catch((e) => {
         if (generation === fullscreenBuddhaResizeRedrawGeneration) {
           buddhaRenderPending = false
           console.warn('Could not redraw Buddhabrot after fullscreen canvas resize:', e?.message ? e.message : e)
@@ -8649,7 +8657,7 @@ function applyFullscreenState() {
         requestAnimationFrame(() => {
           if (restartGeneration !== fullscreenBuddhaRestartGeneration) return
           resizeToCanvasSize()
-          startBuddhaRender({ captureFractalImage: false }).catch((e) => {
+          startBuddhaRender({ captureFractalImage: false, preserveSourceRender: juliaState.active }).catch((e) => {
             if (restartGeneration === fullscreenBuddhaRestartGeneration) {
               buddhaRenderPending = false
               console.warn('Could not redraw Buddhabrot after fullscreen change:', e?.message ? e.message : e)
@@ -10207,7 +10215,10 @@ function initListeners() {
           }
           requestAnimationFrame(() => {
             resizeToCanvasSize()
-            if (stoppedBuddhabrotRendering) restoreOrRedrawFractalDisplayAfterClearingBuddha('main')
+            // Julia changes main-view quality even when the canvas size stays the same.
+            // Recompute rather than restoring the unsampled Julia source image.
+            if (fractal.supersampling > 0) redraw(true)
+            else if (stoppedBuddhabrotRendering) restoreOrRedrawFractalDisplayAfterClearingBuddha('main')
             // ミニマップ上で固定した通常軌道を、通常サイズの overlay バッファへ
             // 再描画する。小さいバッファを CSS 拡大した表示を残さない。
             _refreshActiveOrbitOverlays()
@@ -10734,7 +10745,10 @@ async function init() {
   await redraw()
   // redraw() queues worker/GPU jobs; it does not wait for their pixels.
   // Do not cache the unfinished initial canvas as the View OFF image.
-  if (restoredParams?.buddhaView) await startBuddhaRender({ captureFractalImage: false })
+  if (restoredParams?.buddhaView) {
+    // Julia Buddhabrot replaces only the Julia view. Let the queued source render finish.
+    await startBuddhaRender({ captureFractalImage: false, preserveSourceRender: juliaState.active })
+  }
 }
 
 function initFromParams(params) {

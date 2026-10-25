@@ -46,6 +46,72 @@ try {
         setToggle(doc, 'julia-toggle', true)
         await waitFor(() => hasRenderedPixels(doc, 'mandelbrot-canvas') && hasRenderedPixels(doc, 'julia-canvas'), 'Initial Julia render missing')
         await delay(750)
+        if (params.has('fullscreenOnly')) {
+          // Exercise the shared fullscreen layout handler without requiring a
+          // browser user gesture inside this automated iframe.
+          const main = doc.getElementById('main')
+          main.requestFullscreen = undefined
+          for (const buddhabrot of [false, true]) {
+            if (buddhabrot) {
+              doc.getElementById('buddha-iterations').value = '512'
+              doc.getElementById('buddha-render').click()
+              await waitFor(() => doc.getElementById('buddha-toggle').checked &&
+                !doc.getElementById('buddha-toggle').disabled, 'Julia Buddhabrot did not complete')
+            }
+            doc.getElementById('fullscreen').click()
+            await waitFor(() => main.classList.contains('fullscreen-fallback') &&
+              hasRenderedPixels(doc, 'mandelbrot-canvas'), 'Fullscreen source render missing')
+            await delay(250)
+            doc.getElementById('fullscreen').click()
+            await delay(250)
+            await waitFor(() => !main.classList.contains('fullscreen-fallback') &&
+              hasRenderedPixels(doc, 'mandelbrot-canvas'),
+            `Blank source canvas after leaving Julia fullscreen (Buddhabrot=${buddhabrot})`)
+            await waitFor(() => hasRenderedPixels(doc, 'julia-canvas'),
+              `Blank Julia canvas after leaving fullscreen (Buddhabrot=${buddhabrot})`)
+            if (buddhabrot && !doc.getElementById('buddha-toggle').checked) {
+              throw new Error('Fullscreen exit cleared Julia Buddhabrot')
+            }
+            passed.push(`PASS: ${width}px, GPU ${gpu ? 'ON (fallback allowed)' : 'OFF'}, fullscreen exit, ${buddhabrot ? 'Buddhabrot' : 'ordinary Julia'}`)
+          }
+          continue
+        }
+        if (!gpu) {
+          const postedTasks = []
+          const workerPrototype = doc.defaultView.Worker.prototype
+          const postMessage = workerPrototype.postMessage
+          workerPrototype.postMessage = function (message, ...args) {
+            if (message.type === 'batch') postedTasks.push(...message.tasks)
+            return postMessage.call(this, message, ...args)
+          }
+          try {
+            const supersampling = doc.getElementById('supersampling')
+            supersampling.value = '2'
+            supersampling.dispatchEvent(new doc.defaultView.Event('change', { bubbles: true }))
+            await waitFor(() => postedTasks.some(task => task.fractalType.startsWith('julia') && task.supersampling === 2), 'Julia did not use selected supersampling')
+            if (postedTasks.some(task => !task.fractalType.startsWith('julia') && task.supersampling > 0)) {
+              throw new Error('Julia ON: main canvas used supersampling')
+            }
+            postedTasks.length = 0
+            setToggle(doc, 'julia-toggle', false)
+            // Require an explicit quality refresh, including unchanged canvas sizes
+            // and the path that previously restored an unsampled source image.
+            await waitFor(
+              () => postedTasks.some(task => !task.fractalType.startsWith('julia') && task.resetCaches) &&
+                postedTasks.some(task => !task.fractalType.startsWith('julia') && task.supersampling === 2),
+              'Julia OFF did not recompute main canvas with selected supersampling',
+            )
+            if (supersampling.value !== '2') throw new Error('Julia toggle changed selected quality')
+            supersampling.value = '0'
+            supersampling.dispatchEvent(new doc.defaultView.Event('change', { bubbles: true }))
+            setToggle(doc, 'julia-toggle', true)
+            await waitFor(() => hasRenderedPixels(doc, 'mandelbrot-canvas') && hasRenderedPixels(doc, 'julia-canvas'), 'Julia render missing after quality test')
+            passed.push(`PASS: ${width}px, Julia-only supersampling and explicit main quality refresh after OFF`)
+          } finally {
+            workerPrototype.postMessage = postMessage
+          }
+        }
+        if (params.has('qualityOnly')) continue
         // Separate frames exercise the original 500ms suppression bug; same-frame
         // changes exercise queued toggle callbacks acting on the latest layout.
         for (const interval of [75, 0]) {

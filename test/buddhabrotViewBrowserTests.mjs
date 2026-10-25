@@ -65,6 +65,10 @@ try {
       const view = linkedDoc.getElementById('buddha-toggle')
       const targetCanvas = linkedDoc.getElementById(julia ? 'julia-canvas' : 'mandelbrot-canvas')
       await waitFor(() => view.checked && !view.disabled, 'Permalink Buddhabrot did not complete')
+      if (julia) {
+        await waitFor(() => hasColoredPixels(linkedDoc.getElementById('mandelbrot-canvas')),
+          'Julia permalink left source canvas blank while Buddhabrot was shown')
+      }
       for (let cycle = 0; cycle < 2; cycle++) {
         toggle(linkedDoc, 'buddha-toggle', false)
         await waitFor(() => !view.checked && hasColoredPixels(targetCanvas), `Permalink View OFF left ${julia ? 'Julia' : 'main'} canvas blank`)
