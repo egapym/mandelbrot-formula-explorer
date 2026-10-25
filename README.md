@@ -190,8 +190,9 @@ after completion or Stop, the View toggle is enabled and canvas pan/zoom resumes
 from the displayed frame with the prepared Buddhabrot settings. The normal
 Buddhabrot renderer rebuilds editable density at that held view, so Brightness
 and Gamma changes work again. Prepared PNGs remain available for replay until a
-setting or view changes. Changing Buddhabrot settings invalidates the
-prepared animation.
+setting or view changes. View OFF retains the current image until the ordinary
+renderer presents its replacement, avoiding a blank white transition. Changing
+Buddhabrot settings invalidates the prepared animation.
 Preparation renders the entire path at the current resolution, iterations, smooth
 coloring, and supersampling settings. The percentage reaches 100% after all frames
 have been saved; **Play** then starts at the initial view, pans to the target, and
