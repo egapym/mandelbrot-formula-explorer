@@ -25,10 +25,6 @@ export class FixedBuddhabrotSamples {
         samplingCenter: { ...(baseline.samplingCenter || baseline.center) },
         samplingZoom: baseline.samplingZoom || baseline.zoom,
         samplingAspect: baseline.samplingAspect ?? baseline.height / baseline.width,
-        convergenceView: baseline.convergenceView || {
-          center: { ...baseline.center }, zoom: baseline.zoom,
-          width: baseline.width, height: baseline.height,
-        },
       })
     }
     return { ...params, ...this.views.get(kind) }

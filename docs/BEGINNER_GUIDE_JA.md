@@ -315,7 +315,7 @@ ON にすると、色の段差が目立ちにくくなり、より自然なグ�
 | `Samples` | 試す軌跡の数。多くするとノイズを減らしやすいが時間がかかる |
 | `Continuous` | 上限を決めず、Stop まで軌跡を追加し続ける。初期値は OFF |
 | `Buddhabrot GPU` | Buddhabrot の計算に GPU を使う |
-| `Palette` | Buddhabrot 専用の色。`Preset-01`〜`Preset-04` から選ぶ。通常描画の Palette とは別 |
+| `Palette` | Buddhabrot 専用の色。`Preset-01`〜`Preset-05` から選ぶ。通常描画の Palette とは別 |
 | `Buddhabrot Mode` | 発散する軌跡／発散しない軌跡のどちらを集めるか |
 | `Band Mode` | `perTrajectory` は軌跡全体を軌跡の長さに応じた同じ色帯で、`perPoint` は各点を反復の進み具合に応じた色帯で描く。初期値は `perTrajectory` |
 | `Sampling Range` | ランダムな出発座標を選ぶ範囲。下記参照 |
@@ -325,6 +325,8 @@ ON にすると、色の段差が目立ちにくくなり、より自然なグ�
 | `Render Slowdown (CPU)` | 軌跡をゆっくり鑑賞するための調整。`0` は最速。大きくすると遅くなるが、数値はミリ秒などの時間ではない |
 
 CPU 用の 2 つのスライダーは、操作や個別リセットをすると `Buddhabrot GPU` が OFF になります。Points per Batch を増やしても、1 本の軌跡は更新ごとに 1 ステップずつ進みます。
+
+CPU・GPU とも、軌跡は脱出または `Max iterations` まで描画します。同じ画素に重なっても表示上の収束で打ち切らないため、同じ seed で拡大したときの細かな動きや、後半のパレット色も残ります。長い非発散軌跡は描画時間が増えることがあります。
 
 ### `Sampling Range` の違い
 

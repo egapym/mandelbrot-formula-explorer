@@ -14,8 +14,6 @@ assert.equal(moved.samplingZoom, 1)
 assert.equal(moved.samplingAspect, 0.75)
 assert.equal(moved.center.x, 5, 'Display projection must still move')
 assert.equal(moved.zoom, 20)
-assert.deepEqual(moved.convergenceView, { center: first.center, zoom: 1, width: 800, height: 600 },
-  'Convergence must not change when the locked view is panned, zoomed or resized')
 assert.equal(seeds, 11, 'Navigation must not request fresh entropy')
 const julia = fixed.apply(first, 'julia')
 assert.notEqual(julia.sampleSeed, original.sampleSeed)

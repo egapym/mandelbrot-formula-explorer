@@ -128,13 +128,18 @@ map and reset the current render's count. Reset All Settings turns Continuous of
 sampling range when enabled (or initializes them on the first render if none
 exists). Pressing **Render Buddhabrot** while locked reuses the saved seed and sampling
 range. The **Regenerate seed** button to the right of Fixed Samples chooses a new
-seed while keeping the saved sampling range, and redraws if Buddhabrot is shown. Pan and zoom change only the display projection. Convergence checks retain the
-original display grid without clipping to its viewport. Unlocked rendering uses
-the same unbounded convergence algorithm, so enabling the lock preserves the
-existing orbit points as well as the seed. Offscreen positions
-remain distinct, preserving both late orbit points in deep zooms and later
-palette bands when zooming out of the locked area. CPU and GPU
+seed while keeping the saved sampling range, and redraws if Buddhabrot is shown.
+Pan and zoom change only the display projection. CPU and GPU retain all accepted
+orbit points up to escape or Max iterations, including offscreen points and
+points that overlap in the current view. Pixel overlap does not terminate an
+orbit: later motion can become visible after zooming, and later palette colors
+still contribute even at a stationary point. This also applies with Fixed Samples
+OFF; long nonescaping orbits can take more time to draw. CPU and GPU
 replay their own deterministic coordinate sequences without storing every pair.
+GPU accumulation keeps carry words for overflowing integer counters, combines
+repeated contributions to the same two pixels locally, and converts density on
+the GPU before readback. These operations retain every orbit point and palette
+contribution without frequent full-image transfers to the CPU.
 Fixed Samples is available only with Continuous OFF. Enabling Continuous turns
 Fixed Samples OFF and disables it; disabling Continuous makes it available again
 without automatically turning it back on.
@@ -298,7 +303,12 @@ and reports end-to-end sampling/readback time separately. An optional
 `?reference=./reference.mjs` compares a local earlier module and verifies exact
 density parity; its relative imports must resolve from the reference location.
 Use `&compareDensity=false` only when comparing with a version whose intended
-display coordinates differ, such as the version before parameter-plane alignment.
+orbit/density semantics differ, such as the version before full-orbit replay.
+Benchmark size can be set with `width`, `height`, `samples`, `maxIter`, `palette`,
+and `rounds`; `cases` selects comma-separated case names. Results include the
+number of density-buffer mappings, with an assertion against repeated full-image
+readbacks in finite renders. For example, use
+`?width=1920&height=1080&samples=100000&maxIter=10000&palette=Preset-05&cases=Anti%20Mandelbrot`.
 Immediate CPU sampling yields at sample checkpoints when its 8 ms time slice
 expires; delayed rendering still advances each active trajectory once per Delay.
 

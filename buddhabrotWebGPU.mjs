@@ -8,6 +8,7 @@ import { BUDDHA_DEFAULT_BRIGHTNESS, BUDDHA_DEFAULT_GAMMA, BUDDHA_REFERENCE_BRIGH
 
 import { getBuddhabrotSampleSeed } from './buddhabrotSampling.mjs'
 import { createGpuSamplingPipelines } from './buddhabrotGpuSampling.mjs'
+import { createGpuDensityReadback } from './buddhabrotGpuDensity.mjs'
 import { CUSTOM_FUNCTION_WGSL_HELPERS } from './wgslCompiler.mjs'
 import { getBuddhabrotProjection, getBuddhabrotProjectionWGSL } from './buddhabrotProjection.mjs'
 
@@ -81,7 +82,6 @@ export class BuddhabrotWebGPU {
       bandCount = MAX_BANDS
       bands = bands.slice(0, MAX_BANDS)
     }
-
     // R/G/B 用の u32 atomic buffer を作る
     const bufSize = len * 4 // 各チャンネルあたりの byte 数（u32）
     // このサイズの buffer を束縛できるか確認する。
@@ -129,6 +129,10 @@ export class BuddhabrotWebGPU {
       gBuf = this._cachedBuffers.gBuf
       bBuf = this._cachedBuffers.bBuf
     } else {
+      this._cachedBuffers.densityReadback?.destroy()
+      this._cachedBuffers.densityReadback = null
+      for (const buffer of [this._cachedBuffers.rBuf, this._cachedBuffers.gBuf, this._cachedBuffers.bBuf,
+        ...(this._cachedBuffers.highBuffers || [])]) buffer?.destroy()
       rBuf = device.createBuffer({
         size: bufSize,
         usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
@@ -147,7 +151,15 @@ export class BuddhabrotWebGPU {
       this._cachedBuffers.rBuf = rBuf
       this._cachedBuffers.gBuf = gBuf
       this._cachedBuffers.bBuf = bBuf
+      this._cachedBuffers.highBuffers = null
     }
+    // A carry word preserves exact integer contributions without forcing a
+    // full-image CPU readback every few hundred long orbits.
+    const highBuffers = this._cachedBuffers.highBuffers ||= Array.from({ length: 3 }, () =>
+      device.createBuffer({ size: bufSize,
+        usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST }))
+    const densityReadback = this._cachedBuffers.densityReadback ||=
+      createGpuDensityReadback(device, [rBuf, gBuf, bBuf], highBuffers, bufSize, QUANT_SCALE)
 
     // band 用の uniform buffer。小さな配列なので storage より uniform が向いている
     const bandBufSize = MAX_BANDS * 16 // vec4 境界に合わせて MAX_BANDS 分を確保する
@@ -254,6 +266,7 @@ export class BuddhabrotWebGPU {
     ].join('\n')
 
     const maxGroups = device.limits?.maxComputeWorkgroupsPerDimension || 65535
+    const cacheOrbitDensity = params.mode === 'antibuddha' || params.mode === 'anti'
     const compactSamples = this.maxIter > 32 && (params.samples || this.samples) >= 32768 &&
       len <= maxGroups * 64 && len * 8 <= (device.limits?.maxStorageBufferBindingSize || 134217728)
     const sampleCoordinates = `  var state: u32 = ((id * 747796405u) ^ u.seed) + 2891336453u;
@@ -320,8 +333,7 @@ struct Uniforms {
   juliaCr: f32,
   juliaCi: f32,
   samplingCenterX: f32, samplingCenterY: f32, samplingZoom: f32, samplingHeight: f32,
-  convergenceCenterX: f32, convergenceCenterY: f32, convergenceZoom: f32,
-  convergenceWidth: f32, convergenceHeight: f32,
+  invocationEnd: u32,
 };
 @group(0) @binding(0) var<uniform> u: Uniforms;
 @group(0) @binding(1) var<storage, read_write> rAcc: array<atomic<u32>>;
@@ -329,6 +341,28 @@ struct Uniforms {
 @group(0) @binding(3) var<storage, read_write> bAcc: array<atomic<u32>>;
 @group(0) @binding(4) var<uniform> bands: array<Band, MAX_BANDS>;
 @group(0) @binding(5) var<uniform> bandContribs: array<vec4<u32>, MAX_BANDS>;
+@group(0) @binding(8) var<storage, read_write> rHigh: array<atomic<u32>>;
+@group(0) @binding(9) var<storage, read_write> gHigh: array<atomic<u32>>;
+@group(0) @binding(10) var<storage, read_write> bHigh: array<atomic<u32>>;
+
+fn addDensity(idx: u32, contribution: vec3<u32>) {
+  let r = atomicAdd(&rAcc[idx], contribution.x);
+  let g = atomicAdd(&gAcc[idx], contribution.y);
+  let b = atomicAdd(&bAcc[idx], contribution.z);
+  if (r > 0xffffffffu - contribution.x) { atomicAdd(&rHigh[idx], 1u); }
+  if (g > 0xffffffffu - contribution.y) { atomicAdd(&gHigh[idx], 1u); }
+  if (b > 0xffffffffu - contribution.z) { atomicAdd(&bHigh[idx], 1u); }
+}
+
+${cacheOrbitDensity ? `
+fn accumulateLocal(idx: u32, sum: ptr<function, vec3<u32>>, contribution: vec3<u32>) {
+  if (any((*sum) > vec3<u32>(0xffffffffu) - contribution)) {
+    addDensity(idx, *sum);
+    *sum = vec3<u32>(0u);
+  }
+  *sum = (*sum) + contribution;
+}
+` : ''}
 
 ${params.palette?.gradient === true ? `
 fn gradientContribution(bi: u32, frac: f32) -> vec4<u32> {
@@ -367,14 +401,6 @@ fn coordToIndex(x: f32, y: f32) -> vec2<f32> {
   return vec2<f32>(fx, fy);
 }
 
-fn convergenceIndex(x: f32, y: f32) -> vec2<f32> {
-  let scale = u.convergenceZoom * u.convergenceWidth;
-  let fx = floor(((${displayCoordinates.real}) - u.convergenceCenterX) * scale / 4.0 + u.convergenceWidth / 2.0);
-  let fy = floor(((${displayCoordinates.imag}) - u.convergenceCenterY) * scale / 4.0 + u.convergenceHeight / 2.0);
-  // Do not clip to the original viewport or flatten unbounded coordinates.
-  return vec2<f32>(fx, fy);
-}
-
 ${compactSamples ? `
 @group(0) @binding(6) var<storage, read_write> sampleIds: array<u32>;
 @group(0) @binding(7) var<storage, read_write> sampleCounts: array<atomic<u32>>;
@@ -382,7 +408,7 @@ override queueKind: u32 = 0u;
 @compute @workgroup_size(64)
 fn classify(@builtin(global_invocation_id) gid: vec3<u32>) {
   let id = gid.x + u.invocationOffset;
-  if (id >= u.invocations) { return; }
+  if (id >= min(u.invocations, u.invocationEnd)) { return; }
 ${sampleCoordinates}
 ${escapePass('min(32u, iterationLimit)')}
   // Classification only schedules work; replay alone decides whether to draw.
@@ -405,7 +431,7 @@ ${compactSamples ? `
   let id = sampleIds[slot + queueKind * u.width * u.height];
 ` : `
   let id = gid.x + u.invocationOffset;
-  if (id >= u.invocations) { return; }
+  if (id >= min(u.invocations, u.invocationEnd)) { return; }
 ` }
 ${sampleCoordinates}
 ${escapePass('iterationLimit')}
@@ -449,25 +475,19 @@ ${historyReset}
         var contribVec0 = trajContrib;
         if (u.bandMode != 1u) { contribVec0 = gradientContribution(bandIdx0, 0.0); }
         ` : 'let contribVec0 = bandContribs[bandIdx0];'}
-        atomicAdd(&rAcc[idx0], contribVec0.x);
-        atomicAdd(&gAcc[idx0], contribVec0.y);
-        atomicAdd(&bAcc[idx0], contribVec0.z);
+        addDensity(idx0, contribVec0.xyz);
       }
     }
-    // CPU worker と同じ収束判定を適用する。Anti-Buddhabrot の非発散軌道は
-    // 最大反復まで同じ数ピクセルに留まりやすく、ここを省くと GPU だけが
-    // 後半 band（Preset-01 では橙）を過剰に蓄積してしまう。
-    // 直近の異なる 3 ピクセルの最終出現時刻だけで、50 点内に 3 種類あるか
-    // 判定できる。3 番目の ID は不要（上位 2 種類以外の再出現は同じ更新）。
-    // convergence state begin
-    var newestPixel: f32 = -1.0;
-    var secondPixel: f32 = -1.0;
-    var newestPixelY: f32 = 0.0;
-    var secondPixelY: f32 = 0.0;
-    var newestAt: i32 = -1;
-    var secondAt: i32 = -1;
-    var thirdAt: i32 = -1;
-    // convergence state end
+    // Replay every accepted point, just like the CPU. Pixel overlap can hide
+    // later motion at another zoom and must not discard later palette colors.
+    ${cacheOrbitDensity ? `
+    // Keep the two most recent pixels locally. Stationary/two-pixel tails
+    // retain every quantized color, but issue atomics only on eviction/end.
+    var cachedPixel0 = 0xffffffffu;
+    var cachedPixel1 = 0xffffffffu;
+    var cachedColor0 = vec3<u32>(0u);
+    var cachedColor1 = vec3<u32>(0u);
+    ` : ''}
     for (var oi: u32 = 0u; oi < iter; oi = oi + 1u) {
       // 一時変数へ評価してから妥当性を確認する
       let n = f32(oi);
@@ -483,16 +503,10 @@ ${historyAfter('oi')}
       let pcoords = coordToIndex(z.x, z.y);
       let fx_px = pcoords.x;
       let fy_py = pcoords.y;
-      var currentPixelIdx: f32 = -1.0;
-      var currentPixelY: f32 = 0.0;
-      var currentPixelValid = false;
       if (!(fx_px < 0.0 || fy_py < 0.0 || fx_px >= f32(u.width) || fy_py >= f32(u.height))) {
         let px = u32(fx_px);
         let py = u32(fy_py);
         let idx = py * u.width + px;
-        currentPixelIdx = f32(px);
-        currentPixelY = f32(py);
-        currentPixelValid = true;
         // CPU worker と同様に、軌道位置を [0..1] に正規化する
         var frac: f32 = 0.0;
         if (u.bandMode == 1u) {
@@ -517,39 +531,25 @@ ${historyAfter('oi')}
         var contribVec = trajContrib;
         if (u.bandMode != 1u) { contribVec = gradientContribution(bandIdx, frac); }
         ` : 'let contribVec = bandContribs[bandIdx];'}
-        atomicAdd(&rAcc[idx], contribVec.x);
-        atomicAdd(&gAcc[idx], contribVec.y);
-        atomicAdd(&bAcc[idx], contribVec.z);
-      }
-
-      if (iter > 200u && u.convergenceWidth > 0.0) {
-        let convergencePoint = convergenceIndex(z.x, z.y);
-        currentPixelIdx = convergencePoint.x;
-        currentPixelY = convergencePoint.y;
-        currentPixelValid = true;
-      }
-
-      // 200 点以下の軌道は従来の判定位置に達しないため追跡不要。
-      // convergence update begin
-      if (iter > 200u) {
-        if (currentPixelValid) {
-          if (currentPixelIdx == newestPixel && currentPixelY == newestPixelY) {
-            newestAt = i32(oi);
-          } else {
-            if (currentPixelIdx != secondPixel || currentPixelY != secondPixelY) { thirdAt = secondAt; }
-            secondPixel = newestPixel;
-            secondPixelY = newestPixelY;
-            secondAt = newestAt;
-            newestPixel = currentPixelIdx;
-            newestPixelY = currentPixelY;
-            newestAt = i32(oi);
-          }
+        ${cacheOrbitDensity ? `
+        if (idx == cachedPixel0) {
+          accumulateLocal(idx, &cachedColor0, contribVec.xyz);
+        } else if (idx == cachedPixel1) {
+          accumulateLocal(idx, &cachedColor1, contribVec.xyz);
+        } else {
+          if (cachedPixel1 != 0xffffffffu) { addDensity(cachedPixel1, cachedColor1); }
+          cachedPixel1 = cachedPixel0;
+          cachedColor1 = cachedColor0;
+          cachedPixel0 = idx;
+          cachedColor0 = contribVec.xyz;
         }
-        // ウィンドウは [oi - 49, oi]。固定 ON/OFF とも画面外も座標ペアで数える。
-        if (oi >= 200u && oi % 10u == 0u && thirdAt <= i32(oi) - 50) { break; }
+        ` : 'addDensity(idx, contribVec.xyz);'}
       }
-      // convergence update end
     }
+    ${cacheOrbitDensity ? `
+    if (cachedPixel0 != 0xffffffffu) { addDensity(cachedPixel0, cachedColor0); }
+    if (cachedPixel1 != 0xffffffffu) { addDensity(cachedPixel1, cachedColor1); }
+    ` : ''}
   }
 }
 `
@@ -633,16 +633,6 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
       params.samplingAspect === undefined ? height : params.samplingAspect * width,
     ])
     device.queue.writeBuffer(uniformBuf, 80, samplingView.buffer, 0, samplingView.byteLength)
-    // The lock freezes a grid; it does not switch convergence algorithms.
-    const convergenceView = params.convergenceView || {
-      center: params.center || { x: 0, y: 0 }, zoom: params.zoom || 1, width, height,
-    }
-    const convergenceUniform = new Float32Array([
-      convergenceView?.center.x ?? 0, convergenceView?.center.y ?? 0,
-      convergenceView?.zoom ?? 1, convergenceView?.width ?? 0, convergenceView?.height ?? 0,
-    ])
-    device.queue.writeBuffer(uniformBuf, 96, convergenceUniform)
-
 
     // Mandelbrot 以外でも反復式を WGSL 化できるなら GPU 経路を使う。
     // 変換できない式だけは、上位で CPU フォールバックできるよう例外にする。
@@ -756,6 +746,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     zeroEncoder.clearBuffer(rBuf)
     zeroEncoder.clearBuffer(gBuf)
     zeroEncoder.clearBuffer(bBuf)
+    for (const buffer of highBuffers) zeroEncoder.clearBuffer(buffer)
     device.queue.submit([zeroEncoder.finish()])
 
     // 次元ごとの最大 compute workgroup 数を取得する
@@ -773,26 +764,52 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 
     // Reuse the pipeline and histogram throughout continuous rendering. Read and
     // clear the integer histogram periodically, accumulating into CPU densities.
+    let hasReadDensity = false
     const readDensity = async () => {
-      const buffer = device.createBuffer({ size: bufSize * 3,
-        usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ })
+      if (densityReadback) {
+        const buffer = device.createBuffer({ size: bufSize * 3,
+          usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ })
+        try {
+          const encoder = device.createCommandEncoder()
+          densityReadback.encode(encoder)
+          encoder.copyBufferToBuffer(densityReadback.output, 0, buffer, 0, bufSize * 3)
+          for (const source of [rBuf, gBuf, bBuf, ...highBuffers]) encoder.clearBuffer(source)
+          device.queue.submit([encoder.finish()])
+          await buffer.mapAsync(GPUMapMode.READ)
+          const values = new Float32Array(buffer.getMappedRange())
+          for (const [ch, density] of [this.densityR, this.densityG, this.densityB].entries()) {
+            const channel = values.subarray(ch * len, (ch + 1) * len)
+            if (!hasReadDensity) density.set(channel)
+            else for (let i = 0; i < len; i++) density[i] += channel[i]
+          }
+          hasReadDensity = true
+          buffer.unmap()
+        } finally { buffer.destroy() }
+        return
+      }
+      const buffers = Array.from({ length: 2 }, () => device.createBuffer({ size: bufSize * 3,
+        usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ }))
       try {
         const encoder = device.createCommandEncoder()
-        for (const [i, source] of [rBuf, gBuf, bBuf].entries()) {
-          encoder.copyBufferToBuffer(source, 0, buffer, i * bufSize, bufSize)
-          if (continuous) encoder.clearBuffer(source)
-        }
-        device.queue.submit([encoder.finish()])
-        await buffer.mapAsync(GPUMapMode.READ)
-        const values = new Uint32Array(buffer.getMappedRange())
-        for (const [channel, density] of [this.densityR, this.densityG, this.densityB].entries()) {
-          for (let i = 0; i < len; i++) {
-            const value = values[channel * len + i] / QUANT_SCALE
-            density[i] = continuous ? density[i] + value : value
+        for (const [word, sources] of [[rBuf, gBuf, bBuf], highBuffers].entries()) {
+          for (const [i, source] of sources.entries()) {
+            encoder.copyBufferToBuffer(source, 0, buffers[word], i * bufSize, bufSize)
+            encoder.clearBuffer(source)
           }
         }
-        buffer.unmap()
-      } finally { buffer.destroy() }
+        device.queue.submit([encoder.finish()])
+        await Promise.all(buffers.map(buffer => buffer.mapAsync(GPUMapMode.READ)))
+        const values = new Uint32Array(buffers[0].getMappedRange())
+        const highs = new Uint32Array(buffers[1].getMappedRange())
+        for (const [channel, density] of [this.densityR, this.densityG, this.densityB].entries()) {
+          for (let i = 0; i < len; i++) {
+            const offset = channel * len + i
+            const value = (values[offset] + highs[offset] * 4294967296) / QUANT_SCALE
+            density[i] += value
+          }
+        }
+        for (const buffer of buffers) buffer.unmap()
+      } finally { for (const buffer of buffers) buffer.destroy() }
     }
     const displayInterval = params.interactive ? 16 : 1000
     let lastDisplay = performance.now()
@@ -805,7 +822,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let pendingSamples = 0
     let queuedBatches = 0
     const sampling = createGpuSamplingPipelines(device, wgsl,
-      [uniformBuf, rBuf, gBuf, bBuf, bandBuf, bandContribBuf], len, compactSamples)
+      [uniformBuf, rBuf, gBuf, bBuf, bandBuf, bandContribBuf], len, compactSamples, highBuffers)
     try {
       while (samplesRemaining > 0 && this.running) {
         // このバッチで処理するサンプル数を決める
@@ -833,25 +850,26 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         device.queue.writeBuffer(uniformBuf, 0, u32view.buffer, 0, u32view.byteLength)
 
         // workgroup が上限を超える場合は分割して dispatch する
-        let remaining = Math.ceil(invocationsThisBatch / 64)
+        let remaining = invocationsThisBatch
         let invocationOffset = 0
         while (remaining > 0) {
-          const thisChunk = Math.min(remaining, maxPerDimSafe)
+          const thisChunk = Math.min(remaining, maxPerDimSafe * 64)
           const encoder = device.createCommandEncoder()
           const offView = new Uint32Array([invocationOffset])
           device.queue.writeBuffer(uniformBuf, 4 * 7, offView.buffer, 0, 4)
+          device.queue.writeBuffer(uniformBuf, 96, new Uint32Array([invocationOffset + thisChunk]))
           if (sampling.counts) encoder.clearBuffer(sampling.counts)
           for (const { pipeline, group } of sampling.passes) {
             const pass = encoder.beginComputePass()
             pass.setPipeline(pipeline)
             pass.setBindGroup(0, group)
-            pass.dispatchWorkgroups(thisChunk)
+            pass.dispatchWorkgroups(Math.ceil(thisChunk / 64))
             pass.end()
           }
           device.queue.submit([encoder.finish()])
 
           remaining -= thisChunk
-          invocationOffset += thisChunk * 64
+          invocationOffset += thisChunk
         }
 
         pendingSamples += samplesThisBatch

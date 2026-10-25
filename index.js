@@ -3139,6 +3139,23 @@ try {
   if (buddhaToggle) {
     buddhaToggle.addEventListener('change', async (_e) => {
       const target = getBuddhabrotTargetSnapshot()
+      const turningBuddhaViewOff = !buddhaToggle.checked
+      if (turningBuddhaViewOff) {
+        // fullscreen 再描画や GPU の bitmap 化は非同期で完了する。View OFF より
+        // 後に古い Buddhabrot がキャンバスへ戻らないよう、先に表示世代を無効化する。
+        buddhaDisplaySuppressed = true
+        buddhaDensityDrawGeneration++
+        buddhaRunnerGeneration++
+        buddhaRenderRequestGeneration++
+        buddhaRenderPending = false
+        buddhaRedrawScheduled = false
+        fullscreenBuddhaRestartGeneration++
+        fullscreenBuddhaResizeRedrawGeneration++
+        if (fullscreenBuddhaResizeRedrawRafId != null) {
+          cancelAnimationFrame(fullscreenBuddhaResizeRedrawRafId)
+          fullscreenBuddhaResizeRedrawRafId = null
+        }
+      }
       // ビットマップ保存中なら少し待ち、停止済み Buddhabrot の復元を安定させる
       try {
         if (!savedBuddhaImageData && savedBuddhaImageDataPromise) {
@@ -3148,6 +3165,7 @@ try {
       // 無効状態のトグル変更は無視する
       if (buddhaToggle.disabled) return
       if (buddhaToggle.checked) {
+        buddhaDisplaySuppressed = false
         // フラクタル変更でロックされているときは有効化を許可しない
         if (buddhaLockedByFractalChange) {
           buddhaToggle.checked = false
@@ -3226,32 +3244,20 @@ try {
           buddhaToggle.checked = false
         }
       } else {
-        // Buddhabrot 表示をオフにしたら、表示を残したままワーカーだけ止める
+        // View OFF は保存済みの通常フラクタル画像を復元しない。fullscreen 前の
+        // 小さい ImageData を戻すと下端が未更新になり、Buddhabrot の旧フレームが
+        // 帯として残るため、現在の canvas サイズで通常フラクタルを必ず描画する。
         if (buddhaActive || buddhaPreservedDisplay || savedBuddhaImageData) {
           // Stop 後の保持表示だけ残っている場合もある
           if (buddhaActive) stopBuddhaPreserveDisplay()
-          // Buddhabrot 状態は保ちつつ、通常フラクタル表示へ戻す
           try {
-            // 保存時の状態と現在状態を比較する
             const displayTargetKind = BuddhabrotState.targetKind || target.kind
-            const displayCanvas = getBuddhabrotDisplayCanvas(displayTargetKind)
-            const currentState = FractalStateHelpers.getCurrentState(displayTargetKind)
-            const match = savedFractalImageData && FractalStateHelpers.stateMatches(savedFractalImageData, currentState)
-
-            if (match) {
-              restoreSavedImageToCanvas(savedFractalImageData, displayCanvas)
-              // ビューが変わるまでは保存画像を残し、再オン時に再利用できるようにする
-            } else {
-              // Buddhabrot 表示中に通常フラクタル設定が変わっている可能性があるので、
-              // パレット設定を反映し直してから正規の再描画を行う。
-              // Navigation leaves ordinary offscreens at the previous view.
-              // Refresh palette data without presenting those stale pixels.
-              fractal.initPallete(false)
-
-              redrawBuddhabrotSourceView(displayTargetKind)
-            }
+            // Navigation leaves ordinary offscreens at the previous view.
+            // Refresh palette data without presenting those stale pixels.
+            fractal.initPallete(false)
+            redrawBuddhabrotSourceView(displayTargetKind)
           } catch (e) {
-            ErrorHelpers.warn('Error restoring saved fractal image after turning off Buddha:', e)
+            ErrorHelpers.warn('Error redrawing fractal image after turning off Buddha:', e)
             redrawBuddhabrotSourceView(BuddhabrotState.targetKind || target.kind)
           }
         }
@@ -3547,7 +3553,7 @@ function activateRealtimeBuddhaNavigation(drag) {
   buddhaActive = true
   buddhaPreservedDisplay = false
   DOM.buddha.toggle.checked = true
-  DOM.buddha.toggle.disabled = false
+  DOM.buddha.toggle.disabled = !!DOM.buddha.continuous?.checked
   clearOrbitCanvas()
   clearJuliaOrbitCanvas()
 }
@@ -3763,6 +3769,21 @@ function redrawBuddhabrotSourceView(targetKind = BuddhabrotState.targetKind) {
     redrawJulia()
     return
   }
+
+  // Buddhabrot 表示中の fullscreen resize は表示 canvas だけを更新するため、
+  // View OFF 後に通常 renderer が古い offscreen 寸法のままになり得る。
+  // 現在の canvas 全体を通常フラクタルで更新できるよう、ここで同期する。
+  if (
+    canvasElement.width > 0 &&
+    canvasElement.height > 0 &&
+    (fractal.width !== canvasElement.width || fractal.height !== canvasElement.height)
+  ) {
+    resizeTmpCanvas()
+    fractal.resized()
+  }
+  // Worker / GPU が全画面を描き終えるまで古い Buddhabrot の断片を残さない。
+  const ctx = canvasElement.getContext('2d')
+  ctx.clearRect(0, 0, canvasElement.width, canvasElement.height)
   redraw()
 }
 
@@ -3877,6 +3898,7 @@ function redrawBuddhaForExecutionSettingChange() {
  * @throws {Error} 描画を開始できない場合
  */
 async function startBuddhaRender({ preserveSourceRender = false, captureFractalImage = true } = {}) {
+  buddhaDisplaySuppressed = false
   cancelRealtimeBuddhaDrag()
   const target = getBuddhabrotTargetSnapshot()
   buddhaRenderSettingsSignature = getBuddhaRenderSettingsSignature()
@@ -4381,7 +4403,7 @@ async function startBuddhaRender({ preserveSourceRender = false, captureFractalI
     hideProgressMonitor(getBuddhabrotProgressMonitor(target.kind))
     if (viewToggle) {
       viewToggle.checked = true
-      viewToggle.disabled = false
+      viewToggle.disabled = true
     }
   }
   await runnerToStart.start(renderParams)
@@ -4598,6 +4620,7 @@ const cpuBuddhaColorMaps = new WeakMap()
 function drawBuddhaDensityChannels(
   rBuf, gBuf, bBuf, width, height, _pal, brightness = BUDDHA_DEFAULT_BRIGHTNESS, gamma = BUDDHA_DEFAULT_GAMMA, synchronous = false, presentedChunks,
 ) {
+  if (buddhaDisplaySuppressed) return
   // Buddhabrot が非アクティブなら早めに抜ける
   // ただし保持表示モード中は、既存 density バッファの再マッピングだけ許可する
   if (!buddhaActive && !buddhaPreservedDisplay) return
@@ -5393,6 +5416,9 @@ let _lastHighResBuddhaCanvas = null
 let lastHighResBuddhaBitmap = null
 // 非同期の密度色変換が古いレンダーを後着で描かないようにする世代番号
 let buddhaDensityDrawGeneration = 0
+// View OFF 後の Worker / WebGPU / ImageBitmap 完了通知が、通常フラクタルの
+// 描画を上書きしないための表示ゲート。
+let buddhaDisplaySuppressed = false
 // 破棄済み runner から飛んでくる遅延描画を無効化するための世代番号
 let buddhaRunnerGeneration = 0
 // runner 生成前の非同期 Buddhabrot 開始リクエストをキャンセルするための世代番号
@@ -5407,9 +5433,8 @@ function scheduleBuddhaRedraw() {
   const generation = buddhaRunnerGeneration
   requestAnimationFrame(() => {
     buddhaRedrawScheduled = false
-    // Stop keeps the last density visible even though View is switched off.
     const toggle = document.getElementById('buddha-toggle')
-    if (toggle && !toggle.checked && !buddhaPreservedDisplay) return
+    if (toggle && !toggle.checked) return
 
     const runner = buddhaRunner
     if (!runner || buddhaRunnerGeneration !== generation) return
@@ -8451,10 +8476,14 @@ function resizeToCanvasSize() {
   const isWideLayout = window.innerWidth >= 1412
   if (mandelbrotDiv) {
     if (isFullscreenActive()) {
-      // アプリ内全画面では CSS の aspect-ratio に任せると 4:3 のままになるため、
-      // 実際のビューポート寸法を明示し、canvas の描画バッファも同じ大きさへ広げる。
-      setStyleIfChanged(mandelbrotDiv, 'height', `${window.innerHeight}px`)
-      setStyleIfChanged(mandelbrotDiv, 'width', `${window.innerWidth}px`)
+      // Chrome native fullscreen では 100dvh / window.innerHeight が遷移直後に
+      // 実際の fullscreen 要素より小さくなることがある。親 #main の実寸を
+      // 使い、下端に未描画の帯を残さない。
+      const fullscreenRoot = document.getElementById('main')
+      const fullscreenWidth = Math.max(1, Math.round(fullscreenRoot?.clientWidth || window.innerWidth || 1))
+      const fullscreenHeight = Math.max(1, Math.round(fullscreenRoot?.clientHeight || window.innerHeight || 1))
+      setStyleIfChanged(mandelbrotDiv, 'height', `${fullscreenHeight}px`)
+      setStyleIfChanged(mandelbrotDiv, 'width', `${fullscreenWidth}px`)
       setStyleIfChanged(mandelbrotDiv, 'flex', '0 0 auto')
     } else if (isWideLayout) {
       setStyleIfChanged(mandelbrotDiv, 'height', '')
@@ -8497,9 +8526,17 @@ function resizeToCanvasSize() {
   const mainCanvasChanged = setCanvasBufferSizeIfChanged(canvasElement, width, height)
 
   if (mainCanvasChanged) resizeTmpCanvas()
-  // Buddhabrot 実行中は通常の Mandelbrot 再描画へ戻さず、既存結果を描き直す。
-  // これにより、フルスクリーン切替時の描画切替や長時間ジョブの中断を防げる。
+  // Chrome native fullscreen は fullscreenchange の後にも canvas の表示矩形を
+  // 変更する。その変更でバッファが消えるため、古い密度を拡大するだけでは
+  // 下端に未描画の帯が残る。最終サイズへの変更なら Buddhabrot 自体を作り直す。
   if (buddhaActive && buddhaRunner) {
+    if (mainCanvasChanged && isFullscreenActive()) {
+      scheduleFullscreenBuddhabrotResizeRedraw()
+      showZoomFactor()
+      return mainCanvasChanged
+    }
+
+    // サイズが変わらない通常の resize 通知では、進行中の density を維持する。
     // runner 内部バッファのサイズは変えず、既存 density を描き直して
     // アスペクト比を保ったままキャンバスへ合わせる。
     try {
@@ -8531,9 +8568,32 @@ function resizeToCanvasSize() {
 
 const ELEMENTS_WITH_FS_CLASS = ['mandelbrot', 'palette-canvas', 'settings', 'footer', 'menu-toggle']
 let appFullscreenFallbackActive = false
+let fullscreenBuddhaRestartGeneration = 0
+let fullscreenBuddhaResizeRedrawGeneration = 0
+let fullscreenBuddhaResizeRedrawRafId = null
 
 function isFullscreenActive() {
   return document.fullscreenElement != null || appFullscreenFallbackActive
+}
+
+function scheduleFullscreenBuddhabrotResizeRedraw() {
+  if (!isFullscreenActive() || !buddhaActive || !buddhaRunner) return
+  const generation = ++fullscreenBuddhaResizeRedrawGeneration
+  if (fullscreenBuddhaResizeRedrawRafId != null) {
+    cancelAnimationFrame(fullscreenBuddhaResizeRedrawRafId)
+  }
+  fullscreenBuddhaResizeRedrawRafId = requestAnimationFrame(() => {
+    fullscreenBuddhaResizeRedrawRafId = null
+    requestAnimationFrame(() => {
+      if (generation !== fullscreenBuddhaResizeRedrawGeneration || !isFullscreenActive()) return
+      startBuddhaRender({ captureFractalImage: false }).catch((e) => {
+        if (generation === fullscreenBuddhaResizeRedrawGeneration) {
+          buddhaRenderPending = false
+          console.warn('Could not redraw Buddhabrot after fullscreen canvas resize:', e?.message ? e.message : e)
+        }
+      })
+    })
+  })
 }
 
 function usesMobileSettingsDrawerLayout() {
@@ -8546,6 +8606,10 @@ function usesJuliaPreviewLayout() {
 }
 
 function applyFullscreenState() {
+  // Canvas のバッファサイズ変更は内容を消去する。Buddhabrot を表示・計算中の
+  // fullscreen 切替では、サイズ確定後に新しい解像度で描き直す。
+  const restartBuddhabrot = buddhaRenderPending || hasVisibleOrRunningBuddhabrot()
+  const restartGeneration = ++fullscreenBuddhaRestartGeneration
   const active = isFullscreenActive()
   const main = document.getElementById('main')
   main?.classList.toggle('fullscreen-fallback', appFullscreenFallbackActive)
@@ -8569,28 +8633,33 @@ function applyFullscreenState() {
   // 必ずしも発火しないため、共通で次フレームにキャンバスを同期する。
   requestAnimationFrame(() => scheduleResize())
 
-  // 全画面の出入り時は Buddhabrot を停止するが、フラクタル設定自体は保つ。
+  // 全画面の出入り時は古いサイズの runner を止める。レイアウト確定後に
+  // startBuddhaRender() で再開するため、View を無効化したまま黒画面にはしない。
   try {
-    if (buddhaRunner) {
-      buddhaRunner.running = false
-      buddhaRunner.terminate?.()
-      buddhaRunner = null
-    }
+    if (restartBuddhabrot) {
+      // startBuddhaRender() の runner 作成前 await から古いジョブが再開しないようにする。
+      buddhaRenderRequestGeneration++
+      buddhaRenderPending = false
+      stopAndClearBuddha(true)
+      savedFractalImageData = null
 
-    buddhaActive = false
-    finishBuddhabrotProgress(BuddhabrotState.targetKind, { showRenderTime: false })
-    hideInactiveBuddhabrotProgress(BuddhabrotState.targetKind)
-    savedFractalImageData = null
-    redraw(true)
-
-    buddhaLockedByFractalChange = true
-    const t = document.getElementById('buddha-toggle')
-    if (t) {
-      t.checked = false
-      t.disabled = true
+      // fullscreenchange と resize の両方が発生するので、次の描画フレームまで
+      // 待ってから現在の canvas 寸法を確定し、最後の切替だけを再描画する。
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          if (restartGeneration !== fullscreenBuddhaRestartGeneration) return
+          resizeToCanvasSize()
+          startBuddhaRender({ captureFractalImage: false }).catch((e) => {
+            if (restartGeneration === fullscreenBuddhaRestartGeneration) {
+              buddhaRenderPending = false
+              console.warn('Could not redraw Buddhabrot after fullscreen change:', e?.message ? e.message : e)
+            }
+          })
+        })
+      })
     }
   } catch (e) {
-    console.warn('Error handling fullscreen state cleanup:', e?.message ? e.message : e)
+    console.warn('Error restarting Buddhabrot after fullscreen change:', e?.message ? e.message : e)
   }
 }
 
@@ -8626,6 +8695,7 @@ function toggleFullScreen() {
     enterAppFullscreenFallback()
     return
   }
+
   try {
     const request = main.requestFullscreen()
     if (request?.catch) {

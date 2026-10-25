@@ -396,12 +396,18 @@ footer {
 /* 現在のレイアウトは折り返し flex と min-width を使うため、細かな分岐は少なくてよい */
 
 /* フルスクリーン時はキャンバスと進捗表示を中心に見せる */
-#main:fullscreen,
-#main.fullscreen-fallback {
-  position: relative;
+#main:fullscreen {
+  /* fullscreen 要素と描画面を同一のビューポート矩形へ固定する。
+     Chrome の 100dvh は fullscreen 遷移中に実画面高より小さくなるため、
+     native fullscreen 要素自身の 100% を使う。 */
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
   display: block;
   padding: 0;
   overflow: hidden;
+  background-color: #000;
 }
 
 /* iOS Safari など Element Fullscreen API を使えない端末用の全画面状態。 */
@@ -413,22 +419,39 @@ footer {
   height: 100vh;
   height: 100dvh;
   z-index: 1000;
+  display: block;
+  padding: 0;
+  overflow: hidden;
+  background-color: #000;
 }
 
 #mandelbrot.fullscreen {
-  width: 100vw;
-  height: 100vh;
-  height: 100dvh;
-  position: fixed;
-  top: 0;
-  left: 0;
+  position: absolute;
+  inset: 0;
+  width: auto;
+  height: auto;
+  margin: 0;
+  aspect-ratio: auto;
 }
 
 /* フルスクリーン時は枠線を消し、画面いっぱいに見せる */
 #mandelbrot.fullscreen .canvas-wrap {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
   border: none !important;
   border-radius: 0 !important;
-  background-color: #fff;
+  /* 通常表示の白い canvas-wrap 背景は保持し、全画面だけ黒にする。 */
+  background-color: #000;
+}
+
+#mandelbrot.fullscreen #mandelbrot-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  max-height: none;
 }
 
 #settings.fullscreen {
@@ -954,11 +977,7 @@ footer {
     font-size: 0.68rem;
   }
 
-  /* Keep paired selects and slider value rows stable when labels wrap. */
-  #buddhabrot-controls .buddha-select-label {
-    min-height: 3rem;
-  }
-
+  /* Keep slider value rows stable when labels wrap. */
   #buddhabrot-controls .buddha-value {
     display: block;
   }

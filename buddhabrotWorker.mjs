@@ -401,17 +401,6 @@ async function runSampling(opts) {
   }
 
   // 内側ループで頻繁に使う値をローカルへ退避する
-  // Use the same unbounded grid before/after locking. Locking retains this
-  // grid across navigation; it must never change which orbit steps are kept.
-  const convergenceView = opts.convergenceView || { center, zoom, width, height }
-  const convergenceHalfSpan = convergenceView ? 2 / convergenceView.zoom : 0
-  const convergenceLeft = convergenceView ? convergenceView.center.x - convergenceHalfSpan : 0
-  const convergenceTop = convergenceView
-    ? convergenceView.center.y - convergenceHalfSpan * (convergenceView.height / convergenceView.width) : 0
-  const convergenceInvWSpan = convergenceView
-    ? 1 / ((convergenceView.center.x + convergenceHalfSpan) - convergenceLeft) : 0
-  const convergenceInvHSpan = convergenceView
-    ? 1 / ((convergenceView.center.y + convergenceHalfSpan * (convergenceView.height / convergenceView.width)) - convergenceTop) : 0
   const invWSpan = 1 / (right - left)
   const invHSpan = 1 / (bottom - top)
   const chunkW_local = chunkW
@@ -541,23 +530,13 @@ async function runSampling(opts) {
       }
     }
 
-    // Track the last occurrences of the three most recent distinct pixels.
-    // The third timestamp determines whether the 50-point window has >2 IDs,
-    // without an orbit buffer or a Set scan at every convergence check.
-    // convergence state begin
-    let newestPixel = -1
-    let secondPixel = -1
-    let newestPixelY = 0
-    let secondPixelY = 0
-    let newestAt = -1
-    let secondAt = -1
-    let thirdAt = -1
-    // convergence state end
-
     const points = stepped ? trajBuf.slice(0, trajLen * 2) : trajBuf
     // Prime the trajectory without drawing: every active orbit starts at step zero.
     if (stepped) yield true
 
+    // Pixel overlap is not orbit convergence: zoom can reveal later motion,
+    // and even a stationary orbit must retain its later palette contributions.
+    // Replay every accepted point, independently of the display or seed lock.
     // Buddhabrot worker ではスーパーサンプリングを省略し、
     // 1 サンプルマッピングのみを使う
     for (let k = 0; k < trajLen; k++) {
@@ -577,12 +556,8 @@ async function runSampling(opts) {
       const px = Math.floor(fx * width_local)
       const py = Math.floor(fy * height_local)
 
-      let currentPixelY = 0
-      let currentPixelIdx = -1 // 収束判定用に現在のピクセルを追跡
-
       if (px >= 0 && px < chunkW_local && py >= 0 && py < chunkH_local) {
         const idx = py * chunkW_local + px
-        currentPixelIdx = idx // 収束追跡のために保持
         if (useBands) {
           if (!perTrajectory) {
             // k increases monotonically: an earlier band cannot match again.
@@ -613,38 +588,6 @@ async function runSampling(opts) {
           pendingNonzeroCount++
         }
       }
-
-      if (convergenceView && trajLen > 200) {
-        const cx = Math.floor((displayRe - convergenceLeft) * convergenceInvWSpan * convergenceView.width)
-        const cy = Math.floor((displayIm - convergenceTop) * convergenceInvHSpan * convergenceView.height)
-        // Keep the grid unbounded: points outside the original viewport are
-        // still distinct orbit positions and may carry later palette bands.
-        currentPixelIdx = cx
-        currentPixelY = cy
-      }
-
-      // All views track the unbounded grid, including offscreen orbit positions.
-      // convergence update begin
-      if (trajLen > 200) {
-        if (currentPixelIdx >= 0 || convergenceView) {
-          if (currentPixelIdx === newestPixel && currentPixelY === newestPixelY) {
-            newestAt = k
-          } else {
-            if (currentPixelIdx !== secondPixel || currentPixelY !== secondPixelY) thirdAt = secondAt
-            secondPixel = newestPixel
-            secondPixelY = newestPixelY
-            secondAt = newestAt
-            newestPixel = currentPixelIdx
-            newestPixelY = currentPixelY
-            newestAt = k
-          }
-        }
-        if (k >= 200 && k % 10 === 0 && thirdAt <= k - 50) {
-          if (stepped) yield false
-          return
-        }
-      }
-      // convergence update end
 
       if (stepped) yield k + 1 < trajLen
     }

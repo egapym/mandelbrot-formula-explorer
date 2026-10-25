@@ -5,23 +5,33 @@ const assert = (condition, message) => {
   if (!condition) throw new Error(message)
 }
 const median = (values) => values.toSorted((a, b) => a - b)[Math.floor(values.length / 2)]
+const query = new URLSearchParams(location.search)
+const measuredRounds = Number(query.get('rounds') || 7)
+const benchmarkSize = {
+  width: Number(query.get('width') || 640), height: Number(query.get('height') || 640),
+  samples: Number(query.get('samples') || 250000), maxIter: Number(query.get('maxIter') || 1000),
+  ...(query.has('palette') ? { palette: getBuddhaPalette(query.get('palette')), buddhaBandMode: 'perPoint' } : {}),
+}
 
 async function run() {
   const adapter = await navigator.gpu?.requestAdapter()
   assert(adapter, 'WebGPU unavailable')
   const timestamps = adapter.features.has('timestamp-query')
   const device = await adapter.requestDevice({ requiredFeatures: timestamps ? ['timestamp-query'] : [] })
-  const querySet = timestamps ? device.createQuerySet({ type: 'timestamp', count: 16 }) : null
+  // Full orbits may require many overflow-safe histogram dispatches per run.
+  const timestampCapacity = 1024
+  const querySet = timestamps ? device.createQuerySet({ type: 'timestamp', count: timestampCapacity }) : null
   const resolveBuffer = timestamps
-    ? device.createBuffer({ size: 128, usage: GPUBufferUsage.QUERY_RESOLVE | GPUBufferUsage.COPY_SRC })
+    ? device.createBuffer({ size: timestampCapacity * 8, usage: GPUBufferUsage.QUERY_RESOLVE | GPUBufferUsage.COPY_SRC })
     : null
   const readBuffer = timestamps
-    ? device.createBuffer({ size: 128, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ })
+    ? device.createBuffer({ size: timestampCapacity * 8, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ })
     : null
   const shaderKinds = new WeakMap()
   let usedSampler = false
   let timestampCount = 0
   let captureTimestamps = false
+  let densityMaps = 0
   const queue = new Proxy(device.queue, {
     get(target, key) {
       if (key === 'writeBuffer')
@@ -41,6 +51,14 @@ async function run() {
   const probe = new Proxy(device, {
     get(target, key) {
       if (key === 'queue') return queue
+      if (key === 'createBuffer') return descriptor => {
+        const buffer = target.createBuffer(descriptor)
+        if (descriptor.usage & GPUBufferUsage.MAP_READ) {
+          const map = buffer.mapAsync.bind(buffer)
+          buffer.mapAsync = (...args) => { if (captureTimestamps) densityMaps++; return map(...args) }
+        }
+        return buffer
+      }
       if (key === 'createShaderModule')
         return (descriptor) => {
           const module = target.createShaderModule(descriptor)
@@ -101,10 +119,11 @@ async function run() {
       ['History Anti', { mode: 'antibuddha', fractalType: 'custom', iterationFunction: 'z*z+c+0.1*zDelay(2)' }],
       ['Julia', { fractalType: 'julia-custom', iterationFunction: 'z*z+c', juliaRe: -0.7, juliaIm: 0.2 }],
     ]) {
-      const timings = runners.map(() => ({ wall: [], gpu: [] }))
+      if (query.has('cases') && !query.get('cases').split(',').includes(label)) continue
+      const timings = runners.map(() => ({ wall: [], gpu: [], maps: [] }))
       let expected
       // Alternate versions on every round; exclude compilation/warmup rounds.
-      for (let round = 0; round < 9; round++) {
+      for (let round = 0; round < measuredRounds + 2; round++) {
         for (let i = 0; i < runners.length; i++) {
           const { name, runner } = runners[i]
           let failure
@@ -115,11 +134,9 @@ async function run() {
           usedSampler = false
           timestampCount = 0
           captureTimestamps = true
+          densityMaps = 0
           await runner.start({
-            width: 640,
-            height: 640,
-            samples: 250000,
-            maxIter: 1000,
+            ...benchmarkSize,
             center: { x: 0, y: 0 },
             zoom: 1,
             escapeRadius: 4,
@@ -130,6 +147,7 @@ async function run() {
           captureTimestamps = false
           const elapsed = performance.now() - start
           assert(!failure && !runner._cpuRunner && usedSampler, failure || 'Sampler did not run on GPU')
+          if (name === 'current') assert(densityMaps <= 2, `Unbounded full-image readbacks: ${densityMaps}`)
           let gpuMs = 0
           if (timestamps) {
             const encoder = device.createCommandEncoder()
@@ -146,6 +164,7 @@ async function run() {
           if (round >= 2) {
             timings[i].wall.push(elapsed)
             timings[i].gpu.push(gpuMs)
+            timings[i].maps.push(densityMaps)
           }
           if (round === 0) {
             const channels = [runner.densityR, runner.densityG, runner.densityB]
@@ -175,6 +194,7 @@ async function run() {
           case: label,
           gpuMs: timestamps ? +median(timings[i].gpu).toFixed(3) : null,
           totalMs: +median(timings[i].wall).toFixed(3),
+          densityMaps: median(timings[i].maps),
         })
     }
     // Force periodic readback boundaries without a wall-clock wait. With the
@@ -205,8 +225,11 @@ async function run() {
           if (!continuous) expected = channels.map(channel => channel.slice())
           else {
             assert(frames >= 2, 'Periodic GPU readback did not publish updates')
+            // Overflow-safe flushing and periodic presentation can group
+            // Float32 additions differently while retaining all contributions.
             for (let ch = 0; ch < channels.length; ch++)
-              assert(channels[ch].every((value, i) => value === expected[ch][i]),
+              assert(channels[ch].every((value, i) =>
+                Math.abs(value - expected[ch][i]) <= Math.max(1 / 1024, Math.abs(expected[ch][i]) * 0.000002)),
                 `${mode}: continuous histogram clearing lost or duplicated density`)
           }
         }
@@ -262,7 +285,7 @@ async function run() {
     const error = await device.popErrorScope()
     assert(!error, error?.message)
     const validation = runners.length > 1 && compareDensity ? 'fixed-seed density parity' : 'fixed-seed sampling'
-    return `PASS: ${validation}; continuous readback/Stop density parity; locked deep-zoom orbit retention; Preset-05 zoom-out palette parity; median of 7 runs after 2 warmups\n${JSON.stringify(rows, null, 2)}`
+    return `PASS: ${validation}; continuous readback/Stop density parity; locked deep-zoom orbit retention; Preset-05 zoom-out palette parity; median of ${measuredRounds} runs after 2 warmups\n${JSON.stringify(rows, null, 2)}`
   } finally {
     for (const { runner } of runners) runner.stop()
     querySet?.destroy()

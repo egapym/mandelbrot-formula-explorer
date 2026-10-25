@@ -204,7 +204,11 @@ assert.equal(stoppedImmediate.waits.length, 1, 'Immediate rendering ignored Stop
 assert.ok(!stoppedImmediate.progress.includes(base.samples))
 for (const delay of [0.01, 1, 10, 100]) {
   const delayed = await sample({}, delay)
-  assert.ok(delayed.waits.length < 2000, `Long anti-buddhabrot orbits waited ${delayed.waits.length} times`)
+  // Full orbits now run to maxIter even when they overlap on screen. Timers
+  // should scale with concurrent frames, not samples times orbit length.
+  const maxFrames = base.maxIter * Math.ceil(base.samples / DEFAULT_RENDER_POINT_BATCH_SIZE)
+  assert.ok(delayed.waits.length <= maxFrames + Math.ceil(base.samples / 100),
+    `Long anti-buddhabrot orbits waited ${delayed.waits.length} times`)
   assert.ok(delayed.chunks > 0, 'Missing visible density')
   assert.equal(delayed.progress.at(-1), base.samples)
   equalDensity(immediate, delayed)

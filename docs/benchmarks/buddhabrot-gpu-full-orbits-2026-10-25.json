@@ -1,0 +1,38 @@
+{
+  "date": "2026-10-25",
+  "environment": "Local macOS Chrome headless, native WebGPU with GPU timestamps",
+  "harness": "test/buddhabrotPerformanceBrowserTests.html",
+  "parameters": {
+    "width": 1920,
+    "height": 1080,
+    "samples": 100000,
+    "maxIter": 10000,
+    "palette": "Preset-05",
+    "bandMode": "perPoint",
+    "center": { "x": 0, "y": 0 },
+    "zoom": 1,
+    "mode": "antibuddha"
+  },
+  "method": "Alternate reference/current, two warmups, median of measured runs; sampling plus density readback, excluding canvas coloring. GPU jobs run sequentially.",
+  "originalComparison": {
+    "referenceCommit": "c80b60c72e51af30e05b6f6ba5ed431b7e8bf22d",
+    "referenceModuleSha256": "01d45315dc69d1d0aeb61bf91750f62355b9c0ec8ad91e51d31b42ad5f2684aa",
+    "measuredRounds": 7,
+    "original": { "gpuMs": 23.311, "totalMs": 33.5, "densityMaps": 1 },
+    "optimizedFullOrbit": { "gpuMs": 27.195, "totalMs": 32.9, "densityMaps": 1 }
+  },
+  "regressionComparison": {
+    "reference": "Working-tree GPU renderer before this performance fix; full-orbit replay with conservative per-histogram sample limits",
+    "referenceModuleSha256": "843f18d0ae78e0a381f6627cf1c9aac9a8233d304600cbda4b8365cac33aeca4",
+    "measuredRounds": 3,
+    "slowFullOrbit": { "gpuMs": 1111.968, "totalMs": 2943.5, "densityMaps": 260 },
+    "optimizedFullOrbit": { "gpuMs": 27.2, "totalMs": 34.0, "densityMaps": 1 }
+  },
+  "validation": [
+    "45 actual worker/WebGPU full-orbit checks, including Preset-05 gradients, zoom, stationary and periodic trajectories, late motion, carry conversion, seeded subdivision and compact/noncompact queues",
+    "642 existing CPU/WebGPU escape and Buddhabrot orbit checks",
+    "Continuous readback/Stop density parity and locked zoom tests",
+    "Finite rendering asserts at most two density mappings, independent of sample/iteration count"
+  ],
+  "note": "Timing comparisons use compareDensity=false because the original intentionally discarded tail contributions. Full-orbit correctness is validated against an independent density oracle. These measurements do not establish equal speed for every formula, view or GPU."
+}
