@@ -176,9 +176,17 @@ Navigation reuses this project's CPU/WebGPU renderers.
 - Reset All Settings action
 - Save Image action
 - Jump To favorites selector
-- GPU-only prepared animation with zoom-speed and frame-rate sliders
+- Prepared animation with zoom-speed and frame-rate sliders
 
 Enable **Animation**, apply coordinates, then select **Prepare**.
+When Buddhabrot is displayed, preparation renders Buddhabrot frames using the
+current formula, Max iterations, Samples, Supersampling, palette, mode, band mode,
+sampling range, Fixed Samples, brightness/gamma and Buddhabrot GPU selection.
+Each frame uses a finite sample budget; with Continuous ON this is the Samples
+value saved before enabling Continuous. Render Slowdown affects live drawing,
+so prepared frames compute at full speed. Automatic iteration/density adjustment
+is available for ordinary fractal animation. Playback retains Buddhabrot View;
+changing Buddhabrot settings invalidates the prepared animation.
 Preparation renders the entire path at the current resolution, iterations, smooth
 coloring, and supersampling settings. The percentage reaches 100% after all frames
 have been saved; **Play** then starts at the initial view, pans to the target, and
@@ -217,16 +225,19 @@ Settings reset restores automatic adjustment to OFF and clears the minimum.
 Target iteration/density controls retain their configured values during analysis
 and playback.
 
-Animation requires WebGPU and browser temporary storage (OPFS and Web Locks).
-It turns GPU on automatically and does not fall back to CPU rendering. Julia,
-Buddhabrot, and settings unsupported by the GPU cannot be prepared. Lossless PNG
+Ordinary fractal animation requires WebGPU. Buddhabrot animation also supports
+CPU rendering. Both require browser temporary storage (OPFS and Web Locks).
+Ordinary fractal animation turns GPU on automatically and does not fall back to
+CPU rendering. Julia animation remains unavailable. Ordinary fractal settings
+unsupported by the GPU cannot be prepared. Lossless PNG
 frames are stored temporarily with a limit of 2 GiB or 80% of estimated free quota,
 whichever is smaller. Buffer limits and a 128 MiB decoded-image budget are checked
 without reducing quality. Temporary frames are deleted on invalidation; abandoned
 sessions are cleaned on the next visit without deleting another tab's active data.
 
 Animation checks: `node --test test/animationTests.mjs`. With the local server
-running, open `test/animationBrowserTests.html` and `test/gpuResourceTests.html`
+running, open `test/animationBrowserTests.html`, `test/animationBuddhabrotBrowserTests.html`
+and `test/gpuResourceTests.html`
 in a WebGPU-capable browser for GPU and storage integration tests.
 
 ### Coordinates and Diagnostics

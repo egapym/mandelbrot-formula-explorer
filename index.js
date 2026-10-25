@@ -7,6 +7,7 @@ import {
   AnimationStore, PreparedAnimation, analyzeAnimationPath, createAnimationPath, resolveAnimationMinimum,
 } from './animation.mjs'
 import { AnimationGpuSession } from './animationGpuSession.mjs'
+import { AnimationBuddhabrotSession } from './animationBuddhabrotSession.mjs'
 import { BuddhabrotRunner, createBuddhaRunner } from './buddhabrot.mjs'
 import { BuddhabrotRealtimeRenderer, getBuddhabrotFrameTransform } from './buddhabrotRealtime.mjs'
 import { BuddhabrotContinuousRunner, CONTINUOUS_SAMPLES } from './buddhabrotContinuous.mjs'
@@ -3902,7 +3903,54 @@ function redrawBuddhaForExecutionSettingChange() {
  * @async
  * @throws {Error} 描画を開始できない場合
  */
+function getBuddhaRenderParams(target, { samples, renderDelay, brightness, gamma, pal }) {
+  const targetRenderer = target.renderer
+  const mode = document.getElementById('buddhaMode')?.value || 'buddha'
+  return applyFixedBuddhaSamples({
+    renderDelay,
+    samples: samples,
+    renderPointBatchSize: syncBuddhaPointBatchSize(samples),
+    maxIter: targetRenderer.max_iter,
+    width: target.canvas.width,
+    height: target.canvas.height,
+    center: {
+      x: targetRenderer.center[0].toNumber ? targetRenderer.center[0].toNumber() : -0.5,
+      y: targetRenderer.center[1].toNumber ? targetRenderer.center[1].toNumber() : 0,
+    },
+    zoom: targetRenderer.zoom.toNumber ? targetRenderer.zoom.toNumber() : 1,
+    ...getBuddhaSamplingRange(targetRenderer, target.kind),
+    // Buddhabrot 専用 supersampling UI があれば読む
+    supersampling: targetRenderer.supersampling,
+    palette: pal,
+    mode: mode,
+    fractalType: target.fractalType,
+    brightness: brightness,
+    gamma: gamma,
+    iterationFunction: target.iterationFunction,
+    // UI 側で指定された初期 z0 があれば含める
+    z0Real: document.getElementById('z0-real') ? parseFloat(document.getElementById('z0-real').value) : undefined,
+    z0Imag: document.getElementById('z0-imag') ? parseFloat(document.getElementById('z0-imag').value) : undefined,
+    escapeRadius: targetRenderer.escapeRadius !== undefined ? targetRenderer.escapeRadius : 4.0,
+    juliaRe: target.juliaRe,
+    juliaIm: target.juliaIm,
+    gpu: (() => {
+      try {
+        const bel = document.getElementById('buddha-gpu')
+        if (bel) return !!bel.checked
+        const el = document.getElementById('gpu')
+        return el ? !!el.checked : false
+      } catch (_e) {
+        return false
+      }
+    })(),
+    // 両モードとも画面で選択された Band Mode を使用する。
+    buddhaBandMode: DOM.buddha.bandMode?.value === 'perPoint' ? 'perPoint' : 'perTrajectory',
+  }, target.kind)
+}
+
 async function startBuddhaRender({ preserveSourceRender = false, captureFractalImage = true } = {}) {
+  invalidateAnimation()
+  queueMicrotask(updateAnimationUi)
   buddhaDisplaySuppressed = false
   cancelRealtimeBuddhaDrag()
   const target = getBuddhabrotTargetSnapshot()
@@ -4184,7 +4232,10 @@ async function startBuddhaRender({ preserveSourceRender = false, captureFractalI
           // 部分密度の完了通知が届く。表示保持中はこれを描画し、完全消去または
           // 再実行で世代が変わった場合だけ無視する。
           if (buddhaRunnerGeneration !== runnerGeneration) return
-          queueMicrotask(() => syncBuddhaPointBatchSize())
+          queueMicrotask(() => {
+            syncBuddhaPointBatchSize()
+            updateAnimationUi()
+          })
           try {
             finishBuddhabrotProgress()
             hideInactiveBuddhabrotProgress()
@@ -4278,9 +4329,6 @@ async function startBuddhaRender({ preserveSourceRender = false, captureFractalI
   buddhaRunner.width = targetWidth
   buddhaRunner.height = targetHeight
   buddhaRunner.maxIter = targetRenderer.max_iter
-  let mode = 'buddha'
-  const modeEl = document.getElementById('buddhaMode')
-  mode = modeEl && typeof modeEl.value !== 'undefined' ? modeEl.value || 'buddha' : 'buddha'
   // Buddhabrot 用進捗を開始する。タスク総数は samples ベースの近似値を使う
   try {
     if (samples > 0) {
@@ -4360,46 +4408,7 @@ async function startBuddhaRender({ preserveSourceRender = false, captureFractalI
   if (!runnerToStart || typeof runnerToStart.start !== 'function') {
     console.error('index.js: runnerToStart.start is not available', runnerToStart)
   }
-  const renderParams = applyFixedBuddhaSamples({
-    renderDelay,
-    samples: samples,
-    renderPointBatchSize: syncBuddhaPointBatchSize(samples),
-    maxIter: targetRenderer.max_iter,
-    width: buddhaRunner.width,
-    height: buddhaRunner.height,
-    center: {
-      x: targetRenderer.center[0].toNumber ? targetRenderer.center[0].toNumber() : -0.5,
-      y: targetRenderer.center[1].toNumber ? targetRenderer.center[1].toNumber() : 0,
-    },
-    zoom: targetRenderer.zoom.toNumber ? targetRenderer.zoom.toNumber() : 1,
-    ...getBuddhaSamplingRange(targetRenderer, target.kind),
-    // Buddhabrot 専用 supersampling UI があれば読む
-    supersampling: targetRenderer.supersampling,
-    palette: pal,
-    mode: mode,
-    fractalType: target.fractalType,
-    brightness: brightness,
-    gamma: gamma,
-    iterationFunction: target.iterationFunction,
-    // UI 側で指定された初期 z0 があれば含める
-    z0Real: document.getElementById('z0-real') ? parseFloat(document.getElementById('z0-real').value) : undefined,
-    z0Imag: document.getElementById('z0-imag') ? parseFloat(document.getElementById('z0-imag').value) : undefined,
-    escapeRadius: targetRenderer.escapeRadius !== undefined ? targetRenderer.escapeRadius : 4.0,
-    juliaRe: target.juliaRe,
-    juliaIm: target.juliaIm,
-    gpu: (() => {
-      try {
-        const bel = document.getElementById('buddha-gpu')
-        if (bel) return !!bel.checked
-        const el = document.getElementById('gpu')
-        return el ? !!el.checked : false
-      } catch (_e) {
-        return false
-      }
-    })(),
-    // 両モードとも画面で選択された Band Mode を使用する。
-    buddhaBandMode: DOM.buddha.bandMode?.value === 'perPoint' ? 'perPoint' : 'perTrajectory',
-  }, target.kind)
+  const renderParams = getBuddhaRenderParams(target, { samples, renderDelay, brightness, gamma, pal })
   // Source navigation needs partial images before the configured sample
   // budget completes; keep the budget and all numerical settings unchanged.
   renderParams.interactive = preserveSourceRender
@@ -4933,21 +4942,25 @@ if (juliaCanvasElement) {
 const animationLockedControls = new Map()
 let animationGpuAvailable = false
 
+function isBuddhabrotAnimation() {
+  return BuddhabrotState.targetKind === 'main' && !buddhaDisplaySuppressed &&
+    (buddhaActive || buddhaPreservedDisplay || BuddhabrotState.isViewEnabled())
+}
+
 function animationUnavailableReason() {
-  if (!animationGpuAvailable) return 'WebGPU is unavailable in this browser.'
+  if (!isBuddhabrotAnimation() && !animationGpuAvailable) return 'WebGPU is unavailable in this browser.'
   if (!AnimationStore.supported()) return 'Animation requires temporary storage (OPFS and Web Locks).'
-  if (!fractal.useGpu) return 'Enable GPU to prepare an animation.'
+  if (!isBuddhabrotAnimation() && !fractal.useGpu) return 'Enable GPU to prepare an animation.'
   if (juliaState.active) return 'Animation is unavailable in Julia mode.'
-  if (!selectAnimationGpu(fractal)) return 'The current formula, palette or zoom cannot be rendered with WebGPU.'
+  if (!isBuddhabrotAnimation() && !selectAnimationGpu(fractal)) return 'The current formula, palette or zoom cannot be rendered with WebGPU.'
   return ''
 }
 
-// Prepared animation frames are normal fractal frames. A Buddhabrot render may
-// continue during preparation, but must be fully stopped before it can write
-// over playback frames. This changes no fractal coordinates or animation data.
+// Stop live density callbacks before presenting prepared animation frames.
 function stopBuddhabrotForAnimationPlayback() {
   if (!buddhaRenderPending && !buddhaActive && !buddhaPreservedDisplay && !BuddhabrotState.isViewEnabled()) return
   buddhaRenderRequestGeneration++
+  buddhaDensityDrawGeneration++
   buddhaRenderPending = false
   stopAndClearBuddha()
 }
@@ -4965,7 +4978,7 @@ function selectAnimationGpu(view, { analysis = false } = {}) {
 function animationAdjustmentError() {
   const input = document.getElementById('anim-min-iterations')
   let message = ''
-  if (document.getElementById('anim-auto-adjust').checked) {
+  if (!isBuddhabrotAnimation() && document.getElementById('anim-auto-adjust').checked) {
     try {
       if (input.validity.badInput) throw new Error('Invalid minimum')
       resolveAnimationMinimum(input.value, fractal.max_iter)
@@ -4982,9 +4995,10 @@ function updateAnimationUi() {
   if (!toggle || !preparedAnimation) return
   const enabled = toggle.checked
   const busy = preparedAnimation.busy || animationUiPending || !!animationInvalidation
-  toggle.disabled = !animationGpuAvailable
-  toggle.title = animationGpuAvailable
-    ? 'Prepare a GPU animation to the applied coordinates'
+  const available = animationGpuAvailable || isBuddhabrotAnimation()
+  toggle.disabled = !available
+  toggle.title = available
+    ? 'Prepare an animation to the applied coordinates'
     : 'WebGPU is unavailable in this browser'
   document.getElementById('animation-panel').classList.toggle('d-none', !enabled)
   const exceptions = new Set(['anim-enable', 'anim-play', 'gpu'])
@@ -5002,8 +5016,9 @@ function updateAnimationUi() {
   }
   const reason = animationUnavailableReason()
   const adjustmentError = animationAdjustmentError()
+  document.getElementById('anim-auto-adjust').closest('.form-check').classList.toggle('d-none', isBuddhabrotAnimation())
   document.getElementById('anim-iteration-settings').classList.toggle(
-    'd-none', !document.getElementById('anim-auto-adjust').checked,
+    'd-none', isBuddhabrotAnimation() || !document.getElementById('anim-auto-adjust').checked,
   )
   document.getElementById('anim-prepare').disabled =
     busy || !enabled || !!reason || !!adjustmentError || preparedAnimation.state === 'ready'
@@ -5075,7 +5090,7 @@ async function prepareAnimation() {
     if (
       setupGeneration !== animationSetupGeneration ||
       !document.getElementById('anim-enable').checked ||
-      !fractal.useGpu
+      (!isBuddhabrotAnimation() && !fractal.useGpu)
     )
       return
     const targetCenter = [...fractal.center]
@@ -5083,7 +5098,8 @@ async function prepareAnimation() {
     const targetMaxIter = fractal.max_iter
     const targetDensity = Number(fractal.paletteComponent.density)
     const minimum = document.getElementById('anim-min-iterations').value
-    const autoAdjust = document.getElementById('anim-auto-adjust').checked
+    const buddhaAnimation = isBuddhabrotAnimation()
+    const autoAdjust = !buddhaAnimation && document.getElementById('anim-auto-adjust').checked
     const startZoom = getInitialFractalZoom(fractal.precision)
     const path = createAnimationPath({
       startCenter: [fxp.fromNumber(-0.5, fractal.precision), fxp.fromNumber(0, fractal.precision)],
@@ -5098,7 +5114,24 @@ async function prepareAnimation() {
       center: [...targetCenter],
       zoom: targetZoom,
     })
-    session = new AnimationGpuSession({
+    if (buddhaAnimation) {
+      const ss = Number(fractal.supersampling) || 0
+      const sampleValue = parseInt(buddhaFiniteSampleValue ?? DOM.buddha.iterations.value, 10)
+      const samples = Math.floor((Number.isNaN(sampleValue) ? 100000 : sampleValue) * (ss > 1 ? ss * ss : 1))
+      const palId = document.getElementById('buddha-palette').value
+      const rawPal = buildPaletteFromId(palId)
+      const params = getBuddhaRenderParams(getBuddhabrotTargetSnapshot(), {
+        samples,
+        renderDelay: 0,
+        brightness: parseFloat(document.getElementById('buddha-brightness').value) || BUDDHA_DEFAULT_BRIGHTNESS,
+        gamma: parseFloat(document.getElementById('buddha-gamma').value) || BUDDHA_DEFAULT_GAMMA,
+        pal: Array.isArray(rawPal) ? { bands: rawPal, gradient: getBuddhaPalette(palId)?.gradient === true } : rawPal,
+      })
+      session = new AnimationBuddhabrotSession({
+        view, params, workerCount: Math.max(1, DEFAULT_WORKER_COUNT),
+        samplingRange: (frameView) => getBuddhaSamplingRange(frameView, 'main'),
+      })
+    } else session = new AnimationGpuSession({
       view,
       sources: {
         direct: fractal.mandelbrotCustomGpu,
@@ -5133,6 +5166,7 @@ async function prepareAnimation() {
 async function playAnimation() {
   if (animationInvalidation || animationUiPending || animationUnavailableReason()) return
   clearPendingInteractiveRedrawState()
+  const buddhaAnimation = isBuddhabrotAnimation()
   stopBuddhabrotForAnimationPlayback()
   cancelActiveMainRender()
   _clearPinnedOrbits()
@@ -5143,6 +5177,16 @@ async function playAnimation() {
     context.clearRect(0, 0, canvasElement.width, canvasElement.height)
     context.drawImage(image, 0, 0)
     savedFractalImageData = null
+    if (buddhaAnimation) {
+      BuddhabrotState.targetKind = 'main'
+      buddhaPreservedDisplay = true
+      DOM.buddha.toggle.checked = true
+      DOM.buddha.toggle.disabled = false
+      savedBuddhaImageData = {
+        type: 'imageData', imageData: context.getImageData(0, 0, canvasElement.width, canvasElement.height),
+        width: canvasElement.width, height: canvasElement.height, targetKind: 'main',
+      }
+    }
     updateCoordinateInputs()
     showZoomFactor()
     _refreshActiveOrbitOverlays()
@@ -5175,7 +5219,7 @@ function initAnimationControls() {
     updateAnimationUi()
   })
   toggle.addEventListener('change', () => {
-    if (toggle.checked) {
+    if (toggle.checked && !isBuddhabrotAnimation()) {
       fractal.useGpu = true
       document.getElementById('gpu').checked = true
       fractal.applyZoomLimitForConfiguredMode()
@@ -5226,7 +5270,7 @@ function initAnimationControls() {
           (type === 'input' || type === 'change') &&
           !target.id?.startsWith('anim-') &&
           !['coordX', 'coordY', 'coordZoom'].includes(target.id) &&
-          !target.closest?.('#buddhabrot-section')
+          (!target.closest?.('#buddhabrot-section') || isBuddhabrotAnimation())
         ) {
           invalidateAnimation()
           queueMicrotask(updateAnimationUi)
@@ -5235,6 +5279,10 @@ function initAnimationControls() {
       { capture: true, passive: false },
     )
   }
+  document.getElementById('buddhabrot-section').addEventListener('change', () => {
+    invalidateAnimation()
+    queueMicrotask(updateAnimationUi)
+  })
   if (AnimationStore.supported())
     AnimationStore.cleanup().catch((error) => {
       preparedAnimation.reportError(error, 'cleanup')
