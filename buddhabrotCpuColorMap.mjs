@@ -1,4 +1,4 @@
-import { DensityExposure, mapDensityChannel } from './buddhabrotExposure.mjs'
+import { DensityExposure, getDensityExposure, mapDensityChannel } from './buddhabrotExposure.mjs'
 
 // Incremental CPU exposure mapping. Density only grows between sparse updates;
 // a changed exposure or display setting requires recoloring occupied pixels.
@@ -90,5 +90,18 @@ export class CpuDensityColorMap {
     this.gamma = gamma
     this.initialized = true
     return { x, y, width: right - x, height: bottom - y, max, full }
+  }
+}
+
+// Complete animation frames need no sparse-update bookkeeping. Match the full
+// mapper's metering and integer rounding without a Set and per-pixel peak array.
+export function mapBuddhabrotFrame(r, g, b, pixels, brightness, gamma) {
+  const scale = getDensityExposure(r, g, b)
+  for (let i = 0; i < r.length; i++) {
+    const offset = i * 4
+    pixels[offset] = (255 * mapDensityChannel(r[i] || 0, scale, brightness, gamma)) | 0
+    pixels[offset + 1] = (255 * mapDensityChannel(g[i] || 0, scale, brightness, gamma)) | 0
+    pixels[offset + 2] = (255 * mapDensityChannel(b[i] || 0, scale, brightness, gamma)) | 0
+    pixels[offset + 3] = 255
   }
 }

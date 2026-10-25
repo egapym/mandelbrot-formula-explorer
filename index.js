@@ -31,6 +31,7 @@ import { WorkerContext } from './workerContext.mjs'
 import { createWorkerFrom } from './workerLoader.mjs'
 
 let preparedAnimation = null
+let preparedBuddhabrotParams = null
 let animationInvalidation = null
 let animationUiPending = false
 let animationSetupGeneration = 0
@@ -3168,8 +3169,12 @@ try {
           await savedBuddhaImageDataPromise
         }
       } catch (_err) {}
-      // 無効状態のトグル変更は無視する
-      if (buddhaToggle.disabled) return
+      // Discarding prepared frames briefly locks controls between the native
+      // input/change events (or while awaiting a saved bitmap). Honor the
+      // already initiated View change when its original state was enabled.
+      const lockedByAnimationCleanup = animationLockedControls.get(buddhaToggle) === false &&
+        !preparedAnimation?.busy && !animationUiPending
+      if (buddhaToggle.disabled && !lockedByAnimationCleanup) return
       if (buddhaToggle.checked) {
         buddhaDisplaySuppressed = false
         // フラクタル変更でロックされているときは有効化を許可しない
@@ -3787,9 +3792,9 @@ function redrawBuddhabrotSourceView(targetKind = BuddhabrotState.targetKind) {
     resizeTmpCanvas()
     fractal.resized()
   }
-  // Worker / GPU が全画面を描き終えるまで古い Buddhabrot の断片を残さない。
-  const ctx = canvasElement.getContext('2d')
-  ctx.clearRect(0, 0, canvasElement.width, canvasElement.height)
+  // Keep the visible image until the current-view renderer presents pixels.
+  // Clearing here exposes the white canvas background during worker/GPU startup.
+  // The synchronized full-size offscreens above replace the entire canvas.
   redraw()
 }
 
@@ -3948,8 +3953,10 @@ function getBuddhaRenderParams(target, { samples, renderDelay, brightness, gamma
   }, target.kind)
 }
 
-async function startBuddhaRender({ preserveSourceRender = false, captureFractalImage = true } = {}) {
-  invalidateAnimation()
+async function startBuddhaRender({
+  preserveSourceRender = false, captureFractalImage = true, animationFrameParams = null,
+} = {}) {
+  if (!animationFrameParams) invalidateAnimation()
   queueMicrotask(updateAnimationUi)
   buddhaDisplaySuppressed = false
   cancelRealtimeBuddhaDrag()
@@ -3977,7 +3984,7 @@ async function startBuddhaRender({ preserveSourceRender = false, captureFractalI
   const viewToggle = DOM.buddha.toggle || document.getElementById('buddha-toggle')
   if (viewToggle) {
     viewToggle.checked = targetWasShowingBuddha
-    viewToggle.disabled = true
+    viewToggle.disabled = !animationFrameParams
   }
 
   // 通常フラクタル描画が進行中なら止め、Buddhabrot に計算資源を譲る
@@ -4348,6 +4355,7 @@ async function startBuddhaRender({ preserveSourceRender = false, captureFractalI
   buddhaRunner.palette = pal
   // アクティブ扱いにして、操作を制限する
   buddhaActive = true
+  buddhaPreservedDisplay = false
   buddhaRenderPending = false
   // 手動開始時は、フラクタル変更由来のロックを解除する
   buddhaLockedByFractalChange = false
@@ -4409,6 +4417,9 @@ async function startBuddhaRender({ preserveSourceRender = false, captureFractalI
     console.error('index.js: runnerToStart.start is not available', runnerToStart)
   }
   const renderParams = getBuddhaRenderParams(target, { samples, renderDelay, brightness, gamma, pal })
+  // Rebuild editable density for the held animation frame using the same finite
+  // sample sequence. Continuous rendering resumes its normal accumulation mode.
+  if (animationFrameParams && !continuous) renderParams.sampleSeed = animationFrameParams.sampleSeed
   // Source navigation needs partial images before the configured sample
   // budget completes; keep the budget and all numerical settings unchanged.
   renderParams.interactive = preserveSourceRender
@@ -4417,7 +4428,7 @@ async function startBuddhaRender({ preserveSourceRender = false, captureFractalI
     hideProgressMonitor(getBuddhabrotProgressMonitor(target.kind))
     if (viewToggle) {
       viewToggle.checked = true
-      viewToggle.disabled = true
+      viewToggle.disabled = !animationFrameParams
     }
   }
   await runnerToStart.start(renderParams)
@@ -4940,6 +4951,7 @@ if (juliaCanvasElement) {
 
 // なめらかな移動用のアニメーション状態と補助関数
 const animationLockedControls = new Map()
+let animationControlsLocked = false
 let animationGpuAvailable = false
 
 function isBuddhabrotAnimation() {
@@ -5002,7 +5014,8 @@ function updateAnimationUi() {
     : 'WebGPU is unavailable in this browser'
   document.getElementById('animation-panel').classList.toggle('d-none', !enabled)
   const exceptions = new Set(['anim-enable', 'anim-play', 'gpu'])
-  if (busy) {
+  if (busy && !animationControlsLocked) {
+    animationControlsLocked = true
     for (const control of document.querySelectorAll(
       '#settings input, #settings select, #settings button, #settings textarea',
     )) {
@@ -5010,7 +5023,8 @@ function updateAnimationUi() {
       if (!animationLockedControls.has(control)) animationLockedControls.set(control, control.disabled)
       control.disabled = true
     }
-  } else {
+  } else if (!busy && animationControlsLocked) {
+    animationControlsLocked = false
     for (const [control, disabled] of animationLockedControls) control.disabled = disabled
     animationLockedControls.clear()
   }
@@ -5048,6 +5062,7 @@ function updateAnimationUi() {
 }
 
 function invalidateAnimation() {
+  preparedBuddhabrotParams = null
   animationSetupGeneration++
   if (!preparedAnimation || animationInvalidation || (!preparedAnimation.store && !preparedAnimation.busy)) return
   animationInvalidation = preparedAnimation
@@ -5148,12 +5163,13 @@ async function prepareAnimation() {
         return new Offscreen(canvas, 1, true, true)
       },
     })
-    await preparedAnimation.prepare(path, (frame, signal) => session.render(frame, signal), {
+    await preparedAnimation.prepare(path, (frame, signal) => session.prepareFrame(frame, signal), {
       analyze: autoAdjust ? (signal, report) => analyzeAnimationPath(
         { path, startZoom, targetZoom, targetCenter, minimum, targetMaxIter, targetDensity },
         (frame, probeSignal) => session.probe(frame, probeSignal), signal, report,
       ) : undefined,
     })
+    preparedBuddhabrotParams = buddhaAnimation && preparedAnimation.state === 'ready' ? session.params : null
   } catch (error) {
     preparedAnimation.reportError(error)
   } finally {
@@ -5166,7 +5182,8 @@ async function prepareAnimation() {
 async function playAnimation() {
   if (animationInvalidation || animationUiPending || animationUnavailableReason()) return
   clearPendingInteractiveRedrawState()
-  const buddhaAnimation = isBuddhabrotAnimation()
+  const buddhaParams = preparedBuddhabrotParams
+  const buddhaAnimation = !!buddhaParams
   stopBuddhabrotForAnimationPlayback()
   cancelActiveMainRender()
   _clearPinnedOrbits()
@@ -5178,10 +5195,21 @@ async function playAnimation() {
     context.drawImage(image, 0, 0)
     savedFractalImageData = null
     if (buddhaAnimation) {
+      // Playback clears the live runner and its parameters. Reattach the exact
+      // prepared settings to the displayed frame so wheel/drag navigation can
+      // start again after completion or Stop, using the held frame's view.
+      lastBuddhaRenderParams = {
+        ...buddhaParams,
+        width: canvasElement.width, height: canvasElement.height,
+        center: { x: fractal.center[0].toNumber(), y: fractal.center[1].toNumber() },
+        zoom: fractal.zoom.toNumber(),
+      }
       BuddhabrotState.targetKind = 'main'
       buddhaPreservedDisplay = true
       DOM.buddha.toggle.checked = true
-      DOM.buddha.toggle.disabled = false
+      // Unlock with the rest of the controls after completion/Stop. The live
+      // runner was cleared before playback, when View was temporarily disabled.
+      animationLockedControls.set(DOM.buddha.toggle, false)
       savedBuddhaImageData = {
         type: 'imageData', imageData: context.getImageData(0, 0, canvasElement.width, canvasElement.height),
         width: canvasElement.width, height: canvasElement.height, targetKind: 'main',
@@ -5191,6 +5219,13 @@ async function playAnimation() {
     showZoomFactor()
     _refreshActiveOrbitOverlays()
   })
+  if (buddhaParams && BuddhabrotState.targetKind === 'main' && BuddhabrotState.isViewEnabled()) {
+    // PNG playback has no density buffers. Hand the held view back to the real
+    // renderer so exposure controls, View OFF/ON and navigation work normally.
+    // Keep prepared frames available for replay until a setting/view changes.
+    startBuddhaRender({ captureFractalImage: false, animationFrameParams: buddhaParams })
+      .catch((error) => console.warn('Could not restore Buddhabrot rendering after animation:', error))
+  }
   updatePermalink()
 }
 

@@ -124,6 +124,10 @@ try {
       draws = 0
       cachedDraws = 0
       toggle(doc, 'buddha-toggle', false)
+      const switchingPixels = canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height).data
+      if (!switchingPixels.some((value, index) => index % 4 === 3 && value > 0)) {
+        throw new Error(`View OFF exposed a transparent white frame after ${gesture}`)
+      }
       if (cachedDraws !== 0) throw new Error(`Stale ordinary frame was drawn synchronously after ${gesture}: ${cachedDraws} draws`)
       // Stop flushes the current Buddhabrot density synchronously; count only
       // subsequent frames when waiting for the ordinary renderer.

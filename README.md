@@ -186,11 +186,34 @@ Each frame uses a finite sample budget; with Continuous ON this is the Samples
 value saved before enabling Continuous. Render Slowdown affects live drawing,
 so prepared frames compute at full speed. Automatic iteration/density adjustment
 is available for ordinary fractal animation. Playback retains Buddhabrot View;
-changing Buddhabrot settings invalidates the prepared animation.
+after completion or Stop, the View toggle is enabled and canvas pan/zoom resumes
+from the displayed frame with the prepared Buddhabrot settings. The normal
+Buddhabrot renderer rebuilds editable density at that held view, so Brightness
+and Gamma changes work again. Prepared PNGs remain available for replay until a
+setting or view changes. Changing Buddhabrot settings invalidates the
+prepared animation.
 Preparation renders the entire path at the current resolution, iterations, smooth
 coloring, and supersampling settings. The percentage reaches 100% after all frames
 have been saved; **Play** then starts at the initial view, pans to the target, and
 zooms in. Playback uses the saved images without recalculating the fractal.
+
+Prepare overlaps frame computation with lossless PNG encoding and ordered storage
+writes, with at most two frame snapshots in flight. PNGs are appended to one OPFS
+file instead of opening and committing a file for every frame. Ready/100% waits
+for the final file commit; Stop and failures drain pending encoders and writes
+before removing partial storage. Playback reads frame slices from one immutable
+file snapshot. Resolution, samples, iteration limits and frame rate are retained.
+Ordinary GPU animation omits unused escape-coordinate readback and memoizes exact
+deep-zoom reference calculations in a bounded 32 MiB/64-entry cache. Buddhabrot
+animation reuses its GPU sampling pipelines, readback staging buffer, density
+arrays and canvas, and uses full-frame exposure mapping without sparse-update
+bookkeeping. CPU Buddhabrot also reuses complete orbit points and rejected-sample
+classifications while seeded sampling bounds remain identical (Fixed Samples or
+Initial View). Its 32 MiB budget is divided across workers; trajectories that do
+not fit are recomputed in full. Cache keys include sampling, iteration, formula,
+seed and Julia settings. Stop/worker release clears the cache, and replay retains
+the original Float32 flush boundaries. Progress updates only lock controls when
+entering the busy state.
 
 **Stop** cancels preparation or holds the current playback frame. A subsequent
 **Play** starts again from the beginning. Changing rendering settings, speed, frame
@@ -235,7 +258,7 @@ whichever is smaller. Buffer limits and a 128 MiB decoded-image budget are check
 without reducing quality. Temporary frames are deleted on invalidation; abandoned
 sessions are cleaned on the next visit without deleting another tab's active data.
 
-Animation checks: `node --test test/animationTests.mjs`. With the local server
+Animation checks: `node --test test/animationTests.mjs test/animationBuddhabrotTests.mjs test/buddhabrotAnimationCacheTests.mjs`. With the local server
 running, open `test/animationBrowserTests.html`, `test/animationBuddhabrotBrowserTests.html`
 and `test/gpuResourceTests.html`
 in a WebGPU-capable browser for GPU and storage integration tests.
@@ -362,3 +385,13 @@ readback buffer limits, mapping failure recovery, and repeated rendering. Shader
 outputs are also compared with frozen pre-optimization generators, including
 reference-limit ties, custom formulas using iteration numbers and orbit history,
 smooth coloring, and supersampling.
+
+Animation Prepare benchmark: open
+`test/animationPreparePerformanceBrowserTests.html?repeats=3` with the local server.
+It measures complete Prepare time (including PNG encoding and storage commit),
+GPU readback bytes, pipeline/buffer creation and exact-reference calculation
+counts for normal, deep-zoom, CPU Buddhabrot and GPU Buddhabrot frames. It also
+hashes every decoded frame for comparison against a frozen baseline. Timing is
+diagnostic, not a test pass threshold; use `?case=normal&repeats=3` to isolate one
+case. Measurements are recorded in
+`docs/benchmarks/animation-prepare-2026-10-26.json`.

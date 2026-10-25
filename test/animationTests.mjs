@@ -504,3 +504,104 @@ test('analysis GPU failures abort preparation and release storage', async (t) =>
   assert.equal(store.disposed, true)
   assert.match(animation.error, /graphics device/)
 })
+
+test('preparation overlaps encoding and ordered writes with at most two frame snapshots', async () => {
+  const gates = [deferred(), deferred(), deferred()]
+  const rendered = []
+  const store = memoryStore()
+  const animation = new PreparedAnimation({ createStore: async () => store })
+  const preparing = animation.prepare({ count: 3, at: i => i }, async i => {
+    rendered.push(i)
+    return { blob: gates[i].promise }
+  })
+  await wait()
+  assert.deepEqual(rendered, [0, 1])
+  assert.equal(animation.progress, 0)
+  gates[1].resolve(new Blob(['second']))
+  await wait()
+  assert.equal(store.files.length, 0, 'Encoding completion must not reorder writes')
+  gates[0].resolve(new Blob(['first']))
+  while (rendered.length < 3) await wait()
+  gates[2].resolve(new Blob(['third']))
+  await preparing
+  assert.equal(animation.state, 'ready')
+  assert.deepEqual(await Promise.all(store.files.map(blob => blob.text())), ['first', 'second', 'third'])
+})
+
+test('Stop drains a pending encoder before disposing partial storage', async () => {
+  const encode = deferred()
+  const store = memoryStore()
+  const animation = new PreparedAnimation({ createStore: async () => store })
+  const preparing = animation.prepare({ count: 1, at: i => i }, async () => ({ blob: encode.promise }))
+  await wait()
+  const stopping = animation.stop()
+  await wait()
+  assert.equal(store.disposed, false)
+  encode.resolve(new Blob(['late']))
+  await Promise.all([preparing, stopping])
+  assert.equal(store.disposed, true)
+  assert.equal(store.files.length, 0)
+  assert.equal(animation.state, 'idle')
+})
+
+test('100 percent and ready wait for the packed file commit; a commit failure discards frames', async (t) => {
+  t.mock.method(console, 'error', () => {})
+  for (const failure of [false, true]) {
+    const commit = deferred()
+    const store = memoryStore()
+    store.finalize = async () => { await commit.promise; if (failure) throw new Error('commit failed') }
+    const animation = new PreparedAnimation({ createStore: async () => store })
+    const preparing = animation.prepare({ count: 1, at: i => i }, async () => new Blob(['frame']))
+    while (!store.files.length) await wait()
+    assert.equal(animation.state, 'preparing')
+    assert.ok(animation.progress < 100)
+    commit.resolve()
+    await preparing
+    assert.equal(animation.state, failure ? 'idle' : 'ready')
+    assert.equal(store.disposed, failure)
+    assert.equal(animation.progress, failure ? 0 : 100)
+  }
+})
+
+test('packed OPFS stores lossless frame slices with one writer and one immutable file snapshot', async () => {
+  const chunks = []
+  let closes = 0, reads = 0
+  const store = new AnimationStore({
+    budget: 100,
+    frames: new Map(),
+    writer: { write: async blob => chunks.push(blob), close: async () => { closes++ } },
+    packedFile: { getFile: async () => { reads++; return new Blob(chunks) } },
+  })
+  await store.put(0, new Blob(['first'], { type: 'image/png' }))
+  await store.put(1, new Blob(['second'], { type: 'image/png' }))
+  await store.finalize()
+  assert.equal((await store.get(0)).type, 'image/png')
+  assert.equal(await (await store.get(1)).text(), 'second')
+  assert.equal(await (await store.get(0)).text(), 'first')
+  assert.equal(closes, 1)
+  assert.equal(reads, 1)
+  assert.equal(store.bytes, 11)
+  await assert.rejects(store.get(2), /Missing/)
+  await assert.rejects(store.put(2, new Blob(['late'])), /finalized/)
+})
+
+test('a rendering failure cancels queued saves and drains the previous encoder', async (t) => {
+  t.mock.method(console, 'error', () => {})
+  const encode = deferred()
+  const failed = deferred()
+  const store = memoryStore()
+  const animation = new PreparedAnimation({ createStore: async () => store })
+  const preparing = animation.prepare({ count: 2, at: i => i }, async i => {
+    if (i) { failed.resolve(); throw new Error('GPU lost') }
+    return { blob: encode.promise }
+  })
+  await failed.promise
+  await wait()
+  assert.equal(store.disposed, false)
+  encode.resolve(new Blob(['stale']))
+  await preparing
+  assert.equal(animation.state, 'idle')
+  assert.equal(animation.progress, 0)
+  assert.equal(store.files.length, 0)
+  assert.equal(store.disposed, true)
+})

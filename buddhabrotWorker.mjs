@@ -139,6 +139,7 @@ class JobContext {
 }
 
 let running = false
+let preparedOrbitCache = null
 let renderDelay = 0 // 描画点のバッチごとの待ち時間（ミリ秒）
 let renderPointBatchSize = DEFAULT_RENDER_POINT_BATCH_SIZE
 let trajectorySlots = null
@@ -189,6 +190,7 @@ self.onmessage = (e) => {
       }
     })
   } else if (data.cmd === 'stop') {
+    preparedOrbitCache = null
     releasePresentations()
     releaseSlotWait()
     running = false
@@ -281,6 +283,31 @@ async function runSampling(opts) {
   const sampleBottom = samplingCenter.y + (SAMPLING_CONFIG.VIEW_SPAN / samplingZoom) * samplingAspect
   const sampleWidth = sampleRight - sampleLeft
   const sampleHeight = sampleBottom - sampleTop
+
+  // Fixed/Initial sampling can replay exact accepted points and skip rejected
+  // orbits across animation frames. View projection and coloring still run for
+  // every point. A bounded cache falls back to recomputing uncached trajectories.
+  const cacheBudget = Math.min(32 * 1024 ** 2, Math.max(0, Number(opts.orbitCacheBytes) || 0))
+  const cacheKey = cacheBudget && renderDelay === 0 && Number.isSafeInteger(samples) &&
+    samples > 0 && samples <= cacheBudget / 2 && opts.sampleSeed !== undefined
+    ? JSON.stringify([cacheBudget, samples, maxIter, sampleLeft, sampleTop, sampleWidth, sampleHeight,
+      opts.sampleSeed, mode, fractalType, opts.iterationFunction, opts.z0Real, opts.z0Imag,
+      opts.escapeRadius, fixedJuliaRe, fixedJuliaIm]) : null
+  if (!cacheKey || preparedOrbitCache?.key !== cacheKey) {
+    preparedOrbitCache = cacheKey ? { key: cacheKey, flags: new Uint8Array(samples),
+      points: new Map(), bytes: samples, flushes: new Set(), complete: false } : null
+  }
+  const orbitCache = preparedOrbitCache
+  const rememberOrbit = (index, points) => {
+    if (!orbitCache || orbitCache.flags[index]) return
+    if (!points) { orbitCache.flags[index] = 1; return }
+    const bytes = points.byteLength + 96
+    if (orbitCache.bytes + bytes <= cacheBudget) {
+      orbitCache.points.set(index, points.slice())
+      orbitCache.flags[index] = 2
+      orbitCache.bytes += bytes
+    } else orbitCache.flags[index] = 3
+  }
 
   const chunkW = width
   const chunkH = height
@@ -452,61 +479,69 @@ async function runSampling(opts) {
     const cr = isJulia ? fixedJuliaRe : sampleRe
     const ci = isJulia ? fixedJuliaIm : sampleIm
 
-    // 反復を開始
-    // Julia は画素側を z0 とし、Mandelbrot / Custom は従来どおり固定 z0 から始める
-    let zx = isJulia ? sampleRe : typeof opts.z0Real === 'number' ? opts.z0Real : 0
-    let zy = isJulia ? sampleIm : typeof opts.z0Imag === 'number' ? opts.z0Imag : 0
-    if (
-      !(zx * zx + zy * zy <= escapeRadiusSq) ||
-      (checkComponentLimit && (Math.abs(zx) >= 1e20 || Math.abs(zy) >= 1e20))
-    ) return
-    let escaped = false
-    let trajLen = 0
-    const history = { z: [] }
-    if (isJulia) {
-      trajBuf[0] = sampleRe
-      trajBuf[1] = sampleIm
-      trajLen = 1
-    }
-    // trajBuf を再利用し、長さを trajLen で管理する
-    for (let iter = 0; iter < maxIter; iter++) {
-      // コンパイル済み反復関数があればそれを使い、なければ z^2 + c を使う
-      let x2, y2
-      if (compiledIter) {
-        try {
-          const res = compiledIter(zx, zy, cr, ci, iter, history)
-          x2 = Number(res[0])
-          y2 = Number(res[1])
-        } catch (_e) {
+    const sampleIndex = nextSample - 1
+    if (orbitCache?.flags[sampleIndex] === 1) return
+    const cachedPoints = orbitCache?.points.get(sampleIndex)
+    let trajLen = cachedPoints ? cachedPoints.length / 2 : 0
+    if (!cachedPoints) {
+      // 反復を開始
+      // Julia は画素側を z0 とし、Mandelbrot / Custom は従来どおり固定 z0 から始める
+      let zx = isJulia ? sampleRe : typeof opts.z0Real === 'number' ? opts.z0Real : 0
+      let zy = isJulia ? sampleIm : typeof opts.z0Imag === 'number' ? opts.z0Imag : 0
+      if (
+        !(zx * zx + zy * zy <= escapeRadiusSq) ||
+        (checkComponentLimit && (Math.abs(zx) >= 1e20 || Math.abs(zy) >= 1e20))
+      ) { rememberOrbit(sampleIndex, null); return }
+      let escaped = false
+      trajLen = 0
+      const history = { z: [] }
+      if (isJulia) {
+        trajBuf[0] = sampleRe
+        trajBuf[1] = sampleIm
+        trajLen = 1
+      }
+      // trajBuf を再利用し、長さを trajLen で管理する
+      for (let iter = 0; iter < maxIter; iter++) {
+        // コンパイル済み反復関数があればそれを使い、なければ z^2 + c を使う
+        let x2, y2
+        if (compiledIter) {
+          try {
+            const res = compiledIter(zx, zy, cr, ci, iter, history)
+            x2 = Number(res[0])
+            y2 = Number(res[1])
+          } catch (_e) {
+            escaped = true
+            break
+          }
+        } else {
+          // z = z^2 + c  (実部/虚部)
+          x2 = zx * zx - zy * zy + cr
+          y2 = 2 * zx * zy + ci
+        }
+        // Negating <= rejects NaN as well as out-of-radius values, without
+        // separate finite/absolute-value checks on every ordinary iteration.
+        if (
+          !(x2 * x2 + y2 * y2 <= escapeRadiusSq) ||
+          (checkComponentLimit && (Math.abs(x2) >= 1e20 || Math.abs(y2) >= 1e20))
+        ) {
+          // 次の z が発散する場合は脱出とみなし、脱出点自体は含めない
           escaped = true
           break
         }
-      } else {
-        // z = z^2 + c  (実部/虚部)
-        x2 = zx * zx - zy * zy + cr
-        y2 = 2 * zx * zy + ci
+        zx = x2
+        zy = y2
+        // 再利用可能なバッファに保存する
+        const ti = trajLen * 2
+        trajBuf[ti] = zx
+        trajBuf[ti + 1] = zy
+        trajLen++
       }
-      // Negating <= rejects NaN as well as out-of-radius values, without
-      // separate finite/absolute-value checks on every ordinary iteration.
-      if (
-        !(x2 * x2 + y2 * y2 <= escapeRadiusSq) ||
-        (checkComponentLimit && (Math.abs(x2) >= 1e20 || Math.abs(y2) >= 1e20))
-      ) {
-        // 次の z が発散する場合は脱出とみなし、脱出点自体は含めない
-        escaped = true
-        break
-      }
-      zx = x2
-      zy = y2
-      // 再利用可能なバッファに保存する
-      const ti = trajLen * 2
-      trajBuf[ti] = zx
-      trajBuf[ti + 1] = zy
-      trajLen++
-    }
 
-    const keep = (mode === 'buddha' && escaped) || (mode === 'antibuddha' && !escaped)
-    if (!keep || trajLen === 0) return
+      const keep = (mode === 'buddha' && escaped) || (mode === 'antibuddha' && !escaped)
+      if (!keep || trajLen === 0) { rememberOrbit(sampleIndex, null); return }
+      if (orbitCache && !orbitCache.flags[sampleIndex])
+        rememberOrbit(sampleIndex, trajBuf.subarray(0, trajLen * 2))
+    }
 
     // Color components retain the original Float32 palette rounding, followed
     // by double-precision multiplication and Float32 density accumulation.
@@ -530,7 +565,7 @@ async function runSampling(opts) {
       }
     }
 
-    const points = stepped ? trajBuf.slice(0, trajLen * 2) : trajBuf
+    const points = cachedPoints || (stepped ? trajBuf.slice(0, trajLen * 2) : trajBuf)
     // Prime the trajectory without drawing: every active orbit starts at step zero.
     if (stepped) yield true
 
@@ -614,14 +649,18 @@ async function runSampling(opts) {
         drawTrajectory().next()
       }
       completedSamples++
+      // Preserve the first frame's Float32 chunk boundaries while replaying,
+      // regardless of how much faster cached trajectories become.
+      if (orbitCache?.complete && orbitCache.flushes.has(completedSamples)) flushSparse(jobCtx)
       if (
         completedSamples % SAMPLING_CONFIG.COOPERATIVE_SAMPLE_INTERVAL === 0 &&
         Date.now() - sliceStarted >= SAMPLING_CONFIG.COOPERATIVE_TIME_SLICE_MS
       ) {
         // Finite and continuous jobs share the same hot loop and display cadence.
         // Always flush the final remainder after the loop, even for short jobs.
-        if (Date.now() - lastDensityFlush >= displayInterval) {
+        if (!orbitCache?.complete && Date.now() - lastDensityFlush >= displayInterval) {
           flushSparse(jobCtx)
+          if (orbitCache) orbitCache.flushes.add(completedSamples)
           lastDensityFlush = Date.now()
         }
         await new Promise((resolve) => setTimeout(resolve, 0))
@@ -675,6 +714,8 @@ async function runSampling(opts) {
       jobCtx.sendProgress(completedSamples, samples)
     }
   }
+
+  if (orbitCache && jobCtx.isActive() && completedSamples === samples) orbitCache.complete = true
 
   // 最終フラッシュ
   if (flushSparse(jobCtx) && presentationWait) await presentationWait

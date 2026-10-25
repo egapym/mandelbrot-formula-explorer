@@ -374,6 +374,7 @@ export class BuddhabrotRunner {
         samples: assign,
         continuous: this.continuous,
         interactive: !!params.interactive,
+        orbitCacheBytes: params.orbitCacheBytes || 0,
         maxIter: this.maxIter,
         width: this.width,
         height: this.height,

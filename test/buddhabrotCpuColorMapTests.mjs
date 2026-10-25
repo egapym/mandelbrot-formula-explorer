@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { CpuDensityColorMap } from '../buddhabrotCpuColorMap.mjs'
+import { CpuDensityColorMap, mapBuddhabrotFrame } from '../buddhabrotCpuColorMap.mjs'
 import { getDensityExposure, mapDensityChannel } from '../buddhabrotExposure.mjs'
 
 // Full-image reference checks incremental exposure statistics and recoloring.
@@ -30,6 +30,9 @@ function check(brightness, gamma, chunks) {
   const previous = pixels.slice()
   const update = mapper.update(brightness, gamma, chunks)
   assert.deepEqual(pixels, reference(r, g, b, brightness, gamma), 'Incremental RGB differs from full mapping')
+  const frame = new Uint8ClampedArray(pixels.length)
+  mapBuddhabrotFrame(r, g, b, frame, brightness, gamma)
+  assert.deepEqual(frame, pixels, 'Animation frame mapping changed RGBA')
   for (let i = 0; i < size; i++) {
     if (previous.subarray(i * 4, i * 4 + 4).some((value, channel) => value !== pixels[i * 4 + channel])) {
       assert.ok(i % width >= update.x && i % width < update.x + update.width)

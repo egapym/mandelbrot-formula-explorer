@@ -155,11 +155,13 @@ export class BuddhabrotWebGPU {
     }
     // A carry word preserves exact integer contributions without forcing a
     // full-image CPU readback every few hundred long orbits.
-    const highBuffers = this._cachedBuffers.highBuffers ||= Array.from({ length: 3 }, () =>
+    this._cachedBuffers.highBuffers ||= Array.from({ length: 3 }, () =>
       device.createBuffer({ size: bufSize,
         usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST }))
-    const densityReadback = this._cachedBuffers.densityReadback ||=
+    const highBuffers = this._cachedBuffers.highBuffers
+    this._cachedBuffers.densityReadback ||=
       createGpuDensityReadback(device, [rBuf, gBuf, bBuf], highBuffers, bufSize, QUANT_SCALE)
+    const densityReadback = this._cachedBuffers.densityReadback
 
     // band 用の uniform buffer。小さな配列なので storage より uniform が向いている
     const bandBufSize = MAX_BANDS * 16 // vec4 境界に合わせて MAX_BANDS 分を確保する
@@ -767,8 +769,14 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let hasReadDensity = false
     const readDensity = async () => {
       if (densityReadback) {
-        const buffer = device.createBuffer({ size: bufSize * 3,
-          usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ })
+        let buffer = params.reusePipelines && this._animationReadback?.device === device &&
+          this._animationReadback.size === bufSize * 3 ? this._animationReadback.buffer : null
+        if (!buffer) {
+          if (params.reusePipelines) this._animationReadback?.buffer.destroy()
+          buffer = device.createBuffer({ size: bufSize * 3,
+            usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ })
+          if (params.reusePipelines) this._animationReadback = { device, size: bufSize * 3, buffer }
+        }
         try {
           const encoder = device.createCommandEncoder()
           densityReadback.encode(encoder)
@@ -784,7 +792,10 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
           }
           hasReadDensity = true
           buffer.unmap()
-        } finally { buffer.destroy() }
+        } finally {
+          if (buffer.mapState === 'mapped') buffer.unmap()
+          if (!params.reusePipelines) buffer.destroy()
+        }
         return
       }
       const buffers = Array.from({ length: 2 }, () => device.createBuffer({ size: bufSize * 3,
@@ -821,8 +832,24 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
       Math.floor(3_840_000_000 / (invocations * Math.max(1000, this.maxIter)))))
     let pendingSamples = 0
     let queuedBatches = 0
-    const sampling = createGpuSamplingPipelines(device, wgsl,
-      [uniformBuf, rBuf, gBuf, bBuf, bandBuf, bandContribBuf], len, compactSamples, highBuffers)
+    // Animation changes uniforms for every frame, but its shader, histogram
+    // layout and sample queue capacity usually stay identical. Keep one bounded
+    // pipeline/queue set rather than compiling and allocating for every frame.
+    const samplingBuffers = [uniformBuf, rBuf, gBuf, bBuf, bandBuf, bandContribBuf, ...highBuffers]
+    let sampling = this._animationSampling
+    const matches = sampling?.device === device && sampling.code === wgsl &&
+      sampling.compact === compactSamples && sampling.capacity === len &&
+      samplingBuffers.every((buffer, i) => buffer === sampling.buffers[i])
+    if (!params.reusePipelines || !matches) {
+      sampling?.destroy()
+      this._animationSampling = null
+      sampling = createGpuSamplingPipelines(device, wgsl,
+        samplingBuffers.slice(0, 6), len, compactSamples, highBuffers)
+      if (params.reusePipelines) {
+        Object.assign(sampling, { device, code: wgsl, compact: compactSamples, capacity: len, buffers: samplingBuffers })
+        this._animationSampling = sampling
+      }
+    }
     try {
       while (samplesRemaining > 0 && this.running) {
         // このバッチで処理するサンプル数を決める
@@ -935,7 +962,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     } finally {
       // Includes Stop/readback errors; GPU queue IDs are never retained by a
       // cancelled navigation renderer or a later render generation.
-      sampling.destroy()
+      if (!params.reusePipelines) sampling.destroy()
     }
 
     return
@@ -976,9 +1003,10 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     this.height = params.height || this.height
 
     const total = Math.max(0, this.width * this.height)
-    this.densityR = new Float32Array(total)
-    this.densityG = new Float32Array(total)
-    this.densityB = new Float32Array(total)
+    for (const key of ['densityR', 'densityG', 'densityB']) {
+      if (this[key]?.length === total) this[key].fill(0)
+      else this[key] = new Float32Array(total)
+    }
 
     // ここではまず最小構成の GPU 経路を用意し、
     // 必要に応じて CPU フォールバックも扱えるようにしている。
@@ -1334,6 +1362,22 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         error: e?.message ? e.message : String(e),
       })
     }
+  }
+
+  // Animation owns a dedicated runner. Call after start() and readbacks settle.
+  dispose() {
+    this.stop()
+    this._cpuRunner?.terminate?.()
+    this._cpuRunner = null
+    this._animationSampling?.destroy()
+    this._animationSampling = null
+    this._animationReadback?.buffer.destroy()
+    this._animationReadback = null
+    for (const value of Object.values(this._cachedBuffers || {})) {
+      if (Array.isArray(value)) for (const buffer of value) buffer?.destroy?.()
+      else value?.destroy?.()
+    }
+    this._cachedBuffers = null
   }
 
   stop() {

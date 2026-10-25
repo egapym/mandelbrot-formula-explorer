@@ -308,7 +308,10 @@ export class AnimationStore {
     await Promise.race([ready, lockTask])
     try {
       const directory = await root.getDirectoryHandle(name, { create: true })
-      return new AnimationStore({ root, name, directory, budget, unlock, lockTask })
+      const packedFile = await directory.getFileHandle('frames.pngpack', { create: true })
+      const writer = await packedFile.createWritable()
+      return new AnimationStore({ root, name, directory, budget, unlock, lockTask,
+        packedFile, writer, frames: new Map() })
     } catch (error) {
       unlock()
       await lockTask
@@ -322,6 +325,13 @@ export class AnimationStore {
   }
   async put(index, blob) {
     if (this.bytes + blob.size > this.budget) throw new Error('Animation temporary storage limit reached')
+    if (this.packedFile) {
+      if (!this.writer) throw new Error('Animation storage is already finalized')
+      await this.writer.write(blob)
+      this.frames.set(index, { offset: this.bytes, size: blob.size, type: blob.type })
+      this.bytes += blob.size
+      return
+    }
     const file = await this.directory.getFileHandle(`${index}.png`, { create: true })
     const writer = await file.createWritable()
     try {
@@ -333,10 +343,30 @@ export class AnimationStore {
     }
     this.bytes += blob.size
   }
+  async finalize() {
+    if (!this.packedFile || this.file) return
+    const writer = this.writer
+    await writer.close()
+    this.writer = null
+    // One immutable snapshot serves all playback frames without reopening OPFS.
+    this.file = await this.packedFile.getFile()
+  }
   async get(index) {
+    if (this.packedFile) {
+      await this.finalize()
+      const frame = this.frames.get(index)
+      if (!frame) throw new Error('Missing animation frame')
+      return this.file.slice(frame.offset, frame.offset + frame.size, frame.type)
+    }
     return (await this.directory.getFileHandle(`${index}.png`)).getFile()
   }
   async dispose() {
+    if (this.writer) {
+      await this.writer.abort().catch(() => {})
+      this.writer = null
+    }
+    this.file = null
+    this.frames?.clear()
     try {
       await this.root.removeEntry(this.name, { recursive: true })
     } finally {
@@ -404,6 +434,9 @@ export class PreparedAnimation {
     this.notify()
     this.operation = (async () => {
       let store
+      const pending = []
+      const encoders = new Set()
+      let writes = Promise.resolve()
       try {
         store = await this.createStore()
         checkSignal(controller.signal)
@@ -419,25 +452,50 @@ export class PreparedAnimation {
           this.notify()
         }
         for (let i = 0; i < path.count; i++) {
-          const blob = await render(path.at(i), controller.signal)
           checkSignal(controller.signal)
-          await store.put(i, blob)
+          // Capture/encode the previous canvas while the next frame computes.
+          // Only two independent snapshots may be in flight; writes stay ordered.
+          const frame = await render(path.at(i), controller.signal)
+          const encoded = Promise.resolve(frame?.blob ?? frame)
+          encoders.add(encoded)
+          encoded.then(() => encoders.delete(encoded), () => encoders.delete(encoded))
           checkSignal(controller.signal)
-          this.progress = (analyze ? 10 : 0) + ((i + 1) / path.count) * (analyze ? 90 : 100)
-          this.notify()
-          // GPU readback, PNG encoding and OPFS writes already yield to the
-          // browser. Avoid an additional timer delay on every prepared frame.
+          writes = writes.then(async () => {
+            const blob = await encoded
+            checkSignal(controller.signal)
+            await store.put(i, blob)
+            checkSignal(controller.signal)
+            this.progress = (analyze ? 10 : 0) + ((i + 1) / path.count) * (analyze ? 90 : 100)
+            // A packed file is not committed until finalize() closes its writer.
+            if (store.finalize && i === path.count - 1) this.progress = 99.9
+            this.notify()
+          })
+          // Attach a handler immediately, including while GPU work is in flight.
+          writes.catch(() => {})
+          pending.push(writes)
+          if (pending.length >= 2) await pending.shift()
         }
+        await writes
+        checkSignal(controller.signal)
+        await store.finalize?.()
+        checkSignal(controller.signal)
+        this.progress = 100
         if (generation !== this.generation) throw aborted()
         this.store = store
         this.path = path
         store = null
         this.state = 'ready'
       } catch (error) {
+        controller.abort(aborted())
         this.state = 'idle'
         this.progress = 0
         this.reportError(error)
       } finally {
+        // Stop and failures must settle PNG encoders/writes before deleting data
+        // or allowing the session's render buffers to be disposed.
+        await Promise.allSettled(pending)
+        await Promise.allSettled(encoders)
+        await writes.catch(() => {})
         this.phase = ''
         if (store)
           await store.dispose().catch((error) => {

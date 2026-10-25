@@ -1,0 +1,151 @@
+{
+  "date": "2026-10-26",
+  "baselineCommit": "5adb29560050bc31ec3ddbabcb9751b047a9e8da",
+  "environment": "Local Chrome on macOS, real WebGPU; CPU Buddhabrot uses four workers.",
+  "method": "Three runs per case, same fixture and frame path. Elapsed milliseconds include calculation, lossless PNG encoding, storage writes and final commit. Decoding and SHA-256 comparison occur after timing. Each of 252 decoded frames exactly matches the frozen baseline.",
+  "notes": [
+    "Baseline workerLoader resolves worker entry points relative to its module, as in the optimized checkout, so the direct test page can load CPU workers. This path-only correction does not affect worker calculations.",
+    "Buddhabrot cases use sampleSeed 123456, a fixed initial sampling rectangle and perTrajectory bands. Current View with changing sampling bounds cannot reuse CPU orbits.",
+    "Normal uses smooth coloring, Blue and Gold palette density 20, supersampling OFF.",
+    "Times vary with browser/GPU and workload. No FPS, resolution, sample count or iteration reductions were used.",
+    "Cold and warm samples are retained. Reported speedups use the median of all three runs."
+  ],
+  "cases": [
+    {
+      "name": "normal",
+      "width": 640,
+      "height": 360,
+      "maxIter": 512,
+      "frames": 24,
+      "samples": null,
+      "before": [
+        751,
+        819,
+        948
+      ],
+      "after": [
+        403,
+        448,
+        464
+      ],
+      "readBefore": 110592000,
+      "readAfter": 66355200,
+      "pipelinesBefore": 0,
+      "pipelinesAfter": 0,
+      "buffersBefore": 7,
+      "buffersAfter": 7,
+      "mapsBefore": 24,
+      "mapsAfter": 24,
+      "referencesBefore": 0,
+      "referencesAfter": 0,
+      "pngBytes": 5027732,
+      "beforeMedianMs": 819,
+      "afterMedianMs": 448,
+      "speedup": 1.828125,
+      "pixelHashesEqualForEveryFrame": true,
+      "encodedByteCountEqual": true
+    },
+    {
+      "name": "buddha-gpu",
+      "width": 640,
+      "height": 360,
+      "maxIter": 512,
+      "frames": 24,
+      "samples": 65536,
+      "before": [
+        1722,
+        1770,
+        1699
+      ],
+      "after": [
+        1397,
+        1203,
+        1233
+      ],
+      "readBefore": 66355200,
+      "readAfter": 66355200,
+      "pipelinesBefore": 73,
+      "pipelinesAfter": 4,
+      "buffersBefore": 82,
+      "buffersAfter": 13,
+      "mapsBefore": 24,
+      "mapsAfter": 24,
+      "referencesBefore": 0,
+      "referencesAfter": 0,
+      "pngBytes": 5261832,
+      "beforeMedianMs": 1722,
+      "afterMedianMs": 1233,
+      "speedup": 1.3965936739659368,
+      "pixelHashesEqualForEveryFrame": true,
+      "encodedByteCountEqual": true
+    },
+    {
+      "name": "buddha-cpu",
+      "width": 640,
+      "height": 360,
+      "maxIter": 512,
+      "frames": 24,
+      "samples": 32768,
+      "before": [
+        1972,
+        1826,
+        1799
+      ],
+      "after": [
+        1655,
+        1497,
+        1428
+      ],
+      "readBefore": 0,
+      "readAfter": 0,
+      "pipelinesBefore": 0,
+      "pipelinesAfter": 0,
+      "buffersBefore": 0,
+      "buffersAfter": 0,
+      "mapsBefore": 0,
+      "mapsAfter": 0,
+      "referencesBefore": 0,
+      "referencesAfter": 0,
+      "pngBytes": 3508874,
+      "beforeMedianMs": 1826,
+      "afterMedianMs": 1497,
+      "speedup": 1.2197728790915163,
+      "pixelHashesEqualForEveryFrame": true,
+      "encodedByteCountEqual": true
+    },
+    {
+      "name": "deep",
+      "width": 320,
+      "height": 180,
+      "maxIter": 4096,
+      "frames": 12,
+      "samples": null,
+      "before": [
+        953,
+        936,
+        924
+      ],
+      "after": [
+        790,
+        754,
+        738
+      ],
+      "readBefore": 25113600,
+      "readAfter": 19584000,
+      "pipelinesBefore": 1,
+      "pipelinesAfter": 1,
+      "buffersBefore": 15,
+      "buffersAfter": 15,
+      "mapsBefore": 109,
+      "mapsAfter": 85,
+      "referencesBefore": 58,
+      "referencesAfter": 57,
+      "pngBytes": 1817934,
+      "beforeMedianMs": 936,
+      "afterMedianMs": 754,
+      "speedup": 1.2413793103448276,
+      "pixelHashesEqualForEveryFrame": true,
+      "encodedByteCountEqual": true
+    }
+  ]
+}

@@ -1,6 +1,6 @@
 import { checkSignal, IMAGE_BUDGET } from './animation.mjs'
 import { createBuddhaRunner } from './buddhabrot.mjs'
-import { CpuDensityColorMap } from './buddhabrotCpuColorMap.mjs'
+import { mapBuddhabrotFrame } from './buddhabrotCpuColorMap.mjs'
 
 // A dedicated runner replaces its density for each frame. No callback can repaint
 // the visible canvas, and Stop cancels both worker startup and active sampling.
@@ -13,12 +13,17 @@ export class AnimationBuddhabrotSession {
   }
 
   async render(frame, signal) {
+    return (await this.prepareFrame(frame, signal)).blob
+  }
+
+  async prepareFrame(frame, signal) {
     checkSignal(signal)
     const view = this.view
     view.setZoom(frame.zoom)
     view.setCenter([...frame.center])
     const params = {
       ...this.params,
+      reusePipelines: true,
       center: { x: view.center[0].toNumber(), y: view.center[1].toNumber() },
       zoom: view.zoom.toNumber(),
       ...this.samplingRange(view),
@@ -27,6 +32,8 @@ export class AnimationBuddhabrotSession {
     if (this.params.sampleSeed !== undefined && this.params.samplingAspect !== undefined) {
       for (const key of ['samplingCenter', 'samplingZoom', 'samplingAspect']) params[key] = this.params[key]
     }
+    params.orbitCacheBytes = params.samplingCenter && params.sampleSeed !== undefined
+      ? Math.floor(32 * 1024 ** 2 / Math.max(1, this.workerCount || 1)) : 0
     let complete, fail
     const finished = new Promise((resolve, reject) => { complete = resolve; fail = reject })
     const runner = this.runner || await this.createRunner({
@@ -46,17 +53,20 @@ export class AnimationBuddhabrotSession {
       const [result] = await Promise.all([finished, start])
       checkSignal(signal)
       if (result.aborted) throw new DOMException('Animation stopped', 'AbortError')
-      const canvas = document.createElement('canvas')
-      canvas.width = params.width
-      canvas.height = params.height
-      const context = canvas.getContext('2d')
-      const image = context.createImageData(canvas.width, canvas.height)
-      new CpuDensityColorMap(runner.densityR, runner.densityG, runner.densityB,
-        canvas.width, canvas.height, image.data).update(params.brightness, params.gamma)
+      if (!this.canvas) {
+        this.canvas = document.createElement('canvas')
+        this.canvas.width = params.width
+        this.canvas.height = params.height
+        this.context = this.canvas.getContext('2d')
+        this.image = this.context.createImageData(params.width, params.height)
+      }
+      const { canvas, context, image } = this
+      mapBuddhabrotFrame(runner.densityR, runner.densityG, runner.densityB,
+        image.data, params.brightness, params.gamma)
       context.putImageData(image, 0, 0)
-      return await new Promise((resolve, reject) => canvas.toBlob(
+      return { blob: new Promise((resolve, reject) => canvas.toBlob(
         (blob) => blob ? resolve(blob) : reject(new Error('Could not encode animation frame')), 'image/png',
-      ))
+      )) }
     } finally {
       signal.removeEventListener('abort', cancel)
       await start?.catch(() => {})
@@ -65,9 +75,12 @@ export class AnimationBuddhabrotSession {
 
   dispose() {
     this.runner?.stop()
+    this.runner?.dispose?.()
     this.runner?.terminate?.()
     this.runner?._cpuRunner?.terminate?.()
     this.runner?.devicePromise?.then((device) => device?.destroy()).catch(() => {})
     this.runner = null
+    if (this.canvas) this.canvas.width = this.canvas.height = 1
+    this.canvas = this.context = this.image = null
   }
 }

@@ -56,14 +56,36 @@ export class AnimationGpuSession {
     // Bound the perturbation reference cache, including JS reference sequence overhead.
     if (kind === 'perturbation') {
       const calculateReference = renderer.calculate_reference.bind(renderer)
+      const references = new Map()
+      let cachedBytes = 0
+      this.referenceCache = references
       renderer.calculate_reference = async (...args) => {
+        // Reuse only the exact same reference calculation. The renderer still
+        // chooses reference points afresh for every frame, preserving results.
+        const key = `${args.join(':')}:${renderer.max_iter}`
+        const cached = references.get(key)
+        if (cached) {
+          references.delete(key)
+          references.set(key, cached)
+          return cached
+        }
         const bytes = renderer.referencePoints.reduce(
           (sum, ref) => sum + ref.zBuffer.byteLength + ref.zqErrorBoundBuffer.byteLength,
           0,
         )
         if (bytes + (renderer.max_iter + 2) * 64 > IMAGE_BUDGET)
           throw new Error('Animation reference memory limit reached')
-        return calculateReference(...args)
+        const reference = await calculateReference(...args)
+        const size = reference.zBuffer.byteLength + reference.zqErrorBoundBuffer.byteLength
+        // Keep cache memory separate from the active frame's reference budget.
+        while (references.size && (cachedBytes + size > IMAGE_BUDGET / 4 || references.size >= 64)) {
+          const oldest = references.keys().next().value
+          const value = references.get(oldest)
+          cachedBytes -= value.zBuffer.byteLength + value.zqErrorBoundBuffer.byteLength
+          references.delete(oldest)
+        }
+        if (size <= IMAGE_BUDGET / 4) { references.set(key, reference); cachedBytes += size }
+        return reference
       }
     }
     const entry = { renderer, device, onGpuUpdate }
@@ -127,7 +149,8 @@ export class AnimationGpuSession {
       colorPatternId: this.colorPatternId,
       animationQuick: false,
       finalOnly: true,
-      // Never retain references from earlier frames.
+      readEscapeZ: false,
+      // Rebuild reference selection per frame; exact calculations are memoized.
       paramHash: this.token,
       resetCaches: true,
       onUpdate: onGpuUpdate,
@@ -165,6 +188,10 @@ export class AnimationGpuSession {
   }
 
   async render(frame, signal) {
+    return (await this.prepareFrame(frame, signal)).blob
+  }
+
+  async prepareFrame(frame, signal) {
     const result = await this.compute(frame, signal)
     const view = this.view
     const density = frame.paletteDensity ?? this.targetDensity
@@ -185,12 +212,12 @@ export class AnimationGpuSession {
       }
       screen.render(view.palette, view.max_iter, view.smooth, view.paletteComponent.palette)
     }
-    return new Promise((resolve, reject) =>
+    return { blob: new Promise((resolve, reject) =>
       screen.canvas.toBlob((blob) => {
         if (blob) resolve(blob)
         else reject(new Error('Could not encode animation frame'))
       }, 'image/png'),
-    )
+    ) }
   }
 
   dispose() {
@@ -205,6 +232,7 @@ export class AnimationGpuSession {
       renderer.referencePoints = []
     }
     this.renderers.clear()
+    this.referenceCache?.clear()
     if (this.screen) {
       for (const canvas of [this.screen.canvas, this.screen.offscreen, this.screen.smoothscreen])
         canvas.width = canvas.height = 1

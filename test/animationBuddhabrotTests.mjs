@@ -32,7 +32,7 @@ test('frame navigation changes projection while retaining Fixed Samples and conf
     samplingAspect: 0.5, mode: 'anti', buddhaBandMode: 'perPoint', gpu: false }
   const { session, received } = fixture(settings, () => { throw new Error('captured') })
   await assert.rejects(session.render(frame, new AbortController().signal), /captured/)
-  assert.deepEqual(received[0], { ...session.params,
+  assert.deepEqual(received[0], { ...session.params, reusePipelines: true, orbitCacheBytes: 32 * 1024 ** 2,
     center: { x: -0.75, y: frame.center[1].toNumber() }, zoom: 4 })
   session.dispose()
 })

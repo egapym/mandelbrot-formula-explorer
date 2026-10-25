@@ -40,10 +40,10 @@ const ErrorHelpers = {
 
 const _blobUrlCache = new Map() // absoluteUrl -> Promise<string>
 
-// ページの基準 URL を使ってスクリプトパスを絶対 URL に変換する。
+// Resolve worker entry points beside this module, including from test pages.
 function _resolveAbsolute(scriptPath) {
   try {
-    return new URL(scriptPath, location.href).href
+    return new URL(scriptPath, import.meta.url).href
   } catch (_e) {
     // URL 化に失敗した場合は元の文字列をそのまま使う
     return scriptPath
