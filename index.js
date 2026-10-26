@@ -3028,17 +3028,11 @@ let lastBuddhaRenderParams = null
 const fixedBuddhaSamples = new FixedBuddhabrotSamples()
 
 function getBuddhaSamplingRange(renderer, kind) {
-  const initialZoom = kind === 'julia' ? 1 : getInitialFractalZoom(renderer.precision).toNumber()
-  // Zooming out must sample the whole current view, including its new center.
-  if (DOM.buddha.samplingRange?.value !== 'initial' || renderer.zoom.toNumber() < initialZoom) {
-    return { samplingCenter: undefined, samplingZoom: undefined }
+  if (DOM.buddha.samplingRange?.value !== 'initial') {
+    return { samplingCenter: undefined, samplingZoom: undefined, samplingRadius: undefined }
   }
-  const presetIndex = parseInt(DOM.fractalTypeSelect?.value?.split(':')[1], 10)
-  const preset = functionPresets[presetIndex]
-  return {
-    samplingCenter: kind === 'julia' ? { x: 0, y: 0 } : { x: preset?.coordX || 0, y: preset?.coordY || 0 },
-    samplingZoom: initialZoom,
-  }
+  // Initial View always samples a uniform disk, independently of the display.
+  return { samplingCenter: { x: 0, y: 0 }, samplingZoom: 0.5, samplingRadius: 4 }
 }
 
 function applyFixedBuddhaSamples(params, kind, baseline = params) {

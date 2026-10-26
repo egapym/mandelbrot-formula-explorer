@@ -28,9 +28,9 @@ export class AnimationBuddhabrotSession {
       zoom: view.zoom.toNumber(),
       ...this.samplingRange(view),
     }
-    // Fixed Samples retains the original sampling rectangle as well as seed.
+    // Fixed Samples retains the original sampling region as well as seed.
     if (this.params.sampleSeed !== undefined && this.params.samplingAspect !== undefined) {
-      for (const key of ['samplingCenter', 'samplingZoom', 'samplingAspect']) params[key] = this.params[key]
+      for (const key of ['samplingCenter', 'samplingZoom', 'samplingAspect', 'samplingRadius']) params[key] = this.params[key]
     }
     params.orbitCacheBytes = params.samplingCenter && params.sampleSeed !== undefined
       ? Math.floor(32 * 1024 ** 2 / Math.max(1, this.workerCount || 1)) : 0

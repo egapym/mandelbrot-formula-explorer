@@ -49,31 +49,30 @@ runInNewContext(source.slice(samplingStart, source.indexOf('function applyFixedB
 function resolveRange(zoom, kind = 'main') {
   const renderer = { precision: 64, zoom: { toNumber: () => zoom } }
   const range = samplingContext.getBuddhaSamplingRange(renderer, kind)
-  // Mirror the runners' fallback to the current display when no override is set.
-  return {
-    center: { ...(range.samplingCenter || { x: 3, y: -2 }) },
-    zoom: range.samplingZoom || zoom,
-  }
+  return JSON.parse(JSON.stringify(range))
 }
 for (const kind of ['main', 'julia']) {
-  assert.deepEqual(resolveRange(0.5172854246793117, kind), { center: { x: 3, y: -2 }, zoom: 0.5172854246793117 },
-    'Below the initial zoom, sample the current center and zoom')
-  const initialCenter = kind === 'julia' ? { x: 0, y: 0 } : { x: -0.5, y: 0 }
-  for (const zoom of [1, 2, 10]) {
-    assert.deepEqual(resolveRange(zoom, kind), { center: initialCenter, zoom: 1 })
+  for (const zoom of [0.01, 0.9566303671497955, 1, 1.0231724767554273, 10]) {
+    assert.deepEqual(resolveRange(zoom, kind), {
+      samplingCenter: { x: 0, y: 0 }, samplingZoom: 0.5, samplingRadius: 4,
+    }, 'Initial View must always sample the origin-centered radius-4 disk')
   }
-  assert.deepEqual(resolveRange(0.5, kind), { center: { x: 3, y: -2 }, zoom: 0.5 },
-    'Returning below the initial zoom must drop the initial range again')
 }
+samplingContext.DOM.fractalTypeSelect.value = 'preset:-1'
 samplingContext.getInitialFractalZoom = () => ({ toNumber: () => 1.5 })
-assert.deepEqual(resolveRange(1.2), { center: { x: 3, y: -2 }, zoom: 1.2 }, 'Use the embedded initial zoom threshold')
-assert.deepEqual(resolveRange(1.5), { center: { x: -0.5, y: 0 }, zoom: 1.5 })
-assert.deepEqual(resolveRange(1, 'julia'), { center: { x: 0, y: 0 }, zoom: 1 }, 'Julia retains its own initial zoom')
+assert.equal(resolveRange(0.5).samplingRadius, 4, 'Custom presets and embedded zoom must not change the disk')
 samplingContext.DOM.buddha.samplingRange.value = 'current'
-for (const zoom of [0.5, 1, 10]) {
-  assert.deepEqual(resolveRange(zoom), { center: { x: 3, y: -2 }, zoom })
-}
-console.log('PASS: Initial View falls back to Current View below the initial zoom for main, Julia and embedded views')
+for (const zoom of [0.5, 1, 10]) assert.deepEqual(resolveRange(zoom), {})
+const diskLock = new FixedBuddhabrotSamples(() => 12345)
+const diskParams = { ...first, samplingCenter: { x: 0, y: 0 }, samplingZoom: 0.5, samplingRadius: 4 }
+diskLock.apply(diskParams, 'main')
+assert.equal(diskLock.apply({ ...first, zoom: 10 }, 'main').samplingRadius, 4,
+  'Fixed Samples must retain the disk when display/settings change')
+const rectangleLock = new FixedBuddhabrotSamples(() => 12345)
+rectangleLock.apply(first, 'main')
+assert.equal(rectangleLock.apply(diskParams, 'main').samplingRadius, undefined,
+  'A fixed rectangular range must not inherit a later disk setting')
+console.log('PASS: Initial View always selects the radius-4 disk; Current View and Fixed Samples retain their ranges')
 
 const context = {
   DOM: { buddha: {

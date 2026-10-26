@@ -271,6 +271,7 @@ export class BuddhabrotWebGPU {
     const cacheOrbitDensity = params.mode === 'antibuddha' || params.mode === 'anti'
     const compactSamples = this.maxIter > 32 && (params.samples || this.samples) >= 32768 &&
       len <= maxGroups * 64 && len * 8 <= (device.limits?.maxStorageBufferBindingSize || 134217728)
+    const samplingRadius = Number.isFinite(params.samplingRadius) && params.samplingRadius > 0 ? params.samplingRadius : 0
     const sampleCoordinates = `  var state: u32 = ((id * 747796405u) ^ u.seed) + 2891336453u;
   let spt = u.samplesPerThread;
   // Uniform-only values are constant throughout sampling.
@@ -282,11 +283,14 @@ export class BuddhabrotWebGPU {
   let halfW = f32(u.width) / 2.0;
   let halfH = u.samplingHeight / 2.0;
     for (var si: u32 = 0u; si < spt; si = si + 1u) {
-	    let rpx = rand(&state) * f32(u.width);
+${samplingRadius ? `    let radius = ${samplingRadius.toExponential(16)} * sqrt(rand(&state));
+    let angle = 6.283185307179586 * rand(&state);
+    let sample = vec2<f32>(u.samplingCenterX, u.samplingCenterY) + radius * vec2<f32>(cos(angle), sin(angle));` : `	    let rpx = rand(&state) * f32(u.width);
 	    let rpy = rand(&state) * u.samplingHeight;
 	  let rx = (rpx - halfW) * invDenom_local + u.samplingCenterX;
 	  let ry = (rpy - halfH) * invDenom_local + u.samplingCenterY;
-	    let sample = vec2<f32>(rx, ry);
+	    let sample = vec2<f32>(rx, ry);`}
+
 	    let c = select(sample, vec2<f32>(u.juliaCr, u.juliaCi), u.isJulia != 0u);
 	    var z = select(vec2<f32>(u.z0x, u.z0y), sample, u.isJulia != 0u);
 	    // An already escaped initial point contributes no density in either mode.

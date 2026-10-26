@@ -275,6 +275,7 @@ async function runSampling(opts) {
   const bottom = center.y + (1 / zoom) * SAMPLING_CONFIG.VIEW_SPAN * aspect
   // Sampling may use the initial view while orbit hits still map to the current view.
   const samplingCenter = opts.samplingCenter || center
+  const samplingRadius = Number.isFinite(opts.samplingRadius) && opts.samplingRadius > 0 ? opts.samplingRadius : 0
   const samplingZoom = opts.samplingZoom || zoom
   const samplingAspect = opts.samplingAspect ?? aspect
   const sampleLeft = samplingCenter.x - SAMPLING_CONFIG.VIEW_SPAN / samplingZoom
@@ -291,7 +292,7 @@ async function runSampling(opts) {
   const cacheKey = cacheBudget && renderDelay === 0 && Number.isSafeInteger(samples) &&
     samples > 0 && samples <= cacheBudget / 2 && opts.sampleSeed !== undefined
     ? JSON.stringify([cacheBudget, samples, maxIter, sampleLeft, sampleTop, sampleWidth, sampleHeight,
-      opts.sampleSeed, mode, fractalType, opts.iterationFunction, opts.z0Real, opts.z0Imag,
+      opts.sampleSeed, samplingRadius, mode, fractalType, opts.iterationFunction, opts.z0Real, opts.z0Imag,
       opts.escapeRadius, fixedJuliaRe, fixedJuliaIm]) : null
   if (!cacheKey || preparedOrbitCache?.key !== cacheKey) {
     preparedOrbitCache = cacheKey ? { key: cacheKey, flags: new Uint8Array(samples),
@@ -473,9 +474,11 @@ async function runSampling(opts) {
   const band2 = Math.max(band1 + 1, Math.floor(maxIter * 0.1))
 
   function* drawTrajectory(stepped = false) {
-    // 表示領域内のランダム点を選ぶ（PRNG を使用）
-    const sampleRe = sampleLeft + randf() * sampleWidth
-    const sampleIm = sampleTop + randf() * sampleHeight
+    // sqrt(u) gives uniform area density throughout the disk, without rejection.
+    const radius = samplingRadius ? samplingRadius * Math.sqrt(randf()) : 0
+    const angle = samplingRadius ? 2 * Math.PI * randf() : 0
+    const sampleRe = samplingRadius ? samplingCenter.x + radius * Math.cos(angle) : sampleLeft + randf() * sampleWidth
+    const sampleIm = samplingRadius ? samplingCenter.y + radius * Math.sin(angle) : sampleTop + randf() * sampleHeight
     const cr = isJulia ? fixedJuliaRe : sampleRe
     const ci = isJulia ? fixedJuliaIm : sampleIm
 

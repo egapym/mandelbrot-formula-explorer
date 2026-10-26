@@ -61,7 +61,7 @@ for (const fractalType of ['mandelbrot', 'julia']) {
       const reference = await worker().run({ ...next, orbitCacheBytes: 0 })
       assert.deepEqual(replay.channels, reference.channels, 'Cached full orbits changed density after zoom/pan')
       assert.equal(replay.calls, 0, 'Cached sampling recomputed iteration functions')
-      for (const override of [{ sampleSeed: 99 }, { maxIter: 129 }, { samplingZoom: 2 }, { z0Real: 0.1 }, { escapeRadius: 3 }]) {
+      for (const override of [{ sampleSeed: 99 }, { maxIter: 129 }, { samplingZoom: 2 }, { samplingRadius: 4 }, { z0Real: 0.1 }, { escapeRadius: 3 }]) {
         const changed = { ...next, ...override }
         const actual = await cache.run(changed)
         const expected = await worker().run({ ...changed, orbitCacheBytes: 0 })

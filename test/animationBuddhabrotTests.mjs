@@ -29,7 +29,7 @@ const frame = {
 
 test('frame navigation changes projection while retaining Fixed Samples and configured Buddhabrot settings', async () => {
   const settings = { sampleSeed: 123, samplingCenter: { x: 0, y: 0 }, samplingZoom: 1,
-    samplingAspect: 0.5, mode: 'anti', buddhaBandMode: 'perPoint', gpu: false }
+    samplingAspect: 0.5, samplingRadius: 4, mode: 'anti', buddhaBandMode: 'perPoint', gpu: false }
   const { session, received } = fixture(settings, () => { throw new Error('captured') })
   await assert.rejects(session.render(frame, new AbortController().signal), /captured/)
   assert.deepEqual(received[0], { ...session.params, reusePipelines: true, orbitCacheBytes: 32 * 1024 ** 2,

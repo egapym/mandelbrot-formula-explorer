@@ -89,7 +89,7 @@ At very high resolutions, switching can happen at different zoom levels to reduc
 - Continuous toggle: accumulate samples until Stop (CPU updates live; GPU display updates every second)
 - Fixed Samples toggle: lock the previous render’s sample sequence and sampling range across pan/zoom (separate main/Julia sequences); Render Buddhabrot reuses the seed; Regenerate seed chooses a new one
 - Sample count input (computed sample total in Continuous mode)
-- Sampling range selector: Current View (default) or Initial View; initial sampling uses the selected preset's reset position/zoom, switching to the current view when zoomed out below the initial zoom. Orbit hits map to the current view on both CPU and GPU.
+- Sampling range selector: Current View (default) or Initial View; Initial View always samples uniformly inside the disk centered at (0, 0) with radius 4, independently of the preset, display position, zoom and aspect ratio (including Julia). This sampling radius is independent of Escape Radius. Orbit hits map to the current view on both CPU and GPU.
 - Buddhabrot GPU toggle
 - Buddhabrot palette selector
 - Band mode selector for both Buddhabrot and Anti-Buddhabrot (per-trajectory / per-point; defaults to per-trajectory)

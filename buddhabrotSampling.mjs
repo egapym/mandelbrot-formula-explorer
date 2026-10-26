@@ -24,6 +24,7 @@ export class FixedBuddhabrotSamples {
         sampleSeed: baseline.sampleSeed ?? this.createSeed(),
         samplingCenter: { ...(baseline.samplingCenter || baseline.center) },
         samplingZoom: baseline.samplingZoom || baseline.zoom,
+        samplingRadius: baseline.samplingRadius,
         samplingAspect: baseline.samplingAspect ?? baseline.height / baseline.width,
       })
     }

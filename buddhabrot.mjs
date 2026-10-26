@@ -382,6 +382,7 @@ export class BuddhabrotRunner {
         zoom: this.zoom,
         samplingCenter: params.samplingCenter,
         samplingZoom: params.samplingZoom,
+        samplingRadius: params.samplingRadius,
         samplingAspect: params.samplingAspect,
         sampleSeed: params.sampleSeed === undefined ? undefined : getBuddhabrotSampleSeed(params.sampleSeed, i),
         mode: params.mode || DEFAULT_CONFIG.MODE,

@@ -136,10 +136,9 @@ for (const gpu of [true, false]) {
         },
       }
       runInNewContext(`${rangeHandler}\n${requestHandler}\nrequestRealtimeBuddhaFrame(drag)`, context)
-      assert.equal(requested.samplingZoom, zoom < 1 ? undefined : 1,
-        'Navigation must update the sampling range when crossing the initial zoom')
-      assert.deepEqual(requested.samplingCenter && { ...requested.samplingCenter }, zoom < 1 ? undefined
-        : { x: kind === 'julia' ? 0 : -0.5, y: 0 })
+      assert.equal(requested.samplingZoom, 0.5, 'Navigation must retain the disk across every zoom')
+      assert.equal(requested.samplingRadius, 4)
+      assert.deepEqual({ ...requested.samplingCenter }, { x: 0, y: 0 })
       assert.equal(requested.gpu, gpu, 'Navigation must use the current GPU toggle, not the saved render snapshot')
       assert.equal(requested.samples, 32768)
       assert.equal(requested.width, 800)

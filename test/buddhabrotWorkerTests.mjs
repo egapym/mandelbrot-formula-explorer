@@ -139,6 +139,26 @@ const movedSeeded = await sample({ sampleSeed: 12345, center: { x: 10, y: 20 }, 
 assert.deepEqual(seeded.sampledCoordinates, movedSeeded.sampledCoordinates)
 assert.notDeepEqual(seeded.sampledCoordinates, (await sample({ sampleSeed: 54321 })).sampledCoordinates)
 
+// Observe actual sampled coordinates, not just the requested bounds.
+const diskOptions = { samples: 4096, maxIter: 1, iterationFunction: 'c', z0Real: 0,
+  escapeRadius: 10, sampleSeed: 12345, samplingCenter: { x: 0, y: 0 }, samplingZoom: 0.5, samplingRadius: 4 }
+const disk = await sample(diskOptions)
+const diskMoved = await sample({ ...diskOptions, center: { x: 9, y: -12 }, zoom: 0.1, height: 160 })
+assert.deepEqual(disk.sampledCoordinates, diskMoved.sampledCoordinates,
+  'Disk sampling must ignore display center, zoom and aspect ratio')
+let radiusSquaredSum = 0
+const quadrants = [0, 0, 0, 0]
+for (const [x, y] of disk.sampledCoordinates) {
+  const radiusSquared = x * x + y * y
+  assert.ok(radiusSquared <= 16 + 1e-12, 'A sample escaped the radius-4 disk')
+  radiusSquaredSum += radiusSquared
+  quadrants[(x >= 0 ? 1 : 0) + (y >= 0 ? 2 : 0)]++
+}
+assert.ok(Math.abs(radiusSquaredSum / diskOptions.samples - 8) < 0.3,
+  'Disk samples must be uniform in area, rather than uniform in radius')
+assert.ok(quadrants.every(n => n > 850 && n < 1200), 'Disk samples must cover all four quadrants')
+console.log('PASS: worker disk sampling bounds, uniform area density and navigation/aspect independence')
+
 // A long orbit may enter a deep zoom only after its first 200 points.
 // Offscreen points in the current view must not truncate the locked orbit.
 const lateEntry = { samples: 1, maxIter: 600, mode: 'antibuddha',

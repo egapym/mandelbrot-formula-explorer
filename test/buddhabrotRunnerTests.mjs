@@ -63,9 +63,10 @@ const second = makeRunner(() => completed++)
 await second._workersReady
 assert.equal(second.workers[0], worker, 'idle worker was not reused')
 await second.start({ samples: 10, renderPointBatchSize: 1024,
-  center: { x: 1, y: 2 }, zoom: 8, samplingCenter: { x: -0.5, y: 0 }, samplingZoom: 1 })
+  center: { x: 1, y: 2 }, zoom: 8, samplingCenter: { x: -0.5, y: 0 }, samplingZoom: 1, samplingRadius: 4 })
 assert.deepEqual(worker.messages.at(-1).samplingCenter, { x: -0.5, y: 0 })
 assert.equal(worker.messages.at(-1).samplingZoom, 1)
+assert.equal(worker.messages.at(-1).samplingRadius, 4)
 assert.deepEqual(worker.messages.at(-1).center, { x: 1, y: 2 })
 assert.equal(worker.messages.at(-1).zoom, 8)
 assert.equal(worker.messages.at(-1).renderPointBatchSize, 10, 'Start did not propagate the effective batch limit to reused worker')
