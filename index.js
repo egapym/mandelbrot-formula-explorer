@@ -11,7 +11,7 @@ import { AnimationBuddhabrotSession } from './animationBuddhabrotSession.mjs'
 import { BuddhabrotRunner, createBuddhaRunner } from './buddhabrot.mjs'
 import { BuddhabrotRealtimeRenderer, getBuddhabrotFrameTransform } from './buddhabrotRealtime.mjs'
 import { BuddhabrotContinuousRunner, CONTINUOUS_SAMPLES } from './buddhabrotContinuous.mjs'
-import { FixedBuddhabrotSamples } from './buddhabrotSampling.mjs'
+import { FixedBuddhabrotSamples, getInitialBuddhabrotSamplingRange } from './buddhabrotSampling.mjs'
 import { BUDDHA_DEFAULT_BRIGHTNESS, BUDDHA_DEFAULT_GAMMA } from './buddhabrotExposure.mjs'
 import { CpuDensityColorMap } from './buddhabrotCpuColorMap.mjs'
 import { DEFAULT_RENDER_POINT_BATCH_SIZE, getRenderPointBatchLimit, normalizeRenderPointBatchSize } from './buddhabrotRenderConfig.mjs'
@@ -3031,8 +3031,14 @@ function getBuddhaSamplingRange(renderer, kind) {
   if (DOM.buddha.samplingRange?.value !== 'initial') {
     return { samplingCenter: undefined, samplingZoom: undefined, samplingRadius: undefined }
   }
-  // Initial View always samples a uniform disk, independently of the display.
-  return { samplingCenter: { x: 0, y: 0 }, samplingZoom: 0.5, samplingRadius: 4 }
+  // Initial View follows the formula, independently of display navigation.
+  return getInitialBuddhabrotSamplingRange({
+    iterationFunction: renderer.iterationFunction || 'z*z + c',
+    fractalType: kind === 'julia' ? 'julia-custom' : renderer.fractalType,
+    z0Real: Number(document.getElementById('z0-real')?.value || 0),
+    z0Imag: Number(document.getElementById('z0-imag')?.value || 0),
+    escapeRadius: renderer.escapeRadius ?? 4,
+  })
 }
 
 function applyFixedBuddhaSamples(params, kind, baseline = params) {

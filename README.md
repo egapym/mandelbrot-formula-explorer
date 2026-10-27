@@ -89,7 +89,7 @@ At very high resolutions, switching can happen at different zoom levels to reduc
 - Continuous toggle: accumulate samples until Stop (CPU updates live; GPU display updates every second)
 - Fixed Samples toggle: lock the previous render’s sample sequence and sampling range across pan/zoom (separate main/Julia sequences); Render Buddhabrot reuses the seed; Regenerate seed chooses a new one
 - Sample count input (computed sample total in Continuous mode)
-- Sampling range selector: Current View (default) or Initial View; Initial View always samples uniformly inside the disk centered at (0, 0) with radius 4, independently of the preset, display position, zoom and aspect ratio (including Julia). This sampling radius is independent of Escape Radius. Orbit hits map to the current view on both CPU and GPU.
+- Sampling range selector: Current View (default) or Initial View; Initial View samples uniformly inside a disk derived from the formula and initial z0. For a proven affine parameter term with first iterate `z1 = a*c + b`, its center is `-b/a` and its radius is `Escape Radius / |a|`. If this cannot be determined safely, it falls back to center (0, 0), radius 4. Julia samples initial z0 inside the origin-centered Escape Radius disk. The sampling disk is independent of display position, zoom and aspect ratio; Fixed Samples locks the chosen disk and seed. Orbit hits map to the current view on both CPU and GPU.
 - Buddhabrot GPU toggle
 - Buddhabrot palette selector
 - Band mode selector for both Buddhabrot and Anti-Buddhabrot (per-trajectory / per-point; defaults to per-trajectory)
@@ -305,6 +305,9 @@ passes keep their accumulated results. Resizing replaces only affected buffers.
 ## Testing
 
 CPU rendering regressions: `node --test test/cpuRenderingTests.mjs`.
+Initial View domain and Fixed Samples regressions: `node test/buddhabrotSamplingTests.mjs`.
+Open `test/buddhabrotAdaptiveSamplingBrowserTests.html` to verify on CPU Workers and
+WebGPU that the derived disk recovers trajectories missed by the old fixed disk.
 Complex formula and escape-rule regressions: `node --test test/complexIterationTests.mjs`.
 Open `test/complexIterationBrowserTests.html` for actual CPU/WebGPU escape
 classification, Orbit Trap and Buddhabrot orbit-location checks. Custom formulas

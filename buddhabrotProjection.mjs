@@ -131,6 +131,15 @@ function calculateProjection(expression) {
   }
 }
 
+// Prove the c coefficient structurally; numerical probes cannot distinguish
+// affine expressions from nonlinear expressions that agree at a few points.
+export function getBuddhabrotParameterCoefficient(expression) {
+  // Bypass the parser's scalar-JS shortcuts for common presets so all formulas
+  // reach the same structured complex-operation analysis.
+  const value = affine(getParsedExpression(`(${expression}) + 0`))
+  return value && hasC(value) && value.a.every(Number.isFinite) ? [...value.a] : null
+}
+
 export function getBuddhabrotProjection(expression, fractalType = 'custom') {
   if (!expression || fractalType === 'julia' || fractalType === 'julia-custom') return IDENTITY
   if (projectionCache.has(expression)) return projectionCache.get(expression)

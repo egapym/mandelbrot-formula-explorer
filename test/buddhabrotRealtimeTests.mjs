@@ -1,3 +1,4 @@
+import { getInitialBuddhabrotSamplingRange } from '../buddhabrotSampling.mjs'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { runInNewContext } from 'node:vm'
@@ -115,6 +116,8 @@ for (const gpu of [true, false]) {
     for (const zoom of [0.5, 1, 2]) {
       let requested
       const context = {
+        getInitialBuddhabrotSamplingRange,
+        document: { getElementById: () => null },
         lastBuddhaRenderParams: { gpu: !gpu, samplingZoom: 1, maxIter: 1000 },
         fractal: { max_iter: 2500 },
         applyFixedBuddhaSamples: params => params,

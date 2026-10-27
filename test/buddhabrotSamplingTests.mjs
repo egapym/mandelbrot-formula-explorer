@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { runInNewContext } from 'node:vm'
-import { FixedBuddhabrotSamples, getBuddhabrotSampleSeed } from '../buddhabrotSampling.mjs'
+import { FixedBuddhabrotSamples, getBuddhabrotSampleSeed, getInitialBuddhabrotSamplingRange } from '../buddhabrotSampling.mjs'
 
 let seeds = 10
 const fixed = new FixedBuddhabrotSamples(() => seeds++)
@@ -40,14 +40,16 @@ assert.equal(inherited.apply(first, 'main').sampleSeed, refreshed.sampleSeed)
 const source = readFileSync(new URL('../index.js', import.meta.url), 'utf8')
 // Exercise the range selection used by both normal and realtime rendering.
 const samplingContext = {
+  getInitialBuddhabrotSamplingRange,
+  document: { getElementById: () => null },
   DOM: { buddha: { samplingRange: { value: 'initial' } }, fractalTypeSelect: { value: 'preset:0' } },
   functionPresets: [{ coordX: -0.5, coordY: 0 }],
   getInitialFractalZoom: () => ({ toNumber: () => 1 }),
 }
 const samplingStart = source.indexOf('function getBuddhaSamplingRange(')
 runInNewContext(source.slice(samplingStart, source.indexOf('function applyFixedBuddhaSamples(', samplingStart)), samplingContext)
-function resolveRange(zoom, kind = 'main') {
-  const renderer = { precision: 64, zoom: { toNumber: () => zoom } }
+function resolveRange(zoom, kind = 'main', options = {}) {
+  const renderer = { precision: 64, zoom: { toNumber: () => zoom }, ...options }
   const range = samplingContext.getBuddhaSamplingRange(renderer, kind)
   return JSON.parse(JSON.stringify(range))
 }
@@ -61,6 +63,37 @@ for (const kind of ['main', 'julia']) {
 samplingContext.DOM.fractalTypeSelect.value = 'preset:-1'
 samplingContext.getInitialFractalZoom = () => ({ toNumber: () => 1.5 })
 assert.equal(resolveRange(0.5).samplingRadius, 4, 'Custom presets and embedded zoom must not change the disk')
+const reportedFormula = '(|Re(z)| + i*|Im(z)|)^z - conj(z) + c'
+for (const zoom of [0.01, 1, 100]) {
+  assert.deepEqual(resolveRange(zoom, 'main', { iterationFunction: reportedFormula }), {
+    samplingCenter: { x: -1, y: 0 }, samplingZoom: 0.5, samplingRadius: 4,
+  })
+}
+const range = getInitialBuddhabrotSamplingRange
+assert.deepEqual(range({ iterationFunction: 'z*z + 2*c + 2 + 4*i' }), {
+  samplingCenter: { x: -1, y: -2 }, samplingZoom: 1, samplingRadius: 2,
+})
+assert.deepEqual(range({ iterationFunction: 'z*z + c*i + 2', escapeRadius: 8 }), {
+  samplingCenter: { x: 0, y: 2 }, samplingZoom: 0.25, samplingRadius: 8,
+})
+assert.deepEqual(range({ iterationFunction: 'z*z+c', z0Real: 1, z0Imag: 2 }), {
+  samplingCenter: { x: 3, y: -4 }, samplingZoom: 0.5, samplingRadius: 4,
+})
+assert.equal(range({ iterationFunction: 'zDelay(1)+c' }).samplingRadius, 4)
+for (const iterationFunction of ['sin(c)+z', 'c*c+z', 'z*c+1', 'z*z+c-c', 'exp(1000)+c']) {
+  assert.deepEqual(range({ iterationFunction, escapeRadius: 8 }), range(),
+    `Unproven or singular formulas must fall back to radius 4: ${iterationFunction}`)
+}
+for (const escapeRadius of [0, -1, Infinity, NaN]) assert.deepEqual(range({ escapeRadius }), range())
+assert.deepEqual(range({ iterationFunction: '1e-40*c' }), range(), 'Unrepresentable GPU disks must fall back')
+assert.equal(range({ fractalType: 'julia-custom', iterationFunction: 'sin(c)', escapeRadius: 8 }).samplingRadius, 8)
+// A fixed sequence keeps its originally derived domain, even if the next request differs.
+const adaptiveLock = new FixedBuddhabrotSamples(() => 42)
+const adaptiveLocked = adaptiveLock.apply({ ...first, ...range({ iterationFunction: reportedFormula }) }, 'main')
+const replay = adaptiveLock.apply({ ...first, ...range({ iterationFunction: '2*c' }) }, 'main')
+assert.deepEqual(replay.samplingCenter, adaptiveLocked.samplingCenter)
+assert.equal(replay.samplingRadius, adaptiveLocked.samplingRadius)
+console.log('PASS: affine first-step disks, shifted formula, Julia, fallback and fixed adaptive ranges')
 samplingContext.DOM.buddha.samplingRange.value = 'current'
 for (const zoom of [0.5, 1, 10]) assert.deepEqual(resolveRange(zoom), {})
 const diskLock = new FixedBuddhabrotSamples(() => 12345)
@@ -72,7 +105,7 @@ const rectangleLock = new FixedBuddhabrotSamples(() => 12345)
 rectangleLock.apply(first, 'main')
 assert.equal(rectangleLock.apply(diskParams, 'main').samplingRadius, undefined,
   'A fixed rectangular range must not inherit a later disk setting')
-console.log('PASS: Initial View always selects the radius-4 disk; Current View and Fixed Samples retain their ranges')
+console.log('PASS: Initial View default disk; Current View and Fixed Samples retain their ranges')
 
 const context = {
   DOM: { buddha: {
