@@ -58,6 +58,8 @@ const cases = [
   ['c*i', (_z, c) => [-c[1], c[0]]],
   ['c+i', (_z, c) => add(c, [0, 1])],
   ['z*z+c*i', (z, c) => add(mul(z, z), [-c[1], c[0]])],
+  ['z*z + rotate(c, i*|Im(z)|)', (z, c) => add(mul(z, z), c.map(v => v * Math.exp(-Math.abs(z[1]))))],
+  ['z*z + rotate(c, i*|Re(z)|)', (z, c) => add(mul(z, z), c.map(v => v * Math.exp(-Math.abs(z[0]))))],
   ['z*z+c+i', (z, c) => add(add(mul(z, z), c), [0, 1])],
   ['z*z+i+c/i', (z, c) => add(add(mul(z, z), [0, 1]), [c[1], -c[0]])],
 ]

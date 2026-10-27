@@ -331,7 +331,12 @@ export function compileIterationFunction(functionStr) {
               const theta = complexScalar(angle);
               const cs = Math.cos(theta);
               const sn = Math.sin(theta);
-              return [a[0] * cs - a[1] * sn, a[0] * sn + a[1] * cs];
+              // rotate(a, angle) = a * exp(i * angle), including complex angles.
+              const rotated = [a[0] * cs - a[1] * sn, a[0] * sn + a[1] * cs];
+              const imaginaryAngle = Array.isArray(angle) || angle instanceof Float64Array ? angle[1] : 0;
+              if (imaginaryAngle === 0) return rotated;
+              const scale = Math.exp(-imaginaryAngle);
+              return [rotated[0] * scale, rotated[1] * scale];
             };
             const complexFold = (a) => [Math.abs(a[0]), Math.abs(a[1])];
             const complexBoxFold = (a, radius) => {
@@ -559,7 +564,12 @@ function createOptimizedFunction(expr) {
               const theta = complexScalar(angle);
               const cs = Math.cos(theta);
               const sn = Math.sin(theta);
-              return [a[0] * cs - a[1] * sn, a[0] * sn + a[1] * cs];
+              // rotate(a, angle) = a * exp(i * angle), including complex angles.
+              const rotated = [a[0] * cs - a[1] * sn, a[0] * sn + a[1] * cs];
+              const imaginaryAngle = Array.isArray(angle) || angle instanceof Float64Array ? angle[1] : 0;
+              if (imaginaryAngle === 0) return rotated;
+              const scale = Math.exp(-imaginaryAngle);
+              return [rotated[0] * scale, rotated[1] * scale];
             };
             const complexFold = (a) => [Math.abs(a[0]), Math.abs(a[1])];
             const complexBoxFold = (a, radius) => {

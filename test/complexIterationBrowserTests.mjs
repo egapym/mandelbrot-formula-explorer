@@ -1,3 +1,4 @@
+import { checkComplexRotateCpu, checkComplexRotateGpu } from './complexRotateTests.mjs'
 import { BuddhabrotWebGPU } from '../buddhabrotWebGPU.mjs'
 import * as fxp from '../fxp.mjs'
 import { MandelbrotCustom } from '../mandelbrotCustom.mjs'
@@ -14,6 +15,8 @@ async function run() {
   const adapter = await navigator.gpu?.requestAdapter()
   const device = await adapter?.requestDevice()
   assert(device, 'WebGPU device unavailable')
+  checkComplexRotateCpu()
+  await checkComplexRotateGpu(device)
   const gpu = new MandelbrotCustomWebGPU(
     { onGpuUpdate() {} },
     new WorkerContext(),
@@ -68,6 +71,8 @@ async function run() {
       'c*i',
       'c+i',
       'z*z+c*i',
+      'z*z + rotate(c, i*|Im(z)|)',
+      'z*z + rotate(c, i*|Re(z)|)',
       'z*z+c+i',
       'z*z+i+c/i',
       'exp(1000+Re(c))*i+c',
@@ -355,7 +360,7 @@ async function run() {
     document.querySelector('#buddha').getContext('2d').putImageData(densityImage, 0, 0)
     const error = await device.popErrorScope()
     assert(!error, error?.message)
-    document.querySelector('#result').textContent = `PASS: ${checks} CPU/WebGPU escape and Buddhabrot orbit checks`
+    document.querySelector('#result').textContent = `PASS: complex-angle rotation (CPU/WebGPU) and ${checks} CPU/WebGPU escape and Buddhabrot orbit checks`
   } finally {
     gpu.pipeline.dispose()
     buddha.stop()

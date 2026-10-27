@@ -8,6 +8,7 @@
  */
 
 import assert from 'node:assert/strict'
+import { checkComplexRotateCpu } from './complexRotateTests.mjs'
 import { compileIterationFunction, getIterationHistoryRequirements, getParsedExpression } from '../customFunctionParser.mjs'
 import { functionPresets } from '../functionPresets.mjs'
 import { CUSTOM_FUNCTION_WGSL_HELPERS, jsExprToWGSL_safe } from '../wgslCompiler.mjs'
@@ -238,6 +239,7 @@ function testNestedComplexAdditionAndSubtractionGrouping() {
 }
 
 async function main() {
+  checkComplexRotateCpu()
   testRiemannZetaKnownValues()
   testRemovedFunctionsAreUnavailable()
   testIterationIndexVariableAffectsModOrbit()

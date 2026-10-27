@@ -699,11 +699,15 @@ function astToWGSL(node, tokensTable) {
       case 'complexRotate': {
         const a = argNodes[0]
         const angle = scalarFromNode(argNodes[1])
+        const imaginaryAngle = comp(argNodes[1], 'y')
         const cs = `cos(${angle})`
         const sn = `sin(${angle})`
+        // rotate(a, angle) = a * exp(i * angle). Preserve the real-angle path.
+        const imaginaryValue = tryNumericValue(imaginaryAngle)
+        const scale = imaginaryValue.ok && imaginaryValue.value === 0 ? '' : ` * exp(-(${imaginaryAngle}))`
         return makeVec2FromChildren(
-          { expr: `(${comp(a, 'x')}) * (${cs}) - (${comp(a, 'y')}) * (${sn})`, kind: 'scalar' },
-          { expr: `(${comp(a, 'x')}) * (${sn}) + (${comp(a, 'y')}) * (${cs})`, kind: 'scalar' },
+          { expr: `((${comp(a, 'x')}) * (${cs}) - (${comp(a, 'y')}) * (${sn}))${scale}`, kind: 'scalar' },
+          { expr: `((${comp(a, 'x')}) * (${sn}) + (${comp(a, 'y')}) * (${cs}))${scale}`, kind: 'scalar' },
         )
       }
       case 'complexFold': {
