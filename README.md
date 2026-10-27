@@ -140,9 +140,9 @@ GPU accumulation keeps carry words for overflowing integer counters, combines
 repeated contributions to the same two pixels locally, and converts density on
 the GPU before readback. These operations retain every orbit point and palette
 contribution without frequent full-image transfers to the CPU.
-Fixed Samples is available only with Continuous OFF. Enabling Continuous turns
-Fixed Samples OFF and disables it; disabling Continuous makes it available again
-without automatically turning it back on.
+Fixed Samples is available only with Continuous OFF. Enabling Continuous temporarily
+disables the control while preserving its ON/OFF setting, saved seeds, and sampling
+ranges. Disabling Continuous makes it available again with the same setting.
 Increasing Samples evaluates more coordinates from the same sequence. Switching
 CPU/GPU uses that backend's sequence. Changing Sampling Range turns Fixed Samples
 OFF and clears the saved sequences and ranges for both main and Julia views so

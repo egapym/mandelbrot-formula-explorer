@@ -3824,10 +3824,6 @@ function syncBuddhaContinuousModeUi() {
   const input = DOM.buddha.iterations
   const enabled = !!DOM.buddha.continuous?.checked
   if (DOM.buddha.fixedSamples) {
-    if (enabled) {
-      DOM.buddha.fixedSamples.checked = false
-      fixedBuddhaSamples.clear()
-    }
     DOM.buddha.fixedSamples.disabled = enabled
   }
   syncBuddhaFixedSamplesUi()

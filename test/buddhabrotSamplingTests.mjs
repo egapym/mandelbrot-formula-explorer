@@ -36,7 +36,7 @@ assert.deepEqual(refreshed.samplingCenter, first.center, 'Manual reseeding must 
 assert.equal(refreshed.samplingZoom, first.zoom)
 assert.equal(inherited.apply(first, 'main').sampleSeed, refreshed.sampleSeed)
 
-// Exercise actual toggle synchronization, including restoring incompatible settings.
+// Exercise actual toggle synchronization, including preserving the fixed sample lock.
 const source = readFileSync(new URL('../index.js', import.meta.url), 'utf8')
 // Exercise the range selection used by both normal and realtime rendering.
 const samplingContext = {
@@ -85,19 +85,26 @@ const context = {
 }
 runInNewContext(source.slice(source.indexOf('let buddhaFiniteSampleValue = null'),
   source.indexOf('function wrapContinuousBuddhaRunner(')), context)
+const lockedViews = new Map(fixed.views)
 context.syncBuddhaContinuousModeUi()
-assert.equal(context.DOM.buddha.fixedSamples.checked, false)
+assert.equal(context.DOM.buddha.fixedSamples.checked, true)
 assert.equal(context.DOM.buddha.fixedSamples.disabled, true)
-assert.equal(fixed.views.size, 0)
+assert.deepEqual(fixed.views, lockedViews, 'Continuous must retain the fixed seeds and sampling ranges')
 assert.equal(context.DOM.buddha.regenerateSeed.disabled, true)
 context.DOM.buddha.continuous.checked = false
 context.syncBuddhaContinuousModeUi()
 assert.equal(context.DOM.buddha.fixedSamples.disabled, false)
-assert.equal(context.DOM.buddha.fixedSamples.checked, false, 'Disabling Continuous must not restore the old lock')
-context.DOM.buddha.fixedSamples.checked = true
-context.syncBuddhaFixedSamplesUi()
+assert.equal(context.DOM.buddha.fixedSamples.checked, true, 'Disabling Continuous must keep Fixed Samples ON')
+assert.deepEqual(fixed.views, lockedViews)
 assert.equal(context.DOM.buddha.regenerateSeed.disabled, false)
-console.log('PASS: fixed sample ranges, deterministic streams, independent targets, reset and Continuous exclusion')
+context.DOM.buddha.fixedSamples.checked = false
+context.DOM.buddha.continuous.checked = true
+context.syncBuddhaContinuousModeUi()
+context.DOM.buddha.continuous.checked = false
+context.syncBuddhaContinuousModeUi()
+assert.equal(context.DOM.buddha.fixedSamples.checked, false, 'Continuous must also preserve Fixed Samples OFF')
+assert.equal(context.DOM.buddha.regenerateSeed.disabled, true)
+console.log('PASS: fixed sample ranges, deterministic streams, independent targets, reset and lock preservation across Continuous')
 
 // Sampling Range must release both targets before requesting a render, even when hidden.
 let rangeChange
