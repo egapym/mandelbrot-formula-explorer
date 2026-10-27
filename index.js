@@ -4001,9 +4001,10 @@ async function startBuddhaRender({
   // すでに Buddhabrot 実行中なら一度止めてからやり直す。
   // View ON で再レンダーする場合は、既存表示を消さずに新しい結果へ差し替える。
   try {
-    // Stop 後の保持 runner は、停止前の通知コールバックを持っている。
-    // 新規レンダーでは再利用せず、保持中のキャンバスを残したまま作り直す。
-    if (!buddhaActive && buddhaPreservedDisplay && buddhaRunner) {
+    // A stopped runner retains callbacks invalidated by View OFF. Navigation
+    // clears buddhaPreservedDisplay without discarding that runner, so rebuild
+    // every inactive runner before starting a new render.
+    if (!buddhaActive && buddhaRunner) {
       buddhaRunner.terminate?.()
       buddhaRunner = null
       buddhaPreservedDisplay = false

@@ -48,14 +48,17 @@ try {
     // finish. View OFF must render the fractal instead of restoring that
     // unfinished (possibly entirely transparent) initial canvas.
     const settings = decodeSettings(new URL(win.location.href).searchParams.get('params'))
-    for (const julia of [false, true]) {
+    for (const julia of params.has('navigationOnly') ? [] : [false, true]) {
       const linkedFrame = document.createElement('iframe')
       linkedFrame.style.cssText = frame.style.cssText
       const url = new URL('../index.html', location.href)
       url.searchParams.set('params', encodeSettings({
         ...settings,
         buddhaView: true,
-        controls: { ...settings.controls, 'julia-toggle': julia },
+        controls: {
+          ...settings.controls, 'julia-toggle': julia,
+          gpu, 'buddha-gpu': gpu, 'buddha-iterations': '8192',
+        },
       }))
       linkedFrame.src = url.href
       const linkedLoaded = new Promise((resolve) => linkedFrame.addEventListener('load', resolve, { once: true }))
@@ -141,6 +144,39 @@ try {
       }
       if (!colored) throw new Error('Restored fractal has no colored pixels')
       passed.push(`PASS: GPU ${gpu ? 'ON' : 'OFF'}, ${gesture}: no stale frame; fresh colored fractal rendered`)
+      result.textContent = passed.join('\n')
+
+      // View OFF invalidates runner callbacks. Ordinary navigation also drops
+      // the preserved-display flag; the next Render must rebuild that runner.
+      const sourceRect = canvas.getBoundingClientRect()
+      const sourceX = sourceRect.x + sourceRect.width / 2
+      const sourceY = sourceRect.y + sourceRect.height / 2
+      const beforeNavigation = gesture === 'zoom'
+        ? doc.getElementById('coordZoom').value : doc.getElementById('coordX').value
+      if (gesture === 'zoom') {
+        canvas.dispatchEvent(new win.WheelEvent('wheel', {
+          bubbles: true, cancelable: true, clientX: sourceX, clientY: sourceY, deltaY: 100,
+        }))
+      } else {
+        canvas.setPointerCapture = () => {}
+        for (const [type, dx, buttons] of [['mousedown', 0, 1], ['mousemove', 40, 1], ['mouseup', 40, 0]]) {
+          canvas.dispatchEvent(new win.MouseEvent(type, {
+            bubbles: true, cancelable: true, button: 0, buttons,
+            clientX: sourceX + dx, clientY: sourceY + dx / 2,
+          }))
+        }
+      }
+      await delay(600)
+      const afterNavigation = gesture === 'zoom'
+        ? doc.getElementById('coordZoom').value : doc.getElementById('coordX').value
+      if (afterNavigation === beforeNavigation) throw new Error(`Ordinary ${gesture} did not change coordinates`)
+      doc.getElementById('buddha-render').click()
+      await waitFor(() => view.checked && !view.disabled && hasColoredPixels(canvas),
+        `First Buddhabrot render after View OFF and ${gesture} did not present and complete`)
+      if (doc.getElementById('progress-canvas').style.display !== 'none') {
+        throw new Error(`Buddhabrot progress remained visible after ${gesture} and Render`)
+      }
+      passed.push(`PASS: GPU ${gpu ? 'ON' : 'OFF'}, View OFF then ${gesture}: first Render completes with colored pixels`)
       result.textContent = passed.join('\n')
     }
     prototype.drawImage = original
