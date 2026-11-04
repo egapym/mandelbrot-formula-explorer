@@ -139,9 +139,10 @@ assert.equal(context.DOM.buddha.fixedSamples.checked, false, 'Continuous must al
 assert.equal(context.DOM.buddha.regenerateSeed.disabled, true)
 console.log('PASS: fixed sample ranges, deterministic streams, independent targets, reset and lock preservation across Continuous')
 
-// Sampling Range must release both targets before requesting a render, even when hidden.
+// Sampling Range must preserve ON/OFF while clearing both targets before redraw, even when hidden.
 let rangeChange
 let rangeRedraws = 0
+let expectedFixedSamples = true
 const rangeContext = {
   DOM: { buddha: {
     fixedSamples: { checked: true },
@@ -153,7 +154,7 @@ const rangeContext = {
   fixedBuddhaSamples: fixed,
   syncBuddhaFixedSamplesUi() {},
   redrawBuddhaForRenderSettingChange() {
-    assert.equal(rangeContext.DOM.buddha.fixedSamples.checked, false)
+    assert.equal(rangeContext.DOM.buddha.fixedSamples.checked, expectedFixedSamples)
     assert.equal(fixed.views.size, 0, 'Both main and Julia locks must clear before redraw')
     rangeRedraws++
   },
@@ -163,11 +164,20 @@ fixed.apply(first, 'julia')
 const rangeStart = source.indexOf("  DOM.buddha.samplingRange?.addEventListener('change', () => {")
 assert.ok(rangeStart >= 0)
 runInNewContext(source.slice(rangeStart, source.indexOf('// Buddhabrot 実行ボタン', rangeStart)), rangeContext)
-rangeChange()
-assert.equal(rangeRedraws, 1)
-assert.deepEqual(fixed.apply({ ...first, zoom: 5 }, 'main').samplingZoom, 5,
-  'A later lock must adopt the newly selected range')
-console.log('PASS: Sampling Range releases Fixed Samples and clears both target ranges before redraw')
+for (const enabled of [true, false]) {
+  expectedFixedSamples = enabled
+  rangeContext.DOM.buddha.fixedSamples.checked = enabled
+  fixed.apply(first, 'main')
+  fixed.apply(first, 'julia')
+  rangeChange()
+  assert.equal(rangeContext.DOM.buddha.fixedSamples.checked, enabled)
+  for (const kind of ['main', 'julia']) {
+    assert.equal(fixed.apply({ ...first, zoom: 5 }, kind).samplingZoom, 5,
+      'The next lock must adopt the newly selected range')
+  }
+}
+assert.equal(rangeRedraws, 2)
+console.log('PASS: Sampling Range preserves Fixed Samples ON/OFF and clears both target ranges before redraw')
 
 // Render replays the locked seed; only the explicit seed button changes it.
 const callbacks = {}

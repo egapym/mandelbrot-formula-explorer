@@ -144,8 +144,8 @@ Fixed Samples is available only with Continuous OFF. Enabling Continuous tempora
 disables the control while preserving its ON/OFF setting, saved seeds, and sampling
 ranges. Disabling Continuous makes it available again with the same setting.
 Increasing Samples evaluates more coordinates from the same sequence. Switching
-CPU/GPU uses that backend's sequence. Changing Sampling Range turns Fixed Samples
-OFF and clears the saved sequences and ranges for both main and Julia views so
+CPU/GPU uses that backend's sequence. Changing Sampling Range preserves the Fixed Samples
+ON/OFF setting and clears the saved sequences and ranges for both main and Julia views so
 the selected range applies to the next render. Reset All Settings disables Fixed Samples.
 
 While Buddhabrot is shown (including a stopped image), changing Palette, Buddhabrot Mode,

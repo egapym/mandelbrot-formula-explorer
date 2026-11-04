@@ -9859,7 +9859,6 @@ function initListeners() {
   }
 
   DOM.buddha.samplingRange?.addEventListener('change', () => {
-    if (DOM.buddha.fixedSamples) DOM.buddha.fixedSamples.checked = false
     syncBuddhaFixedSamplesUi()
     fixedBuddhaSamples.clear()
     redrawBuddhaForRenderSettingChange()
