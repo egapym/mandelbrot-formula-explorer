@@ -106,8 +106,10 @@ function, including Julia, Anti-Buddhabrot, iteration-dependent expressions and
 iteration/history state and determines every orbit hit and palette band using
 the configured iteration limit. No Mandelbrot-specific interior approximation
 is used. Small jobs and device limits retain a single-pass GPU path. Completion
-waits are grouped with a bounded queued-work budget; interactive density readback
-is grouped into 16ms intervals, and the final result is always read back.
+waits are grouped with a bounded queued-work budget. Normal finite GPU renders
+display partial results about every second; preview reads retain the integer
+histogram so their timing does not change the final density. Interactive density
+readback is grouped into 16ms intervals, and the final result is always read back.
 
 Enable **Continuous**, then select **Render Buddhabrot** to keep adding samples
 without a finite limit. Changing Continuous does not restart or stop the current

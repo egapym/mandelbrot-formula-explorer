@@ -768,8 +768,10 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     const MAX_SAMPLES_PER_THREAD = 1
     const MAX_SAMPLES_PER_BATCH = Math.max(1, invocations)
 
-    // Reuse the pipeline and histogram throughout continuous rendering. Read and
-    // clear the integer histogram periodically, accumulating into CPU densities.
+    // Continuous/interactive rendering drains the histogram into CPU densities.
+    // Finite previews only read it: retain exact integer totals so preview timing
+    // cannot change the final density through repeated Float32 accumulation.
+    const accumulateDensity = continuous || params.interactive
     let hasReadDensity = false
     const readDensity = async () => {
       if (densityReadback) {
@@ -785,13 +787,14 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
           const encoder = device.createCommandEncoder()
           densityReadback.encode(encoder)
           encoder.copyBufferToBuffer(densityReadback.output, 0, buffer, 0, bufSize * 3)
-          for (const source of [rBuf, gBuf, bBuf, ...highBuffers]) encoder.clearBuffer(source)
+          if (accumulateDensity)
+            for (const source of [rBuf, gBuf, bBuf, ...highBuffers]) encoder.clearBuffer(source)
           device.queue.submit([encoder.finish()])
           await buffer.mapAsync(GPUMapMode.READ)
           const values = new Float32Array(buffer.getMappedRange())
           for (const [ch, density] of [this.densityR, this.densityG, this.densityB].entries()) {
             const channel = values.subarray(ch * len, (ch + 1) * len)
-            if (!hasReadDensity) density.set(channel)
+            if (!hasReadDensity || !accumulateDensity) density.set(channel)
             else for (let i = 0; i < len; i++) density[i] += channel[i]
           }
           hasReadDensity = true
@@ -809,7 +812,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         for (const [word, sources] of [[rBuf, gBuf, bBuf], highBuffers].entries()) {
           for (const [i, source] of sources.entries()) {
             encoder.copyBufferToBuffer(source, 0, buffers[word], i * bufSize, bufSize)
-            encoder.clearBuffer(source)
+            if (accumulateDensity) encoder.clearBuffer(source)
           }
         }
         device.queue.submit([encoder.finish()])
@@ -820,7 +823,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
           for (let i = 0; i < len; i++) {
             const offset = channel * len + i
             const value = (values[offset] + highs[offset] * 4294967296) / QUANT_SCALE
-            density[i] += value
+            density[i] = accumulateDensity ? density[i] + value : value
           }
         }
         for (const buffer of buffers) buffer.unmap()
@@ -946,7 +949,8 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         this.onProgress({ delta: pendingSamples, total: totalSamples })
         pendingSamples = 0
         queuedBatches = 0
-        if ((continuous || params.interactive) && performance.now() - lastDisplay >= displayInterval) {
+        if ((continuous || params.interactive || !params.reusePipelines) &&
+          performance.now() - lastDisplay >= displayInterval) {
           await readDensity()
           this.onChunk({ continuous })
           lastDisplay = performance.now()
