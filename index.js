@@ -3565,8 +3565,6 @@ function activateRealtimeBuddhaNavigation(drag) {
   buddhaPreservedDisplay = false
   DOM.buddha.toggle.checked = true
   DOM.buddha.toggle.disabled = !!DOM.buddha.continuous?.checked
-  clearOrbitCanvas()
-  clearJuliaOrbitCanvas()
 }
 
 function requestRealtimeBuddhaFrame(drag) {
@@ -3634,6 +3632,15 @@ function transformRealtimeBuddhaView(drag, previous, current, factor = 1) {
   ctx.drawImage(drag.copy, x - appliedFactor * px, y - appliedFactor * py,
     canvas.width * appliedFactor, canvas.height * appliedFactor)
   requestRealtimeBuddhaFrame(drag)
+  // Navigation owns pointer/wheel events, so the ordinary overlay refresh
+  // handlers do not run. Reproject pinned orbits and follow the gesture for hover.
+  if (kind === 'main' && mainOrbitHoverActive) {
+    ;[lastX, lastY] = toGraphicsCoordinates(current.x, current.y)
+  } else if (kind === 'julia' && juliaOrbitHoverActive) {
+    juliaLastOrbitClientX = current.x
+    juliaLastOrbitClientY = current.y
+  }
+  _refreshActiveOrbitOverlays()
 }
 
 function realtimeBuddhaGesture(pointers) {
@@ -4056,7 +4063,7 @@ async function startBuddhaRender({
 
   BuddhabrotState.targetKind = target.kind
   if (target.kind === 'julia') {
-    clearJuliaOrbitCanvas()
+    _refreshActiveOrbitOverlays()
     if (detailEnabled) _renderDetailIndicator()
     if (juliaCanvasElement) juliaCanvasElement.style.cursor = ''
   }
@@ -7655,7 +7662,10 @@ function onMouseDown(evt) {
 function onMouseMove(evt) {
   if (realtimeBuddhaDrag?.canvas === canvasElement) return
   const [clientX, clientY] = _getClientCoordinatesFromEvent(evt)
-  if (evt.type === 'mousemove') mainOrbitHoverActive = true
+  if (evt.type === 'mousemove') {
+    mainOrbitHoverActive = true
+    updateMousePos(evt)
+  }
   const buddhaOnJuliaView = isBuddhabrotViewShownOnJulia()
   // 固定した軌道の十字付近では、解除できることが分かるようポインター表示にする
   if (orbitDrawEnabled && pinnedOrbit) {
