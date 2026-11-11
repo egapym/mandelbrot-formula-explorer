@@ -8354,8 +8354,18 @@ function setStyleIfChanged(element, property, value) {
   return true
 }
 
-function setCanvasBufferSizeIfChanged(canvas, width, height) {
+function setCanvasBufferSizeIfChanged(canvas, width, height, preservePixels = false) {
   if (!canvas) return false
+  if (canvas.width === width && canvas.height === height) return false
+  // Buffer resizing clears the canvas. Keep the current frame visible while
+  // the CPU/GPU asynchronously renders the new Hi DPI resolution.
+  let previousFrame = null
+  if (preservePixels && canvas.width > 0 && canvas.height > 0) {
+    previousFrame = document.createElement('canvas')
+    previousFrame.width = canvas.width
+    previousFrame.height = canvas.height
+    previousFrame.getContext('2d').drawImage(canvas, 0, 0)
+  }
   let changed = false
   if (canvas.width !== width) {
     canvas.width = width
@@ -8364,6 +8374,9 @@ function setCanvasBufferSizeIfChanged(canvas, width, height) {
   if (canvas.height !== height) {
     canvas.height = height
     changed = true
+  }
+  if (previousFrame) {
+    canvas.getContext('2d').drawImage(previousFrame, 0, 0, width, height)
   }
   return changed
 }
@@ -8401,7 +8414,7 @@ function refreshDevicePixelBoxSize() {
   updateFullResToggleAvailability()
 }
 
-function resizeToCanvasSize() {
+function resizeToCanvasSize({ preservePixels = false } = {}) {
   // Changing the canvas buffer clears its pixels. Always redraw a changed size,
   // including rapid Julia toggles immediately after stopping Buddhabrot.
   invalidateAnimation()
@@ -8425,7 +8438,7 @@ function resizeToCanvasSize() {
       const jCanvas = document.getElementById('julia-canvas')
       let juliaCanvasChanged = false
       if (jCanvas && juliaState.renderer) {
-        juliaCanvasChanged = setCanvasBufferSizeIfChanged(jCanvas, juliaBufferWidth, juliaBufferHeight)
+        juliaCanvasChanged = setCanvasBufferSizeIfChanged(jCanvas, juliaBufferWidth, juliaBufferHeight, preservePixels)
         if (juliaCanvasChanged) juliaState.renderer.resized()
       }
 
@@ -8452,7 +8465,7 @@ function resizeToCanvasSize() {
         isMandelbrotPreview && previewContentWidth > 0 ? mbDisplayWidth * 0.75 : mbRect?.height || canvasElement.offsetHeight || 1
       const mbW = Math.max(1, Math.round(mbDisplayWidth))
       const mbH = Math.max(1, Math.round(mbDisplayHeight))
-      const mainCanvasChanged = setCanvasBufferSizeIfChanged(canvasElement, mbW, mbH)
+      const mainCanvasChanged = setCanvasBufferSizeIfChanged(canvasElement, mbW, mbH, preservePixels)
       const mainRendererSizeChanged = fractal.width !== canvasElement.width || fractal.height !== canvasElement.height
       if (mainCanvasChanged || mainRendererSizeChanged) {
         resizeTmpCanvas()
@@ -8527,14 +8540,14 @@ function resizeToCanvasSize() {
     if (sizeEl) sizeEl.innerText = `${bufW}x${bufH}`
 
     // メインキャンバスの実ピクセルサイズを設定する
-    const mainCanvasChanged = setCanvasBufferSizeIfChanged(canvasElement, bufW, bufH)
+    const mainCanvasChanged = setCanvasBufferSizeIfChanged(canvasElement, bufW, bufH, preservePixels)
     if (mainCanvasChanged) resizeTmpCanvas()
 
     // Julia キャンバスの実ピクセルサイズを設定する
     const jCanvas = document.getElementById('julia-canvas')
     let juliaCanvasChanged = false
     if (jCanvas && juliaState.renderer) {
-      juliaCanvasChanged = setCanvasBufferSizeIfChanged(jCanvas, bufW, bufH)
+      juliaCanvasChanged = setCanvasBufferSizeIfChanged(jCanvas, bufW, bufH, preservePixels)
       if (juliaCanvasChanged) juliaState.renderer.resized()
     }
 
@@ -8621,7 +8634,7 @@ function resizeToCanvasSize() {
   }
   lastAppliedCanvasSizeKey = sizeKey
 
-  const mainCanvasChanged = setCanvasBufferSizeIfChanged(canvasElement, width, height)
+  const mainCanvasChanged = setCanvasBufferSizeIfChanged(canvasElement, width, height, preservePixels)
 
   if (mainCanvasChanged) resizeTmpCanvas()
   // Chrome native fullscreen は fullscreenchange の後にも canvas の表示矩形を
@@ -9595,10 +9608,10 @@ function initListeners() {
     toggleFullScreen()
   })
   fullResToggle.addEventListener('change', (_event) => {
-    resizeToCanvasSize()
+    const canvasSizeChanged = resizeToCanvasSize({ preservePixels: true })
     if (isBuddhabrotViewShownOnJulia()) {
       restoreOrRedrawFractalDisplayAfterClearingBuddha('main')
-    } else if (!buddhaActive) {
+    } else if (!buddhaActive && !canvasSizeChanged) {
       redraw()
     }
   })
