@@ -3042,8 +3042,11 @@ function getBuddhaSamplingRange(renderer, kind) {
 }
 
 function applyFixedBuddhaSamples(params, kind, baseline = params) {
-  if (DOM.buddha.fixedSamples?.checked && !DOM.buddha.continuous?.checked) {
-    return fixedBuddhaSamples.apply(params, kind, baseline)
+  if (DOM.buddha.fixedSamples?.checked) {
+    const fixed = fixedBuddhaSamples.apply(params, kind, baseline)
+    // Continuous draws fresh samples, but must keep the locked domain when the
+    // display has moved into a region with no escaping starting coordinates.
+    return DOM.buddha.continuous?.checked ? { ...fixed, sampleSeed: undefined } : fixed
   }
   // Retain a replayable root seed even while unlocked, so enabling the lock
   // can preserve the immediately preceding finite render's coordinates.

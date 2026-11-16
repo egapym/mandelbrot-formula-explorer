@@ -145,6 +145,9 @@ contribution without frequent full-image transfers to the CPU.
 Fixed Samples is available only with Continuous OFF. Enabling Continuous temporarily
 disables the control while preserving its ON/OFF setting, saved seeds, and sampling
 ranges. Disabling Continuous makes it available again with the same setting.
+When Fixed Samples is ON, Continuous draws fresh samples from the locked sampling
+range, even after panning or zooming the display. Turning Continuous OFF resumes
+the saved finite sample sequence.
 Increasing Samples evaluates more coordinates from the same sequence. Switching
 CPU/GPU uses that backend's sequence. Changing Sampling Range preserves the Fixed Samples
 ON/OFF setting and clears the saved sequences and ranges for both main and Julia views so

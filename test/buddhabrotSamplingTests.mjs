@@ -38,6 +38,42 @@ assert.equal(inherited.apply(first, 'main').sampleSeed, refreshed.sampleSeed)
 
 // Exercise actual toggle synchronization, including preserving the fixed sample lock.
 const source = readFileSync(new URL('../index.js', import.meta.url), 'utf8')
+// Continuous must sample the locked domain even when the display is entirely
+// inside the Mandelbrot set, where local Buddha samples would all be rejected.
+const executionLock = new FixedBuddhabrotSamples(() => 456)
+const executionContext = {
+  DOM: { buddha: { fixedSamples: { checked: true }, continuous: { checked: false } } },
+  fixedBuddhaSamples: executionLock,
+}
+const applyStart = source.indexOf('function applyFixedBuddhaSamples(')
+runInNewContext(source.slice(applyStart, source.indexOf('let realtimeBuddhaDrag', applyStart)), executionContext)
+const insideView = { ...first, center: { x: 0, y: 0 }, zoom: 100, height: 800 }
+for (const kind of ['main', 'julia']) {
+  for (const domain of [first, { ...first, samplingCenter: { x: -1, y: 0 }, samplingZoom: 0.5, samplingRadius: 4 }]) {
+    executionLock.clear()
+    const locked = executionContext.applyFixedBuddhaSamples(domain, kind)
+    for (const gpu of [false, true]) {
+      executionContext.DOM.buddha.continuous.checked = true
+      const continuous = executionContext.applyFixedBuddhaSamples({ ...insideView, gpu }, kind)
+      for (const key of ['samplingCenter', 'samplingZoom', 'samplingRadius', 'samplingAspect']) {
+        assert.deepEqual(continuous[key], locked[key], `Continuous must retain ${kind} ${key} with GPU ${gpu}`)
+      }
+      assert.deepEqual(continuous.center, insideView.center)
+      assert.equal(continuous.zoom, insideView.zoom, 'Display projection must keep the zoomed view')
+      assert.equal(continuous.sampleSeed, undefined, 'Continuous must draw fresh samples')
+      executionContext.DOM.buddha.continuous.checked = false
+      const resumed = executionContext.applyFixedBuddhaSamples(insideView, kind)
+      assert.equal(resumed.sampleSeed, locked.sampleSeed, 'Returning to finite rendering must replay the saved seed')
+      assert.deepEqual(resumed.samplingCenter, locked.samplingCenter)
+    }
+  }
+}
+executionContext.DOM.buddha.fixedSamples.checked = false
+executionContext.DOM.buddha.continuous.checked = true
+const unlockedContinuous = executionContext.applyFixedBuddhaSamples(insideView, 'main')
+assert.equal(unlockedContinuous.samplingCenter, undefined, 'Unlocked Continuous must follow Current View')
+assert.equal(unlockedContinuous.sampleSeed, undefined)
+console.log('PASS: Continuous retains locked rectangular/disk domains for CPU/GPU and main/Julia; finite seed survives')
 // Exercise the range selection used by both normal and realtime rendering.
 const samplingContext = {
   getInitialBuddhabrotSamplingRange,
