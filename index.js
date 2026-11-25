@@ -15,7 +15,10 @@ import { FixedBuddhabrotSamples, getInitialBuddhabrotSamplingRange } from './bud
 import { BUDDHA_DEFAULT_BRIGHTNESS, BUDDHA_DEFAULT_GAMMA } from './buddhabrotExposure.mjs'
 import { CpuDensityColorMap } from './buddhabrotCpuColorMap.mjs'
 import { DEFAULT_RENDER_POINT_BATCH_SIZE, getRenderPointBatchLimit, normalizeRenderPointBatchSize } from './buddhabrotRenderConfig.mjs'
-import { BUDDHA_PALETTES, buildBuddhaStops, getBuddhaPalette } from './buddhaPalettes.mjs'
+import {
+  BUDDHA_PALETTES, CUSTOM_BUDDHA_PALETTE, DEFAULT_BUDDHA_COLORS,
+  buildBuddhaStops, getBuddhaPalette, setCustomBuddhaColors,
+} from './buddhaPalettes.mjs'
 import { compileIterationFunction, getIterationHistoryRequirements, getParsedExpression, usesIterationHistory } from './customFunctionParser.mjs'
 import { readSettingsControls, writeSettingsControls, encodeSettings, decodeSettings } from './settingsState.mjs'
 import * as favorites from './favorites.js'
@@ -70,7 +73,7 @@ function _orbitTrapColorPatternId(paletteObj) {
 function _orbitTrapGpuRenderKey(paletteObj) {
   if (!paletteObj?.trapSpec) return 'null'
   const colorPatternId = _orbitTrapColorPatternId(paletteObj) ?? ''
-  return `${_trapSpecKey(paletteObj.trapSpec)}|color:${colorPatternId}`
+  return `${_trapSpecKey(paletteObj.trapSpec)}|color:${colorPatternId}:${paletteObj.inSetColor}:${paletteObj.patternColors ?? ''}:${paletteObj.patternCycles ?? ''}`
 }
 
 /**
@@ -320,6 +323,7 @@ function _applyOrbitTrapSpecToUI(spec, colorPatternId) {
   _syncOrbitTrapBitmapBackgroundInputs(_getOrbitTrapBitmapBackgroundColor(spec))
 
   // 一部 UI は shape/mode 依存で隠されている可能性があるため再表示
+  paletteComponent._syncOrbitTrapCycleInputs()
   paletteComponent._updateOrbitTrapModeVisibility()
 }
 
@@ -1043,18 +1047,14 @@ class Mandelbrot {
       const newOrbitTrapGpuRenderKey = useOrbitTrapGpu ? _orbitTrapGpuRenderKey(paletteObj) : null
       if (
         newTrapKey !== this._lastTrapSpecKey ||
-        (useOrbitTrapGpu && newOrbitTrapGpuRenderKey !== this._lastOrbitTrapGpuRenderKey)
+        newOrbitTrapGpuRenderKey !== this._lastOrbitTrapGpuRenderKey
       ) {
-        // キーが異なればいずれの場合でもジョブをリセット
-        this._lastTrapSpecKey = newTrapKey
-        this._lastOrbitTrapGpuRenderKey = newOrbitTrapGpuRenderKey
         this.render(true)
         return
       }
       // Full GPU coloring does not keep CPU otData in sync, so avoid repainting
       // the current RGBA frame through the CPU palette path.
       if (useOrbitTrapGpu) return
-      this._lastOrbitTrapGpuRenderKey = null
       const lastScreenNr = this.jobLevel < 1 ? this.offscreens.length : this.jobLevel - 1
       for (let screenNr = 0; screenNr <= lastScreenNr; screenNr++) {
         this.offscreens[screenNr]?.render(this.palette, this.max_iter, this.smooth, this.paletteComponent.palette)
@@ -1379,9 +1379,10 @@ class Mandelbrot {
     const frameBottomRight = this.canvas2complex(roundup(this.width), roundup(this.height))
     const z0Real = document.getElementById('z0-real') ? parseFloat(document.getElementById('z0-real').value) || 0 : 0
     const z0Imag = document.getElementById('z0-imag') ? parseFloat(document.getElementById('z0-imag').value) || 0 : 0
-    const trapSpec = this.paletteComponent?.palette?.trapSpec ?? null
-    const colorPatternId = _orbitTrapColorPatternId(this.paletteComponent?.palette)
-    const paramHash = `${this.max_iter}-${this.smooth}-${this.renderSupersampling}-${this.fractalType}-${this.iterationFunction}-${this.escapeRadius}-${z0Real}-${z0Imag}-${_trapSpecKey(trapSpec)}-${colorPatternId ?? ''}`
+    const paletteObj = this.paletteComponent.palette
+    const { trapSpec, patternColors, patternCycles, inSetColor } = paletteObj
+    this._lastOrbitTrapGpuRenderKey = _orbitTrapGpuRenderKey(paletteObj)
+    const paramHash = `${this.max_iter}-${this.smooth}-${this.renderSupersampling}-${this.fractalType}-${this.iterationFunction}-${this.escapeRadius}-${z0Real}-${z0Imag}-${this._lastOrbitTrapGpuRenderKey}`
 
     const task = {
       type: 'task',
@@ -1414,7 +1415,10 @@ class Mandelbrot {
       escapeRadius: this.escapeRadius,
       animationQuick: this.currentInteractionGpuRedraw,
       trapSpec,
-      colorPatternId,
+      colorPatternId: _orbitTrapColorPatternId(paletteObj),
+      patternColors,
+      patternCycles,
+      inSetColor,
       onUpdate: (answer) => this.onGpuUpdate(answer),
     }
     this.activeGpuViewRevision = task.viewRevision
@@ -1637,6 +1641,9 @@ class Mandelbrot {
     this.jobLevel = -1
     this.jobStartTime = Date.now()
     this.permalinkUpdated = false
+    // The new frame may have come from a permalink or another direct redraw.
+    this._lastTrapSpecKey = _trapSpecKey(this.paletteComponent.palette.trapSpec)
+    this._lastOrbitTrapGpuRenderKey = null
     this.currentInteractionGpuRedraw = !!this.interactiveGpuRedraw
     this.interactiveGpuRedraw = false
     this.resetStats()
@@ -1769,25 +1776,20 @@ class JuliaRenderer {
   applyPalette() {
     this.syncSettings()
     if (!this.offscreens) return
-    // OTパレットへの切り替え時や異なるOTパレット間の切り替え時は再計算が必要。
-    // 非OTパレットの場合は trapSpec=null なので再計算不要。
+    // A trap change requires fresh iteration data. GPU Orbit Trap frames store only RGBA.
     const paletteObj = this.paletteComponent?.palette
     const newTrapSpec = paletteObj?.trapSpec ?? null
     const newTrapKey = _trapSpecKey(newTrapSpec)
     const useOrbitTrapGpu = this._canUseOrbitTrapGpu()
     const newOrbitTrapGpuRenderKey = useOrbitTrapGpu ? _orbitTrapGpuRenderKey(paletteObj) : null
     if (
-      newTrapSpec !== null &&
-      (newTrapKey !== this._lastTrapSpecKey ||
-        (useOrbitTrapGpu && newOrbitTrapGpuRenderKey !== this._lastOrbitTrapGpuRenderKey))
+      newTrapKey !== this._lastTrapSpecKey ||
+      newOrbitTrapGpuRenderKey !== this._lastOrbitTrapGpuRenderKey
     ) {
-      this._lastTrapSpecKey = newTrapKey
-      this._lastOrbitTrapGpuRenderKey = newOrbitTrapGpuRenderKey
       this.render()
       return
     }
     if (useOrbitTrapGpu) return
-    this._lastOrbitTrapGpuRenderKey = null
     // GPU 描画では jobLevel が最終 offscreen を指したまま完了する。
     // CPU と同じ jobLevel - 1 にすると、表示中の最終フレームが再着色されない。
     const lastScreenNr = this._canUseGpu()
@@ -2029,8 +2031,9 @@ class JuliaRenderer {
     const frameBottomRight = this.canvas2complex(roundup(this.width), roundup(this.height))
     const z0Real = document.getElementById('z0-real') ? parseFloat(document.getElementById('z0-real').value) || 0 : 0
     const z0Imag = document.getElementById('z0-imag') ? parseFloat(document.getElementById('z0-imag').value) || 0 : 0
-    const trapSpec = this.paletteComponent?.palette?.trapSpec ?? null
-    const colorPatternId = _orbitTrapColorPatternId(this.paletteComponent?.palette)
+    const paletteObj = this.paletteComponent.palette
+    const { trapSpec, patternColors, patternCycles, inSetColor } = paletteObj
+    this._lastOrbitTrapGpuRenderKey = _orbitTrapGpuRenderKey(paletteObj)
     const task = {
       type: 'task',
       jobId: this.jobId,
@@ -2045,7 +2048,7 @@ class JuliaRenderer {
       frameHeight: h,
       frameTopLeft,
       frameBottomRight,
-      paramHash: `julia-orbit-gpu-${this.max_iter}-${this.smooth}-${this.supersampling}-${this.fractalType}-${this.iterationFunction}-${this.juliaCRe}-${this.juliaCIm}-${this.escapeRadius}-${z0Real}-${z0Imag}-${_trapSpecKey(trapSpec)}-${colorPatternId ?? ''}`,
+      paramHash: `julia-orbit-gpu-${this.max_iter}-${this.smooth}-${this.supersampling}-${this.fractalType}-${this.iterationFunction}-${this.juliaCRe}-${this.juliaCIm}-${this.escapeRadius}-${z0Real}-${z0Imag}-${this._lastOrbitTrapGpuRenderKey}`,
       resetCaches: false,
       skipTopLeft: false,
       smooth: this.smooth,
@@ -2062,7 +2065,10 @@ class JuliaRenderer {
       juliaIm: this.juliaCIm,
       escapeRadius: this.escapeRadius,
       trapSpec,
-      colorPatternId,
+      colorPatternId: _orbitTrapColorPatternId(paletteObj),
+      patternColors,
+      patternCycles,
+      inSetColor,
       onUpdate: (answer) => this.onGpuUpdate(answer),
     }
     this.orbitTrapGpu.process(task)
@@ -2201,6 +2207,8 @@ class JuliaRenderer {
     this.taskqueue.length = 0
     this.jobId++
     this.jobLevel = -1
+    this._lastTrapSpecKey = _trapSpecKey(this.paletteComponent.palette.trapSpec)
+    this._lastOrbitTrapGpuRenderKey = null
     this.startNextJob()
   }
 }
@@ -2564,6 +2572,84 @@ const fullResToggle = document.getElementById('fullres')
 
 const tempCanvas = document.createElement('canvas')
 
+function createPaletteColorEditor(containerId, defaults, labels, applyColors, onChange, resetId) {
+  const container = document.getElementById(containerId)
+  const defaultValues = defaults.map((rgb) => `#${rgb.map((channel) => channel.toString(16).padStart(2, '0')).join('')}`)
+  const inputs = defaultValues.map((value, index) => {
+    const field = document.createElement('div')
+    const label = document.createElement('label')
+    const input = document.createElement('input')
+    input.id = `${containerId}-${index + 1}`
+    input.type = 'color'
+    input.className = 'form-control form-control-color form-control-sm w-100 p-1'
+    input.value = value
+    label.htmlFor = input.id
+    label.textContent = labels[index]
+    field.append(label, input)
+    container.appendChild(field)
+    return input
+  })
+  const read = () => inputs.map((input) => input.value)
+  const apply = () => applyColors(read().map((hex) => (
+    [1, 3, 5].map((offset) => Number.parseInt(hex.slice(offset, offset + 2), 16))
+  )))
+  container.addEventListener('change', () => {
+    apply()
+    onChange()
+  })
+  const editor = {
+    read,
+    set(values) {
+      inputs.forEach((input, i) => {
+        const value = Array.isArray(values) ? values[i] : null
+        input.value = typeof value === 'string' && /^#[0-9a-f]{6}$/i.test(value) ? value : defaultValues[i]
+      })
+      apply()
+    },
+  }
+  if (resetId) {
+    document.getElementById(resetId).addEventListener('click', () => {
+      editor.set()
+      onChange()
+    })
+  }
+  return editor
+}
+
+function createOrbitTrapColorEditor(onChange) {
+  const custom = palette.CUSTOM_ORBIT_TRAP_PALETTE
+  const { COSINE_RGB, HSL_CAPTURE, TIA_TRIANGLE } = palette.COLOR_PATTERN
+  const patterns = [
+    [COSINE_RGB, 'ot-cosine-colors', ['Dark Color', 'Light Color']],
+    [HSL_CAPTURE, 'ot-hsl-colors', ['Base Color']],
+    [TIA_TRIANGLE, 'ot-tia-colors', ['Dark Color', 'Midpoint Color', 'Light Color']],
+  ]
+  const editors = patterns.map(([pattern, container, labels]) => [pattern, createPaletteColorEditor(
+    container, palette.DEFAULT_ORBIT_TRAP_PATTERN_COLORS[pattern], labels,
+    (colors) => custom.setPatternColors(pattern, colors), onChange,
+  )])
+  const inside = createPaletteColorEditor('ot-inside-color', [[0, 0, 0]], ['Inside Set'], ([color]) => {
+    custom.inSetColor = color
+  }, onChange)
+  return {
+    read() {
+      return {
+        ...Object.fromEntries(editors.map(([pattern, editor]) => [pattern, editor.read()])),
+        inside: inside.read(),
+      }
+    },
+    set(values) {
+      for (const [pattern, editor] of editors) {
+        const wasCrossPreset = pattern === COSINE_RGB && values?.useCrossColors === true
+        editor.set(wasCrossPreset ? undefined : values?.[pattern])
+      }
+      inside.set(Array.isArray(values) ? [values[3]] : values?.inside)
+    },
+  }
+}
+
+let customPaletteEditors
+
 class PaletteComponent {
   constructor() {
     this.listeners = []
@@ -2598,7 +2684,6 @@ class PaletteComponent {
           const id = e.target.value
           const p = palette.getPalette(id)
           this.setPalette(p)
-          this._updateOrbitTrapPanel(id)
           // カスタムパレットに切り替わったら、保存済みの仕様を UI に反映する
           // （resetTrapSpec は呼ばない → 前回設定を復元する）
           if (id === 'orbit_trap_custom' && palette.CUSTOM_ORBIT_TRAP_PALETTE) {
@@ -2657,6 +2742,10 @@ class PaletteComponent {
   setPalette(palette) {
     if (!palette) return
     this.palette = palette
+    document.getElementById('mandelbrot-custom-panel')?.classList.toggle(
+      'd-none', palette.id !== 'mandelbrot_custom',
+    )
+    this._updateOrbitTrapPanel(palette.id)
     const paletteSelect = document.getElementById('palette-dropdown')
 
     if (paletteSelect) {
@@ -2712,13 +2801,7 @@ class PaletteComponent {
     const panel = document.getElementById('orbit-trap-panel')
     if (!panel) return
 
-    // 現在のパレットに応じてパネルの初期表示を設定
-    this._updateOrbitTrapPanel(this.palette?.id)
-
-    // UIコントロールを現在の trapSpec に合わせて埋める（初回読み込みや
-    // パレット切り替え後に仕様が異なる場合があるため）
     const customPalette = palette.CUSTOM_ORBIT_TRAP_PALETTE
-    _applyOrbitTrapSpecToUI(customPalette.trapSpec, customPalette._colorPatternId)
 
     // UI変更時に設定を反映してレンダリングをトリガーする
     // bitmapのように非同期な場合を除いてsnapshot全体を再描画する
@@ -2728,6 +2811,9 @@ class PaletteComponent {
       updatePermalink()
     }
     queryOrbitTrapBitmapState.applyChanges = applyChanges
+    this._initOrbitTrapCycleInputs(applyChanges)
+    this._updateOrbitTrapPanel(this.palette?.id)
+    _applyOrbitTrapSpecToUI(customPalette.trapSpec, customPalette._colorPatternId)
 
     // --- Shape ---
     const shapeSelect = document.getElementById('ot-shape')
@@ -2822,6 +2908,7 @@ class PaletteComponent {
     const colorPatternSelect = document.getElementById('ot-color-pattern')
     colorPatternSelect?.addEventListener('change', () => {
       customPalette.setColorPattern(colorPatternSelect.value)
+      this._updateOrbitTrapModeVisibility()
       applyChanges()
     })
 
@@ -2854,6 +2941,7 @@ class PaletteComponent {
     otResetBtn?.addEventListener('click', () => {
       // 既定の trapSpec と色パターンへ戻す
       customPalette.resetTrapSpec()
+      customPaletteEditors.orbitTrap.set()
       _applyOrbitTrapSpecToUI(customPalette.trapSpec, customPalette._colorPatternId)
       applyChanges()
     })
@@ -2873,6 +2961,28 @@ class PaletteComponent {
         console.warn('Orbit Trap: ビットマップ画像の読み込みに失敗しました', e?.message ? e.message : e)
       }
     })
+  }
+
+  _initOrbitTrapCycleInputs(applyChanges) {
+    const custom = palette.CUSTOM_ORBIT_TRAP_PALETTE
+    this.orbitTrapCycleInputs = Object.keys(palette.DEFAULT_ORBIT_TRAP_CYCLES).map((pattern) => {
+      const input = document.getElementById(`ot-${pattern.replaceAll('_', '-')}-cycles`)
+      input.addEventListener('change', () => {
+        const previous = custom.patternSettings[pattern].cycles
+        if (Number.isFinite(input.valueAsNumber)) custom.setPatternCycles(pattern, input.valueAsNumber)
+        const value = custom.patternSettings[pattern].cycles
+        input.value = String(value)
+        if (previous !== value) applyChanges()
+      })
+      return { pattern, input }
+    })
+  }
+
+  _syncOrbitTrapCycleInputs() {
+    const { patternSettings } = palette.CUSTOM_ORBIT_TRAP_PALETTE
+    for (const { pattern, input } of this.orbitTrapCycleInputs ?? []) {
+      input.value = String(patternSettings[pattern].cycles)
+    }
   }
 
   /**
@@ -2971,7 +3081,13 @@ class PaletteComponent {
 
     // bitmap 使用時は色が画像由来なので color は不要。
     // ただし TIA は shape を参照しないため、内部的に bitmap が残っていても表示する。
-    document.getElementById('ot-color-pattern-group')?.classList.toggle('d-none', !isTia && shape === 'bitmap')
+    const useBitmapColors = isBitmap && !isTia
+    document.getElementById('ot-color-pattern-group')?.classList.toggle('d-none', useBitmapColors)
+    document.getElementById('ot-pattern-settings')?.classList.toggle('d-none', useBitmapColors)
+    const colorPattern = document.getElementById('ot-color-pattern')?.value
+    for (const field of document.querySelectorAll('#ot-pattern-settings [data-orbit-color-pattern]')) {
+      field.classList.toggle('d-none', field.dataset.orbitColorPattern !== colorPattern)
+    }
 
     // Threshold 行は capture_first / distance_farthest / distance_average のときだけ表示
     const modesWithThreshold = ['capture_first', 'distance_farthest', 'distance_average']
@@ -3119,6 +3235,14 @@ function populateBuddhaPaletteSelect() {
     opt.textContent = p.name
     sel.appendChild(opt)
   })
+  sel.addEventListener('change', syncBuddhaPalettePanel)
+  syncBuddhaPalettePanel()
+}
+
+function syncBuddhaPalettePanel() {
+  document.getElementById('buddha-custom-panel').classList.toggle(
+    'd-none', DOM.buddha.palette.value !== CUSTOM_BUDDHA_PALETTE.id,
+  )
 }
 
 // 起動時はトグルを無効・オフ状態でそろえる
@@ -3869,6 +3993,7 @@ let buddhaRenderSettingsSignature = null
 function getBuddhaRenderSettingsSignature() {
   return JSON.stringify([
     DOM.buddha.palette?.value,
+    DOM.buddha.palette?.value === CUSTOM_BUDDHA_PALETTE.id ? CUSTOM_BUDDHA_PALETTE.bands : null,
     DOM.buddha.mode?.value,
     DOM.buddha.bandMode?.value,
     DOM.buddha.samplingRange?.value,
@@ -10370,6 +10495,7 @@ function applySettingsControls(controls) {
     syncBuddhaContinuousModeUi()
   }
   const changed = writeSettingsControls(document, controls)
+  syncBuddhaPalettePanel()
   fractal.useGpu = DOM.gpuToggle.checked
   fractal.supersampling = Number(DOM.supersamplingToggle.value)
   syncBuddhaContinuousModeUi()
@@ -10438,13 +10564,13 @@ function reset() {
     // Reset All also clears the uploaded image; the panel reset remains separate.
     custom.trapSpec = {}
     custom.resetTrapSpec()
+    for (const editor of Object.values(customPaletteEditors)) editor.set()
     _applyOrbitTrapSpecToUI(custom.trapSpec, custom._colorPatternId)
     document.getElementById('ot-bitmap-file').value = ''
     const preview = document.getElementById('ot-bitmap-preview')
     preview.getContext('2d').clearRect(0, 0, preview.width, preview.height)
     preview.classList.add('d-none')
     queryOrbitTrapBitmapState.autoApplied = true
-    paletteComponent._updateOrbitTrapPanel('mandelbrot')
     enforceMainGpuState(fractal.fractalType)
     applySettingsControls(initialSettingsControls)
     const jumpTo = document.getElementById('jump-to')
@@ -10611,6 +10737,7 @@ function updatePermalink() {
       center: juliaState.renderer.center, zoom: juliaState.renderer.zoom,
     } : null,
     buddhaView: BuddhabrotState.isViewEnabled(),
+    customColors: Object.fromEntries(Object.entries(customPaletteEditors).map(([id, editor]) => [id, editor.read()])),
   }
 
   // Preserve custom settings even while a different palette is selected.
@@ -10623,7 +10750,7 @@ function updatePermalink() {
   delete spec.bitmapHeight
   delete spec.bitmapVersion
   if (spec.threshold === Infinity) spec.threshold = 0
-  params.orbitTrap = { trapSpec: spec, colorPattern: custom._colorPatternId }
+  params.orbitTrap = { trapSpec: spec, colorPattern: custom._colorPatternId, patternSettings: custom.patternSettings }
 
   p.set('params', encodeSettings(params))
   pendingPermalinkHref = url.toString()
@@ -10631,6 +10758,25 @@ function updatePermalink() {
 }
 
 function initUI() {
+  const applyFractalColors = () => {
+    paletteComponent.notifyListeners()
+    updatePermalink()
+  }
+  customPaletteEditors = {
+    mandelbrot: createPaletteColorEditor(
+      'mandelbrot-custom-colors', palette.DEFAULT_MANDELBROT_COLORS,
+      ['Color 1', 'Color 2', 'Color 3', 'Color 4', 'Color 5', 'Inside Set'],
+      (colors) => palette.setCustomMandelbrotColors(colors.slice(0, -1), colors.at(-1)), applyFractalColors,
+      'mandelbrot-colors-reset',
+    ),
+    orbitTrap: createOrbitTrapColorEditor(applyFractalColors),
+    buddha: createPaletteColorEditor(
+      'buddha-custom-colors', DEFAULT_BUDDHA_COLORS,
+      ['Low Density', 'Color 2', 'Color 3', 'High Density'],
+      setCustomBuddhaColors, redrawBuddhaForRenderSettingChange,
+      'buddha-colors-reset',
+    ),
+  }
   paletteComponent.init()
   populateBuddhaPaletteSelect()
   try {
@@ -10899,12 +11045,13 @@ function initFromParams(params) {
       console.warn('Error clearing iteration function label during params init:', e)
     }
 
+    for (const [id, editor] of Object.entries(customPaletteEditors)) editor.set(p.customColors?.[id])
+    palette.CUSTOM_ORBIT_TRAP_PALETTE.restorePatternSettings(p.orbitTrap?.patternSettings)
+    paletteComponent._syncOrbitTrapCycleInputs()
     if (p.palette) {
       paletteComponent.setPalette(palette.getPalette(p.palette.id))
       paletteComponent.setDensity(p.palette.density)
       paletteComponent.setRotate(p.palette.rotate)
-      // パレット復元後に Orbit Trap パネルの表示状態も合わせる
-      paletteComponent._updateOrbitTrapPanel(p.palette.id)
 
       // custom OrbitTrap パレットなら追加情報も復元する
       if (p.palette.id === 'orbit_trap_custom') {
@@ -10912,8 +11059,6 @@ function initFromParams(params) {
         // カラーパターン
         if (p.palette.colorPattern && typeof custom.setColorPattern === 'function') {
           custom.setColorPattern(p.palette.colorPattern)
-          const cpSel = document.getElementById('ot-color-pattern')
-          if (cpSel) cpSel.value = p.palette.colorPattern
         }
         // Trap spec
         if (p.palette.trapSpec) {
@@ -10921,9 +11066,9 @@ function initFromParams(params) {
           // 保存時に 0 としていた threshold は、復元時に Infinity へ戻す
           if (spec.threshold === 0) spec.threshold = Infinity
           custom.updateTrapSpec(spec)
-          _applyOrbitTrapSpecToUI(spec, p.palette.colorPattern)
           _maybeAutoApplyQueryOrbitTrapBitmap()
         }
+        _applyOrbitTrapSpecToUI(custom.trapSpec, custom._colorPatternId)
       }
     }
 

@@ -708,6 +708,30 @@ footer {
   border-color: rgba(124, 252, 0, 0.72) !important;
 }
 
+.palette-panel-heading {
+  font-size: 0.82em;
+  opacity: 0.8;
+}
+
+.palette-color-fields {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.palette-color-fields label {
+  display: block;
+  font-size: 0.8em;
+}
+
+.palette-color-fields input {
+  min-width: 3.5rem;
+}
+
+.orbit-trap-cycle-field {
+  width: 5rem;
+}
+
 #animation-panel .animation-range-label {
   display: flex;
   align-items: baseline;

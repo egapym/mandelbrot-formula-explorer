@@ -5,6 +5,9 @@ import * as fxp from '../fxp.mjs'
 import { MandelbrotCustom } from '../mandelbrotCustom.mjs'
 import { calculatePixelOrbitTrap, TRAP_MODE, TRAP_SHAPE } from '../orbitTrap.mjs'
 import { OrbitReplay } from '../orbitReplay.mjs'
+import {
+  COLOR_PATTERN, CustomOrbitTrapPalette, DEFAULT_ORBIT_TRAP_PATTERN_COLORS, getPalette, initPallet, makeOrbitTrapColorFn,
+} from '../palette.js'
 
 const context = { shouldStop: () => false }
 const baseTask = {
@@ -38,6 +41,37 @@ function equalChannels(expected, actual) {
     assert.deepEqual(actual[key], expected[key], key)
   }
 }
+
+test('custom Cosine RGB interpolates between its selected colors', () => {
+  const pattern = COLOR_PATTERN.COSINE_RGB
+  const grayscale = makeOrbitTrapColorFn(pattern, [[0, 0, 0], [255, 255, 255]], 1)
+  assert.deepEqual(grayscale(0), [0, 0, 0])
+  assert.deepEqual(grayscale(0.25), [255, 255, 255])
+  assert.deepEqual(grayscale(1), [0, 0, 0])
+  const [red, green, blue] = grayscale(0.0625)
+  assert.ok(red > 0 && red < 255)
+  assert.equal(red, green)
+  assert.equal(red, blue)
+
+  const colored = makeOrbitTrapColorFn(pattern, [[200, 0, 0], [0, 0, 240]], 1)
+  assert.deepEqual(colored(0.0625), [100, 0, 120])
+  assert.deepEqual(makeOrbitTrapColorFn(pattern)(0), [0, 37, 128])
+})
+
+test('custom palettes start with the corresponding Mandelbrot and Cross colors', () => {
+  assert.deepEqual(initPallet(getPalette('mandelbrot_custom'), 1, 0, 1, 100), initPallet(getPalette('mandelbrot'), 1, 0, 1, 100))
+
+  const customTrap = new CustomOrbitTrapPalette()
+  const crossTrap = getPalette('orbit_trap_ring')
+  for (const distance of [0, 0.01, 0.0625, 0.25, 1]) {
+    assert.deepEqual(customTrap._colorFn(distance), crossTrap._colorFn(distance))
+  }
+  assert.deepEqual(DEFAULT_ORBIT_TRAP_PATTERN_COLORS[COLOR_PATTERN.COSINE_RGB], [[0, 37, 128], [255, 218, 128]])
+  customTrap.setPatternColors(COLOR_PATTERN.COSINE_RGB, [[0, 0, 0], [255, 255, 255]])
+  assert.deepEqual(customTrap._colorFn(0), [0, 0, 0])
+  customTrap.resetTrapSpec()
+  assert.deepEqual(customTrap._colorFn(0), crossTrap._colorFn(0))
+})
 
 test('history-free generic expressions leave supplied history untouched', () => {
   for (const expr of ['cos(z*z)+c', 'z*z+c+0.01*n']) {

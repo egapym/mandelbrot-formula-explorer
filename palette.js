@@ -234,6 +234,18 @@ const MANDELBROT = new IndexedPalette(
   false,
 )
 
+export const CUSTOM_MANDELBROT_PALETTE = new IndexedPalette(
+  'mandelbrot_custom', 'Custom', MANDELBROT.colors, false, false, MANDELBROT.inSetColor,
+)
+
+export const DEFAULT_MANDELBROT_COLORS = [...MANDELBROT.colors, MANDELBROT.inSetColor]
+
+export function setCustomMandelbrotColors(colors, inSetColor) {
+  CUSTOM_MANDELBROT_PALETTE.colors = colors
+  CUSTOM_MANDELBROT_PALETTE.inSetColor = inSetColor
+  CUSTOM_MANDELBROT_PALETTE.interpolationFunctions = null
+}
+
 const LAVA = new IndexedPalette(
   'lava',
   'Lava',
@@ -534,7 +546,7 @@ export class OrbitTrapPalette {
   renderPixels(bufferData, _smoothData, _values, _smooth, _signs, _lookupBuffer, _withSmooth, _zreal, _zimag, otData) {
     const values = _values
     const [inR, inG, inB] = this.inSetColor
-    const isBitmapShape = this.trapSpec?.shape === 'bitmap'
+    const isBitmapShape = this.trapSpec?.shape === 'bitmap' && this.trapSpec.mode !== TRAP_MODE.TIA
     const [bgR, bgG, bgB] = hexColorToRgb(this.trapSpec?.bitmapBackgroundColor)
 
     // BITMAP でも画像未選択の間は orbitTrap.mjs 側の距離フォールバックで通常描画を維持する。
@@ -627,48 +639,89 @@ export const COLOR_PATTERN = {
   TIA_TRIANGLE: 'tia_triangle', // TIA三角波HSL (TIA系に最適)
 }
 
-/**
- * カラーパターンIDに対応する着色関数を返す。
- * @param {string} patternId - COLOR_PATTERN の値
- * @returns {Function} (value: number, iter?: number) => [r, g, b] | null
- */
-export function makeOrbitTrapColorFn(patternId) {
-	switch (patternId) {
-  case COLOR_PATTERN.COSINE_RGB:
-    return (d) => {
-      const DENSITY = 3.0
-      const TRAP_POWER = 0.5
-      const alpha = Math.max(d, 0) ** TRAP_POWER * DENSITY * 2 * Math.PI
-      return [
-        Math.round((Math.cos(alpha - Math.PI) + 1) * 0.5 * 255),
-        Math.round((Math.cos(alpha - 0.75 * Math.PI) + 1) * 0.5 * 255),
-        Math.round((Math.cos(alpha - 0.5 * Math.PI) + 1) * 0.5 * 255),
-      ]
-    }
-  case COLOR_PATTERN.HSL_CAPTURE:
-    return (encoded) => {
-      // encoded=0 は未捕捉 → null で inSetColor を使用
-      if (encoded === 0) return null
-      const capturedIter = Math.floor(encoded)
-      const strength = encoded - capturedIter
-      const COLOR_DENSITY = 6.0
-      const hue = (capturedIter / COLOR_DENSITY) % 1.0
-      const lum = strength * 0.75
-      return hslToRgb(hue, 1.0, lum)
-    }
-  case COLOR_PATTERN.TIA_TRIANGLE:
-  default:
-    return (tia) => {
-      const COLOR_DENSITY = 4.0
-      const COLOR_HUE = 1 / 3 // 緑系
-      const COLOR_SAT = 0.6
-      const scaledAlpha = tia * COLOR_DENSITY
-      const frac = scaledAlpha - Math.floor(scaledAlpha)
-      // 三角波: 0→0, 0.5→1, 1→0 の滑らかな輝度変化
-      const lum = (0.5 - Math.abs(frac - 0.5)) * 2
-      return hslToRgb(COLOR_HUE, COLOR_SAT, lum)
-    }
+const CROSS_COSINE_PHASES = [Math.PI, 0.75 * Math.PI, 0.5 * Math.PI]
+
+function crossCosineColor(alpha) {
+  return CROSS_COSINE_PHASES.map((phase) => Math.round((Math.cos(alpha - phase) + 1) * 127.5))
 }
+
+const CROSS_COSINE_SWATCHES = [crossCosineColor(0), crossCosineColor(Math.PI)]
+
+export const DEFAULT_ORBIT_TRAP_PATTERN_COLORS = {
+  [COLOR_PATTERN.COSINE_RGB]: CROSS_COSINE_SWATCHES,
+  [COLOR_PATTERN.HSL_CAPTURE]: [[255, 0, 0]],
+  [COLOR_PATTERN.TIA_TRIANGLE]: [[0, 0, 0], [51, 204, 51], [255, 255, 255]],
+}
+
+export const DEFAULT_ORBIT_TRAP_CYCLES = {
+  [COLOR_PATTERN.COSINE_RGB]: 3,
+  [COLOR_PATTERN.TIA_TRIANGLE]: 4,
+}
+
+export function rgbToHsl(color) {
+  const [r, g, b] = color.map((channel) => channel / 255)
+  const max = Math.max(r, g, b)
+  const min = Math.min(r, g, b)
+  const lightness = (max + min) / 2
+  const delta = max - min
+  if (delta === 0) return [0, 0, lightness]
+
+  let hue
+  if (max === r) hue = (g - b) / delta
+  else if (max === g) hue = (b - r) / delta + 2
+  else hue = (r - g) / delta + 4
+  const saturation = delta / (1 - Math.abs(2 * lightness - 1))
+  return [((hue + 6) % 6) / 6, saturation, lightness]
+}
+
+function mixChannel(start, end, amount) {
+  return Math.round(start + (end - start) * amount)
+}
+
+export function makeOrbitTrapColorFn(
+  patternId,
+  colors,
+  cycles = DEFAULT_ORBIT_TRAP_CYCLES[patternId],
+) {
+  switch (patternId) {
+    case COLOR_PATTERN.COSINE_RGB: {
+      const frequency = cycles * 2 * Math.PI
+      if (colors) {
+        const [dark, light] = colors
+        return (distance) => {
+          const alpha = Math.sqrt(Math.max(distance, 0)) * frequency
+          const amount = (1 - Math.cos(alpha)) * 0.5
+          return dark.map((channel, i) => mixChannel(channel, light[i], amount))
+        }
+      }
+      return (distance) => crossCosineColor(Math.sqrt(Math.max(distance, 0)) * frequency)
+    }
+    case COLOR_PATTERN.HSL_CAPTURE: {
+      const [baseHue, saturation, lightness] = rgbToHsl((colors ?? DEFAULT_ORBIT_TRAP_PATTERN_COLORS[patternId])[0])
+      return (encoded) => {
+        if (encoded === 0) return null
+        const capturedIter = Math.floor(encoded)
+        const phase = capturedIter / 6 + baseHue
+        return hslToRgb(phase - Math.floor(phase), saturation, (encoded - capturedIter) * lightness * 1.5)
+      }
+    }
+    default: {
+      const [dark, midpoint, light] = colors ?? DEFAULT_ORBIT_TRAP_PATTERN_COLORS[COLOR_PATTERN.TIA_TRIANGLE]
+      const frequency = cycles ?? DEFAULT_ORBIT_TRAP_CYCLES[COLOR_PATTERN.TIA_TRIANGLE]
+      return (tia) => {
+        const phase = tia * frequency - Math.floor(tia * frequency)
+        const luminance = 1 - 2 * Math.abs(phase - 0.5)
+        const start = luminance < 0.5 ? dark : midpoint
+        const end = luminance < 0.5 ? midpoint : light
+        const amount = luminance < 0.5 ? luminance * 2 : luminance * 2 - 1
+        return start.map((channel, i) => mixChannel(channel, end[i], amount))
+      }
+    }
+  }
+}
+
+function normalizeOrbitTrapCycles(patternId, value) {
+  return Number.isFinite(value) ? Math.max(0, Math.min(64, value)) : DEFAULT_ORBIT_TRAP_CYCLES[patternId]
 }
 
 /** orbit trap: クロストラップ + DISTANCE_CLOSEST + コサインRGB */
@@ -732,6 +785,8 @@ export class CustomOrbitTrapPalette extends OrbitTrapPalette {
     }
     super('orbit_trap_custom', 'Orbit Trap (Custom)', defaultTrapSpec, makeOrbitTrapColorFn(COLOR_PATTERN.COSINE_RGB))
     this._colorPatternId = COLOR_PATTERN.COSINE_RGB
+    this.colorsByPattern = { ...DEFAULT_ORBIT_TRAP_PATTERN_COLORS }
+    this.restorePatternSettings()
   }
 
   /**
@@ -739,8 +794,40 @@ export class CustomOrbitTrapPalette extends OrbitTrapPalette {
    * @param {string} patternId - COLOR_PATTERN の値
    */
   setColorPattern(patternId) {
-    this._colorPatternId = patternId
-    this._colorFn = makeOrbitTrapColorFn(patternId)
+    this._colorPatternId = Object.hasOwn(DEFAULT_ORBIT_TRAP_PATTERN_COLORS, patternId)
+      ? patternId : COLOR_PATTERN.COSINE_RGB
+    this._colorFn = makeOrbitTrapColorFn(this._colorPatternId, this.patternColors, this.patternCycles)
+  }
+
+  get patternColors() {
+    const colors = this.colorsByPattern[this._colorPatternId]
+    // The two preset swatches represent a full Cross (Cosine) cycle.
+    if (this._colorPatternId === COLOR_PATTERN.COSINE_RGB &&
+      CROSS_COSINE_SWATCHES.every((color, i) => color.every((channel, j) => channel === colors[i][j]))) {
+      return undefined
+    }
+    return colors
+  }
+
+  get patternCycles() {
+    return this.patternSettings[this._colorPatternId]?.cycles
+  }
+
+  setPatternColors(patternId, colors) {
+    this.colorsByPattern[patternId] = colors
+    if (patternId === this._colorPatternId) this.setColorPattern(patternId)
+  }
+
+  setPatternCycles(patternId, value) {
+    this.patternSettings[patternId].cycles = normalizeOrbitTrapCycles(patternId, value)
+    if (patternId === this._colorPatternId) this.setColorPattern(patternId)
+  }
+
+  restorePatternSettings(settings) {
+    this.patternSettings = Object.fromEntries(Object.keys(DEFAULT_ORBIT_TRAP_CYCLES).map((patternId) => [
+      patternId, { cycles: normalizeOrbitTrapCycles(patternId, settings?.[patternId]?.cycles) },
+    ]))
+    this.setColorPattern(this._colorPatternId)
   }
 
   /**
@@ -769,8 +856,9 @@ export class CustomOrbitTrapPalette extends OrbitTrapPalette {
       captureStep: 1,
     }
     Object.assign(this.trapSpec, defaultTrapSpec)
-    // 色パターンも既定値へ戻す
-    this.setColorPattern(COLOR_PATTERN.COSINE_RGB)
+    this._colorPatternId = COLOR_PATTERN.COSINE_RGB
+    this.colorsByPattern = { ...DEFAULT_ORBIT_TRAP_PATTERN_COLORS }
+    this.restorePatternSettings()
   }
 }
 
@@ -791,6 +879,7 @@ export const PALETTES = [
   new InvertedSingleColorPalette('white_black', 'Pure W/B', [0, 0, 0], [255, 255, 255]),
   new StripePalette(),
   new GridPalette(),
+  CUSTOM_MANDELBROT_PALETTE,
   OT_CROSS_COSINE,
   OT_CROSS_HSL,
   OT_TIA,

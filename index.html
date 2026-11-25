@@ -241,14 +241,21 @@
               </select>
             </div>
           </div>
+          <div id="mandelbrot-custom-panel" class="d-none border rounded p-2 mb-2 settings-outline-panel">
+            <div class="palette-panel-heading mb-1 fw-semibold d-flex align-items-center">
+              <span>Colors</span>
+              <button id="mandelbrot-colors-reset" type="button" class="btn btn-sm btn-outline-secondary rounded-pill slider-reset ms-2" aria-label="Reset Mandelbrot colors" title="Reset colors">↺</button>
+            </div>
+            <div id="mandelbrot-custom-colors" class="palette-color-fields"></div>
+          </div>
 <!-- ============================================================ -->
 <!-- Orbit Trap カスタム設定パネル                                   -->
 <!-- orbit_trap_custom パレット選択時のみ表示される                   -->
 <!-- ============================================================ -->
 <div id="orbit-trap-panel" class="d-none border rounded p-2 mb-2 settings-outline-panel settings-outline-panel-orbit">
-  <div class="mb-1 fw-semibold d-flex align-items-center" style="font-size:0.82em;opacity:0.8">
+  <div class="palette-panel-heading mb-1 fw-semibold d-flex align-items-center">
     <span>Orbit Trap Settings</span>
-    <button id="ot-reset" class="btn btn-sm btn-outline-secondary rounded-pill slider-reset ms-2">↺</button>
+    <button id="ot-reset" type="button" class="btn btn-sm btn-outline-secondary rounded-pill slider-reset ms-2" aria-label="Reset Orbit Trap settings" title="Reset Orbit Trap settings">↺</button>
   </div>
 
   <!-- 行1: Mode / Shape -->
@@ -299,6 +306,29 @@
       <input id="ot-angle" type="number" class="form-control form-control-sm py-0" value="0" step="15"
         title="形状の回転角 (度)" />
     </div>
+  </div>
+
+  <div class="mb-2">
+    <div id="ot-pattern-settings" class="mb-2">
+      <div class="palette-color-fields align-items-end d-none" data-orbit-color-pattern="cosine_rgb">
+        <div class="orbit-trap-cycle-field">
+          <label for="ot-cosine-rgb-cycles">Cycles</label>
+          <input id="ot-cosine-rgb-cycles" type="number" class="form-control form-control-sm py-0" min="0" max="64" step="0.1" />
+        </div>
+        <div id="ot-cosine-colors" class="palette-color-fields"></div>
+      </div>
+      <div class="palette-color-fields d-none" data-orbit-color-pattern="hsl_capture">
+        <div id="ot-hsl-colors" class="palette-color-fields"></div>
+      </div>
+      <div class="palette-color-fields align-items-end d-none" data-orbit-color-pattern="tia_triangle">
+        <div class="orbit-trap-cycle-field">
+          <label for="ot-tia-triangle-cycles">Cycles</label>
+          <input id="ot-tia-triangle-cycles" type="number" class="form-control form-control-sm py-0" min="0" max="64" step="0.1" />
+        </div>
+        <div id="ot-tia-colors" class="palette-color-fields"></div>
+      </div>
+    </div>
+    <div id="ot-inside-color" class="palette-color-fields"></div>
   </div>
 
   <!-- 行3: Center X / Y -->
@@ -647,6 +677,13 @@
                     </div>
                   </div>
                 </div>
+              </div>
+              <div id="buddha-custom-panel" class="d-none border rounded p-2 mb-2 settings-outline-panel">
+                <div class="palette-panel-heading mb-1 fw-semibold d-flex align-items-center">
+                  <span>Colors</span>
+                  <button id="buddha-colors-reset" type="button" class="btn btn-sm btn-outline-secondary rounded-pill slider-reset ms-2" aria-label="Reset Buddhabrot colors" title="Reset colors">↺</button>
+                </div>
+                <div id="buddha-custom-colors" class="palette-color-fields"></div>
               </div>
               <div class="mb-2 row">
                 <div class="col col-sm-6">

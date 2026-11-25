@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { runInNewContext } from 'node:vm'
+import { CUSTOM_BUDDHA_PALETTE, DEFAULT_BUDDHA_COLORS, buildBuddhaStops, setCustomBuddhaColors } from '../buddhaPalettes.mjs'
+
+assert.deepEqual(buildBuddhaStops(CUSTOM_BUDDHA_PALETTE.id), buildBuddhaStops('Preset-01'))
 
 // Run the actual UI handler without canvas/GPU initialization.
 const source = readFileSync(new URL('../index.js', import.meta.url), 'utf8')
@@ -9,6 +12,7 @@ const end = source.indexOf('/**\n * Buddhabrot の描画ジョブを開始する
 let renders = 0
 let shown = false
 const context = {
+  CUSTOM_BUDDHA_PALETTE,
   DOM: { buddha: {
     iterations: { value: '1000' }, palette: { value: 'Preset-01' },
     mode: { value: 'buddha' }, bandMode: { value: 'perTrajectory' },
@@ -75,6 +79,19 @@ assert.equal(renders, 9, 'GPU ON must immediately restart a visible Buddhabrot')
 context.DOM.buddha.gpu.checked = false
 context.redrawBuddhaForExecutionSettingChange()
 assert.equal(renders, 10, 'GPU OFF must immediately restart a visible Buddhabrot')
+
+context.DOM.buddha.palette.value = CUSTOM_BUDDHA_PALETTE.id
+change()
+setCustomBuddhaColors(DEFAULT_BUDDHA_COLORS.map(() => [255, 0, 0]))
+change()
+assert.equal(renders, 12, 'Editing a custom color must redraw an already selected custom palette')
+change()
+assert.equal(renders, 12, 'Repeated events for the same custom colors must not redraw')
+context.DOM.buddha.palette.value = 'Preset-01'
+change()
+setCustomBuddhaColors(DEFAULT_BUDDHA_COLORS)
+change()
+assert.equal(renders, 13, 'Custom colors must not redraw a selected preset')
 
 context.buddhaRenderPending = true
 context.startBuddhaRender = () => Promise.reject(new Error('Older request failed'))

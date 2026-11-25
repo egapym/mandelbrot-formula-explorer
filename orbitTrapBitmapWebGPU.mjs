@@ -8,13 +8,15 @@
 
 import { getParsedExpression } from './customFunctionParser.mjs'
 import { TRAP_MODE, TRAP_SHAPE } from './orbitTrap.mjs'
-import { COLOR_PATTERN } from './palette.js'
+import {
+  COLOR_PATTERN, DEFAULT_ORBIT_TRAP_CYCLES, DEFAULT_ORBIT_TRAP_PATTERN_COLORS, rgbToHsl,
+} from './palette.js'
 import { BAILOUT_SMOOTH } from './sharedCalculations.mjs'
 import { CUSTOM_FUNCTION_WGSL_HELPERS, jsExprToWGSL_safe } from './wgslCompiler.mjs'
 
 const WORKGROUP_SIZE_X = 16
 const WORKGROUP_SIZE_Y = 8
-const SPEC_SIZE = 160
+const SPEC_SIZE = 176
 const DEFAULT_BACKGROUND = '#002580'
 const MAX_VALID_VALUE_WGSL = '1e20'
 
@@ -238,7 +240,9 @@ export class OrbitTrapWebGPU {
     const ddi = cHeight / task.frameHeight
     const modeId = MODE_TO_ID[trapSpec.mode] ?? MODE_TO_ID[TRAP_MODE.DISTANCE_CLOSEST]
     const shapeId = SHAPE_TO_ID[trapSpec.shape] ?? SHAPE_TO_ID[TRAP_SHAPE.RING]
-    const colorPatternId = COLOR_PATTERN_TO_ID[task.colorPatternId] ?? COLOR_PATTERN_TO_ID[COLOR_PATTERN.COSINE_RGB]
+    const colorPattern = Object.hasOwn(COLOR_PATTERN_TO_ID, task.colorPatternId)
+      ? task.colorPatternId : COLOR_PATTERN.COSINE_RGB
+    const colorPatternId = COLOR_PATTERN_TO_ID[colorPattern]
     const ssScale = task.supersampling > 0 ? task.supersampling : 1
     const isCustom = task.fractalType === 'custom' || task.fractalType === 'julia-custom'
     const valueBailout = task.smooth && !isCustom ? BAILOUT_SMOOTH : (task.escapeRadius ?? 4.0) ** 2
@@ -302,7 +306,7 @@ export class OrbitTrapWebGPU {
     view.setUint32(offset, trapSpec.bitmapWidth ?? 0, true)
     view.setUint32(offset + 4, trapSpec.bitmapHeight ?? 0, true)
     view.setUint32(offset + 8, _packRgba(bgR, bgG, bgB), true)
-    view.setUint32(offset + 12, _packRgba(0, 0, 0), true)
+    view.setUint32(offset + 12, _packRgba(...(task.inSetColor ?? [0, 0, 0])), true)
     offset += 16
 
     view.setUint32(offset, shapeId, true)
@@ -321,6 +325,19 @@ export class OrbitTrapWebGPU {
     view.setFloat32(offset + 4, ddiLo, true)
     view.setFloat32(offset + 8, fixedValueRLo, true)
     view.setFloat32(offset + 12, fixedValueILo, true)
+    offset += 16
+
+    const colors = task.patternColors ?? DEFAULT_ORBIT_TRAP_PATTERN_COLORS[colorPattern]
+    // The first three slots hold color data. Cosine RGB uses its spare slot to select endpoint interpolation.
+    if (colorPattern === COLOR_PATTERN.HSL_CAPTURE) {
+      rgbToHsl(colors[0]).forEach((channel, i) => view.setFloat32(offset + i * 4, channel, true))
+    } else {
+      colors.forEach((color, i) => view.setUint32(offset + i * 4, _packRgba(...color), true))
+      if (colorPattern === COLOR_PATTERN.COSINE_RGB) {
+        view.setUint32(offset + 8, task.patternColors ? 1 : 0, true)
+      }
+    }
+    view.setFloat32(offset + 12, task.patternCycles ?? DEFAULT_ORBIT_TRAP_CYCLES[colorPattern] ?? 0, true)
 
     return data
   }
@@ -486,6 +503,7 @@ struct Spec {
   extra: vec4<u32>,
   coord0: vec4<f32>,
   coord1: vec4<f32>,
+  patternParams: vec4<u32>,
 };
 
 @group(0) @binding(0) var<uniform> spec: Spec;
@@ -1231,12 +1249,20 @@ fn computeTiaValueMandelbrotDs(zInit: Ds2, c: Ds2) -> f32 {
   return 0.0;
 }
 
+fn unpackRgb(pixel: u32) -> vec3<f32> {
+  return vec3<f32>(f32(channelR(pixel)), f32(channelG(pixel)), f32(channelB(pixel)));
+}
+
+fn packRgb(rgb: vec3<f32>) -> u32 {
+  return packRgba(toByte(rgb.r), toByte(rgb.g), toByte(rgb.b), 255u);
+}
+
 fn colorFromTrap(iterValue: f32, trapValue: f32) -> u32 {
   if (iterValue <= 3.0) {
     return spec.bitmap.w;
   }
 
-  if (spec.extra.x == 7u && spec.bitmap.x > 0u && spec.bitmap.y > 0u) {
+  if (spec.dims.w != 5u && spec.extra.x == 7u && spec.bitmap.x > 0u && spec.bitmap.y > 0u) {
     if (trapValue >= -0.5) {
       return spec.bitmap.z;
     }
@@ -1250,28 +1276,39 @@ fn colorFromTrap(iterValue: f32, trapValue: f32) -> u32 {
     return blendBitmapPixelOverBackground(bitmapColor, spec.bitmap.z);
   }
 
+  let params = spec.patternParams;
   if (spec.extra.y == 1u) {
-    if (abs(trapValue) < 0.000001) {
+    if (trapValue == 0.0) {
       return spec.bitmap.w;
     }
     let capturedIter = floor(trapValue);
     let strength = trapValue - capturedIter;
-    let hue = fract(capturedIter / 6.0);
-    return hslToRgb(hue, 1.0, strength * 0.75);
+    let hsl = bitcast<vec3<f32>>(params.xyz);
+    let hue = fract(capturedIter / 6.0 + hsl.x);
+    return hslToRgb(hue, hsl.y, strength * hsl.z * 1.5);
   }
 
+  let cycles = bitcast<f32>(params.w);
+  let dark = unpackRgb(params.x);
   if (spec.extra.y == 2u) {
-    let scaledAlpha = trapValue * 4.0;
-    let frac = scaledAlpha - floor(scaledAlpha);
-    let lum = (0.5 - abs(frac - 0.5)) * 2.0;
-    return hslToRgb(1.0 / 3.0, 0.6, lum);
+    let midpoint = unpackRgb(params.y);
+    let light = unpackRgb(params.z);
+    let luminance = 1.0 - 2.0 * abs(fract(trapValue * cycles) - 0.5);
+    if (luminance < 0.5) {
+      return packRgb(mix(dark, midpoint, luminance * 2.0));
+    }
+    return packRgb(mix(midpoint, light, luminance * 2.0 - 1.0));
   }
 
-  let alpha = pow(max(trapValue, 0.0), 0.5) * 3.0 * 2.0 * 3.141592653589793;
-  let r = (cos(alpha - 3.141592653589793) + 1.0) * 0.5 * 255.0;
-  let g = (cos(alpha - 0.75 * 3.141592653589793) + 1.0) * 0.5 * 255.0;
-  let b = (cos(alpha - 0.5 * 3.141592653589793) + 1.0) * 0.5 * 255.0;
-  return packRgba(toByte(r), toByte(g), toByte(b), 255u);
+  let light = unpackRgb(params.y);
+  let alpha = sqrt(max(trapValue, 0.0)) * cycles * 2.0 * 3.141592653589793;
+  if (params.z != 0u) {
+    let amount = (1.0 - cos(alpha)) * 0.5;
+    return packRgb(mix(dark, light, amount));
+  }
+  let phases = vec3<f32>(3.141592653589793, 2.356194490192345, 1.5707963267948966);
+  let amounts = (cos(vec3<f32>(alpha) - phases) + 1.0) * 0.5;
+  return packRgb(amounts * 255.0);
 }
 
 @compute @workgroup_size(${WORKGROUP_SIZE_X}, ${WORKGROUP_SIZE_Y}, 1)

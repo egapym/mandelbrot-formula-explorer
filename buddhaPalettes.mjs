@@ -65,6 +65,22 @@ export const BUDDHA_PALETTES = [
   },
 ]
 
+const customBase = getBuddhaPalette('Preset-01')
+export const DEFAULT_BUDDHA_COLORS = customBase.bands.map(({ color }) => color)
+export const CUSTOM_BUDDHA_PALETTE = {
+  id: 'buddha_custom',
+  name: 'Custom',
+  gradient: customBase.gradient,
+  bands: customBase.bands.map(({ color, ratio }) => ({ color, ratio })),
+}
+BUDDHA_PALETTES.push(CUSTOM_BUDDHA_PALETTE)
+
+export function setCustomBuddhaColors(colors) {
+  CUSTOM_BUDDHA_PALETTE.bands.forEach((band, i) => {
+    band.color = colors[i]
+  })
+}
+
 /**
  * ID から Buddhabrot パレットを取得する
  * @param {string} id - パレット ID
