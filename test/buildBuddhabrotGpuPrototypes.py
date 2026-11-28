@@ -8,9 +8,16 @@ from subprocess import check_output
 root = Path(__file__).resolve().parents[1]
 output = root / 'test' / 'fixtures' / 'gpu-prototypes'
 output.mkdir(parents=True, exist_ok=False)
+
+def renderer_at(revision):
+    source = check_output(['git', 'show', f'{revision}:buddhabrotWebGPU.mjs'], cwd=root, text=True)
+    return source.replace("from './", "from '../../../").replace("import('./", "import('../../../")
+
+# Final-image parity uses the version immediately before finite previews. It
+# already has the same orbit projection and palette semantics as the tests.
+(output / 'parity-reference.mjs').write_text(renderer_at('90748b1'))
 # Pin the measured baseline: the production renderer now uses general queues.
-base = check_output(['git', 'show', '4396f85:buddhabrotWebGPU.mjs'], cwd=root, text=True)
-base = base.replace("from './", "from '../../../").replace("import('./", "import('../../../")
+base = renderer_at('4396f85')
 (output / 'before.mjs').write_text(base)
 interior = base.replace('    const historyDeclarations = [', r"""    const skipInterior = (params.mode || 'buddha') === 'buddha' &&
       (params.fractalType || 'mandelbrot') === 'mandelbrot' &&

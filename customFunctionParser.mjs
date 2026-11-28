@@ -19,6 +19,17 @@ const NUMERIC_CONFIG = {
 
 const NUMBER_LITERAL_PATTERN = /^-?(?:\d+\.\d*|\d*\.\d+|\d+)(?:[eE][+-]?\d+)?$/
 
+// Canonical spellings for formula generation. Aliases such as delayZ are only parsed.
+export const ITERATION_FUNCTION_GENERATION_CATALOG = {
+  leaves: ['z', 'c', 'n', 'i', 'pi', 'e', 'number'].map((id) => ({ id })),
+  unaryFunctions: [
+    'abs', 'Re', 'Im', 'arg', 'abs2', 'conj', 'exp', 'sin', 'tan', 'cos', 'sinh', 'cosh', 'tanh',
+    'sqrt', 'atanSqrt', 'zAt', 'zDelay', 'zeta', 'fract', 'fold', 'log', 'ln',
+  ].map((id) => ({ id })),
+  binaryFunctions: ['mod', 'rotate', 'boxFold'].map((id) => ({ id })),
+  operators: ['+', '-', '*', '/', '^'],
+}
+
 const RIEMANN_ZETA_CPU_SOURCE = `
             const complexZeta = (s) => {
               // Euler-Maclaurin analytic continuation with six Bernoulli corrections.

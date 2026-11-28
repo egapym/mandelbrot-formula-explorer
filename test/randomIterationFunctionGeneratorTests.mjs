@@ -181,6 +181,19 @@ function testFunctionArgumentsUseGeneratedSubexpressions() {
   assert.ok(!binary.expression.startsWith('mod('))
 }
 
+function testAbsoluteValueBarsAreNotNested() {
+  const { expression } = generateRandomIterationFunction({
+    leaves: ['z', 'c'],
+    unaryFunctions: ['abs'],
+    binaryFunctions: [],
+    operators: { ...operators(), '+': { min: 2, max: 2 } },
+    maxDepth: 5,
+  }, () => 0)
+  assert.equal(countOperator(expression, '|'), 2)
+  assert.equal(countOperator(expression, '+'), 2)
+  assert.doesNotThrow(() => compileIterationFunction(expression))
+}
+
 testSelectedOperatorsAndRequiredTerms()
 testHistoryRangeAndParserValidation()
 testNumberRangeAndNeutralArithmeticRemoval()
@@ -188,4 +201,5 @@ testNeutralNumberLiteralsAreNeverGeneratedAsIdentities()
 testAutomaticRelaxation()
 testEveryRegularFunctionCanBeGenerated()
 testFunctionArgumentsUseGeneratedSubexpressions()
+testAbsoluteValueBarsAreNotNested()
 console.log('random iteration function generator tests passed')

@@ -2572,7 +2572,7 @@ const fullResToggle = document.getElementById('fullres')
 
 const tempCanvas = document.createElement('canvas')
 
-function createPaletteColorEditor(containerId, defaults, labels, applyColors, onChange, resetId) {
+function createPaletteColorEditor(containerId, defaults, labels, applyColors, onChange, resetId, updateEvent = 'input') {
   const container = document.getElementById(containerId)
   const defaultValues = defaults.map((rgb) => `#${rgb.map((channel) => channel.toString(16).padStart(2, '0')).join('')}`)
   const inputs = defaultValues.map((value, index) => {
@@ -2593,7 +2593,7 @@ function createPaletteColorEditor(containerId, defaults, labels, applyColors, on
   const apply = () => applyColors(read().map((hex) => (
     [1, 3, 5].map((offset) => Number.parseInt(hex.slice(offset, offset + 2), 16))
   )))
-  container.addEventListener('change', () => {
+  container.addEventListener(updateEvent, () => {
     apply()
     onChange()
   })
@@ -3076,12 +3076,11 @@ class PaletteComponent {
     const shapesWithAngle = ['line', 'parabola', 'triangle', 'square', 'bitmap']
     angleGroup?.classList.toggle('d-none', isTia || !shapesWithAngle.includes(shape))
 
-    // Bitmap group: BITMAP 選択かつ TIA 以外のとき表示
-    document.getElementById('ot-bitmap-group')?.classList.toggle('d-none', isTia || shape !== 'bitmap')
-
     // bitmap 使用時は色が画像由来なので color は不要。
     // ただし TIA は shape を参照しないため、内部的に bitmap が残っていても表示する。
     const useBitmapColors = isBitmap && !isTia
+    document.getElementById('ot-bitmap-group')?.classList.toggle('d-none', !useBitmapColors)
+    document.getElementById('ot-bitmap-bg-color-group')?.classList.toggle('d-none', !useBitmapColors)
     document.getElementById('ot-color-pattern-group')?.classList.toggle('d-none', useBitmapColors)
     document.getElementById('ot-pattern-settings')?.classList.toggle('d-none', useBitmapColors)
     const colorPattern = document.getElementById('ot-color-pattern')?.value
@@ -3678,6 +3677,7 @@ function beginRealtimeBuddhaNavigation(canvas, kind) {
 function activateRealtimeBuddhaNavigation(drag) {
   if (drag.changed) return
   drag.changed = true
+  clearBuddhaContinuousStop()
   buddhaRunnerGeneration++
   buddhaDensityDrawGeneration++
   buddhaRenderRequestGeneration++
@@ -3944,6 +3944,7 @@ function discardSavedBuddhaImageData() {
 let buddhaFiniteSampleValue = null
 let buddhaContinuousSampleCount = 0
 let buddhaContinuousSampleDisplayTime = -Infinity
+let buddhaContinuousStopped = false
 
 function updateBuddhaContinuousSamples(total, force = false) {
   if (!DOM.buddha.continuous?.checked) return
@@ -3954,18 +3955,30 @@ function updateBuddhaContinuousSamples(total, force = false) {
   DOM.buddha.iterations.value = String(buddhaContinuousSampleCount)
 }
 
+function isBuddhaFixedSamplesLocked() {
+  return !!DOM.buddha.continuous?.checked && !buddhaContinuousStopped
+}
+
 function syncBuddhaFixedSamplesUi() {
-  if (DOM.buddha.regenerateSeed) {
-    DOM.buddha.regenerateSeed.disabled = !DOM.buddha.fixedSamples?.checked || !!DOM.buddha.continuous?.checked
+  const locked = isBuddhaFixedSamplesLocked()
+  if (DOM.buddha.fixedSamples) {
+    DOM.buddha.fixedSamples.disabled = locked
   }
+  if (DOM.buddha.regenerateSeed) {
+    DOM.buddha.regenerateSeed.disabled = locked || !DOM.buddha.fixedSamples?.checked
+  }
+}
+
+function clearBuddhaContinuousStop() {
+  if (!buddhaContinuousStopped) return
+  buddhaContinuousStopped = false
+  syncBuddhaFixedSamplesUi()
 }
 
 function syncBuddhaContinuousModeUi() {
   const input = DOM.buddha.iterations
   const enabled = !!DOM.buddha.continuous?.checked
-  if (DOM.buddha.fixedSamples) {
-    DOM.buddha.fixedSamples.disabled = enabled
-  }
+  if (!enabled) buddhaContinuousStopped = false
   syncBuddhaFixedSamplesUi()
   if (enabled && !input.readOnly) {
     buddhaFiniteSampleValue = input.value
@@ -4019,8 +4032,8 @@ function redrawBuddhaForRenderSettingChange() {
 // GPU / Continuous は実行方法を変えるため、現在表示している Buddhabrot を
 // 直ちに新しい runner で描画し直す。Samples と違い、描画品質そのものを変更せず
 // に CPU/GPU または有限/Continuous の実行モードだけを切り替える。
-function redrawBuddhaForExecutionSettingChange() {
-  if (!buddhaActive && !BuddhabrotState.isViewEnabled()) return
+function redrawBuddhaForExecutionSettingChange({ showIfHidden = false } = {}) {
+  if (!showIfHidden && !buddhaActive && !BuddhabrotState.isViewEnabled()) return
   const sampleValue = DOM.buddha.iterations?.value?.trim()
   const samples = Number(sampleValue)
   // Continuous へ切り替える際は、syncBuddhaContinuousModeUi() が 0 を表示する。
@@ -4087,6 +4100,7 @@ function getBuddhaRenderParams(target, { samples, renderDelay, brightness, gamma
 async function startBuddhaRender({
   preserveSourceRender = false, captureFractalImage = true, animationFrameParams = null,
 } = {}) {
+  clearBuddhaContinuousStop()
   if (!animationFrameParams) invalidateAnimation()
   queueMicrotask(updateAnimationUi)
   buddhaDisplaySuppressed = false
@@ -5654,7 +5668,7 @@ function scheduleBuddhaRedraw() {
   requestAnimationFrame(() => {
     buddhaRedrawScheduled = false
     const toggle = document.getElementById('buddha-toggle')
-    if (toggle && !toggle.checked) return
+    if (buddhaDisplaySuppressed || (toggle && !toggle.checked && !buddhaPreservedDisplay)) return
 
     const runner = buddhaRunner
     if (!runner || buddhaRunnerGeneration !== generation) return
@@ -9991,7 +10005,7 @@ function initListeners() {
     if (DOM.buddha.fixedSamples.checked && lastBuddhaRenderParams && BuddhabrotState.targetKind) {
       fixedBuddhaSamples.apply(lastBuddhaRenderParams, BuddhabrotState.targetKind)
     }
-    redrawBuddhaForExecutionSettingChange()
+    if (!buddhaContinuousStopped) redrawBuddhaForExecutionSettingChange()
   })
 
   if (DOM.buddha.continuous) {
@@ -10016,9 +10030,9 @@ function initListeners() {
   })
 
   DOM.buddha.regenerateSeed?.addEventListener('click', () => {
-    if (!DOM.buddha.fixedSamples?.checked || DOM.buddha.continuous?.checked) return
+    if (!DOM.buddha.fixedSamples?.checked || isBuddhaFixedSamplesLocked()) return
     fixedBuddhaSamples.reseed(getBuddhabrotTargetSnapshot().kind)
-    redrawBuddhaForExecutionSettingChange()
+    redrawBuddhaForExecutionSettingChange({ showIfHidden: true })
   })
 
   // Buddhabrot 実行ボタン
@@ -10045,6 +10059,8 @@ function initListeners() {
       stopBtn.addEventListener('click', () => {
         if (buddhaActive && (buddhaRunner?.running || realtimeBuddhaDrag)) {
           stopBuddhaPreserveDisplay()
+          buddhaContinuousStopped = !!DOM.buddha.continuous?.checked
+          syncBuddhaFixedSamplesUi()
           // 保持表示を見せ続けるため、トグルを有効にしてオンのまま保つ
           const t = document.getElementById('buddha-toggle')
           if (t) {
@@ -10774,7 +10790,7 @@ function initUI() {
       'buddha-custom-colors', DEFAULT_BUDDHA_COLORS,
       ['Low Density', 'Color 2', 'Color 3', 'High Density'],
       setCustomBuddhaColors, redrawBuddhaForRenderSettingChange,
-      'buddha-colors-reset',
+      'buddha-colors-reset', 'change',
     ),
   }
   paletteComponent.init()

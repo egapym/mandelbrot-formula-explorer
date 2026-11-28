@@ -160,6 +160,12 @@ assert.equal(context.DOM.buddha.fixedSamples.checked, true)
 assert.equal(context.DOM.buddha.fixedSamples.disabled, true)
 assert.deepEqual(fixed.views, lockedViews, 'Continuous must retain the fixed seeds and sampling ranges')
 assert.equal(context.DOM.buddha.regenerateSeed.disabled, true)
+runInNewContext('buddhaContinuousStopped = true', context)
+context.syncBuddhaFixedSamplesUi()
+assert.equal(context.DOM.buddha.continuous.checked, true)
+assert.equal(context.DOM.buddha.fixedSamples.disabled, false)
+assert.equal(context.DOM.buddha.regenerateSeed.disabled, false)
+assert.deepEqual(fixed.views, lockedViews, 'Stop must retain the fixed seeds and sampling ranges')
 context.DOM.buddha.continuous.checked = false
 context.syncBuddhaContinuousModeUi()
 assert.equal(context.DOM.buddha.fixedSamples.disabled, false)
@@ -169,6 +175,7 @@ assert.equal(context.DOM.buddha.regenerateSeed.disabled, false)
 context.DOM.buddha.fixedSamples.checked = false
 context.DOM.buddha.continuous.checked = true
 context.syncBuddhaContinuousModeUi()
+assert.equal(context.DOM.buddha.fixedSamples.disabled, true, 'Reenabling Continuous must lock Fixed Samples')
 context.DOM.buddha.continuous.checked = false
 context.syncBuddhaContinuousModeUi()
 assert.equal(context.DOM.buddha.fixedSamples.checked, false, 'Continuous must also preserve Fixed Samples OFF')
@@ -233,16 +240,21 @@ const buttonContext = {
   fixedBuddhaSamples: renderFixed,
   getBuddhabrotTargetSnapshot: () => ({ kind: 'main' }),
   async startBuddhaRender() { rendered = renderFixed.apply(first, 'main') },
-  redrawBuddhaForExecutionSettingChange() { redraws++ },
+  redrawBuddhaForExecutionSettingChange({ showIfHidden }) {
+    assert.equal(showIfHidden, true, 'Explicit reseeding must render even if View is OFF')
+    redraws++
+  },
   console,
 }
 const buttonStart = source.indexOf("  DOM.buddha.regenerateSeed?.addEventListener('click'")
+runInNewContext(source.slice(source.indexOf('let buddhaFiniteSampleValue = null'),
+  source.indexOf('function wrapContinuousBuddhaRunner(')), buttonContext)
 runInNewContext(source.slice(buttonStart, source.indexOf('// Buddhabrot 停止ボタン', buttonStart)), buttonContext)
 await callbacks.render()
 await callbacks.render()
 assert.equal(rendered.sampleSeed, locked.sampleSeed, 'Repeated Render must keep the locked seed')
 callbacks.reseed()
-assert.equal(redraws, 1, 'Explicit reseeding requests a visible-view refresh')
+assert.equal(redraws, 1, 'Explicit reseeding requests a new render')
 await callbacks.render()
 assert.notEqual(rendered.sampleSeed, locked.sampleSeed)
 assert.deepEqual(rendered.samplingCenter, locked.samplingCenter)
@@ -255,5 +267,12 @@ callbacks.reseed()
 buttonContext.DOM.buddha.continuous.checked = false
 buttonContext.DOM.buddha.fixedSamples.checked = false
 callbacks.reseed()
-assert.equal(redraws, 1, 'Reseeding requires Fixed Samples ON and Continuous OFF')
+assert.equal(redraws, 1, 'Reseeding is blocked while Continuous is locked or Fixed Samples is OFF')
+buttonContext.DOM.buddha.continuous.checked = true
+buttonContext.DOM.buddha.fixedSamples.checked = true
+runInNewContext('buddhaContinuousStopped = true', buttonContext)
+callbacks.reseed()
+assert.equal(redraws, 2, 'Reseeding after Stop must restart the render')
+await callbacks.render()
+assert.notEqual(rendered.sampleSeed, newSeed, 'Reseeding after Stop must save a new seed')
 console.log('PASS: Render retains locked seeds; explicit reseeding preserves range and the other target')

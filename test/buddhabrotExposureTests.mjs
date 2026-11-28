@@ -62,7 +62,7 @@ let drawCalls = 0
 const callbacks = []
 const context = {
   document: { getElementById: id => id === 'buddha-toggle' ? toggle : id.endsWith('-value') ? output : control },
-  buddhaRedrawScheduled: false, buddhaRunnerGeneration: 1,
+  buddhaRedrawScheduled: false, buddhaRunnerGeneration: 1, buddhaDisplaySuppressed: false,
   buddhaPreservedDisplay: true, buddhaRunner: { brightness: 1.2, gamma: 4.8 },
   BuddhabrotState: { active: false, isViewEnabled: () => false },
   requestAnimationFrame: callback => callbacks.push(callback),
@@ -82,6 +82,11 @@ context.scheduleBuddhaRedraw()
 callbacks.shift()()
 assert.equal(drawCalls, 1, 'Hidden Buddhabrot was repainted')
 context.buddhaPreservedDisplay = true
+context.scheduleBuddhaRedraw()
+context.buddhaDisplaySuppressed = true
+callbacks.shift()()
+assert.equal(drawCalls, 1, 'Turning View OFF must prevent a queued draw from restoring the stopped image')
+context.buddhaDisplaySuppressed = false
 context.scheduleBuddhaRedraw()
 context.buddhaRunnerGeneration++
 callbacks.shift()()

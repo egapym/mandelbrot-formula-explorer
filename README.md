@@ -130,7 +130,7 @@ map and reset the current render's count. Reset All Settings turns Continuous of
 sampling range when enabled (or initializes them on the first render if none
 exists). Pressing **Render Buddhabrot** while locked reuses the saved seed and sampling
 range. The **Regenerate seed** button to the right of Fixed Samples chooses a new
-seed while keeping the saved sampling range, and redraws if Buddhabrot is shown.
+seed and starts a new render while keeping the saved sampling range.
 Pan and zoom change only the display projection. CPU and GPU retain all accepted
 orbit points up to escape or Max iterations, including offscreen points and
 points that overlap in the current view. Pixel overlap does not terminate an
@@ -142,9 +142,11 @@ GPU accumulation keeps carry words for overflowing integer counters, combines
 repeated contributions to the same two pixels locally, and converts density on
 the GPU before readback. These operations retain every orbit point and palette
 contribution without frequent full-image transfers to the CPU.
-Fixed Samples is available only with Continuous OFF. Enabling Continuous temporarily
-disables the control while preserving its ON/OFF setting, saved seeds, and sampling
-ranges. Disabling Continuous makes it available again with the same setting.
+Enabling Continuous temporarily disables Fixed Samples while preserving its ON/OFF
+setting, saved seeds, and sampling ranges. Press **Stop** to edit Fixed Samples while
+keeping Continuous enabled and the current image visible. When Fixed Samples is ON,
+regenerating the seed restarts Continuous rendering. Starting another Continuous
+render locks the controls again.
 When Fixed Samples is ON, Continuous draws fresh samples from the locked sampling
 range, even after panning or zooming the display. Turning Continuous OFF resumes
 the saved finite sample sequence.
@@ -340,6 +342,10 @@ It also accepts `BUDDHA_REFERENCE_WORKER`, `BUDDHA_BENCH_SAMPLES` (default 10,00
 and `BUDDHA_BENCH_REPEATS` (default 3). `BUDDHA_BENCH_CASES` filters case names
 with a regular expression. Reference/current runs alternate to reduce timing bias.
 These times exclude browser canvas coloring.
+For seeded WebGPU parity across the formula presets, run
+`python3 test/buildBuddhabrotGpuPrototypes.py` and open
+`test/buddhabrotGpuFunctionsBrowserTests.html`. The reference uses the renderer
+from before finite previews, with the same projection and palette semantics.
 Open `test/buddhabrotPerformanceBrowserTests.html` for fixed-seed GPU timing
 (seven measured runs after two warmups). It uses GPU timestamps when supported,
 and reports end-to-end sampling/readback time separately. An optional

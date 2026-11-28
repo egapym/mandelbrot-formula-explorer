@@ -1,6 +1,6 @@
 // Generate the baseline with: python3 test/buildBuddhabrotGpuPrototypes.py
-// ?reference=./fixtures/gpu-prototypes/before.mjs compares every preset against a
-// saved renderer. Mode/Julia/band combinations exercise the same sample stream.
+// Mode/Julia/band combinations exercise the same sample stream against the
+// renderer from before finite previews. Use ?reference= to override it.
 import { BuddhabrotWebGPU } from '../buddhabrotWebGPU.mjs'
 import { functionPresets } from '../functionPresets.mjs'
 import { getBuddhaPalette } from '../buddhaPalettes.mjs'
@@ -11,11 +11,12 @@ try {
   const adapter = await navigator.gpu?.requestAdapter()
   assert(adapter, 'WebGPU unavailable')
   const device = await adapter.requestDevice()
-  const reference = query.get('reference')
-  assert(reference, 'Provide a local reference renderer module')
+  const reference = query.get('reference') || './fixtures/gpu-prototypes/parity-reference.mjs'
   const url = new URL(reference, location.href)
   assert(url.origin === location.origin, 'Reference must be a local module')
-  const Before = (await import(url.href)).BuddhabrotWebGPU
+  const { BuddhabrotWebGPU: Before } = await import(url.href).catch((cause) => {
+    throw new Error(`Could not load ${reference}. Generate the default reference with python3 test/buildBuddhabrotGpuPrototypes.py.`, { cause })
+  })
   const runners = [new Before({ devicePromise: Promise.resolve(device) }), new BuddhabrotWebGPU({ devicePromise: Promise.resolve(device) })]
   const passed = [], skipped = []
   try {

@@ -549,9 +549,8 @@ export class OrbitTrapPalette {
     const isBitmapShape = this.trapSpec?.shape === 'bitmap' && this.trapSpec.mode !== TRAP_MODE.TIA
     const [bgR, bgG, bgB] = hexColorToRgb(this.trapSpec?.bitmapBackgroundColor)
 
-    // BITMAP でも画像未選択の間は orbitTrap.mjs 側の距離フォールバックで通常描画を維持する。
-    // 画像があるときだけ bitmapData から RGB を直接参照する。
-    const isBitmapDirect = isBitmapShape && this.trapSpec?.bitmapData
+    const hasBitmapImage = isBitmapShape && this.trapSpec.bitmapData &&
+      this.trapSpec.bitmapWidth > 0 && this.trapSpec.bitmapHeight > 0
 
     for (let i = 0; i < values.length; i++) {
       const iter = values[i]
@@ -565,7 +564,7 @@ export class OrbitTrapPalette {
       }
       const val = otData[i]
 
-      if (isBitmapDirect && val >= -0.5) {
+      if (isBitmapShape && (!hasBitmapImage || val >= -0.5)) {
         bufferData[i * 4] = bgR
         bufferData[i * 4 + 1] = bgG
         bufferData[i * 4 + 2] = bgB
@@ -574,7 +573,7 @@ export class OrbitTrapPalette {
       }
 
       // BITMAPモード全般: 負のfloatにUV座標がエンコードされている
-      if (isBitmapDirect && val < -0.5) {
+      if (hasBitmapImage && val < -0.5) {
         const packed = -val - 1 // = uInt * 4096 + vInt
         const uInt = Math.floor(packed / 4096)
         const vInt = Math.round(packed % 4096)

@@ -328,7 +328,14 @@
         <div id="ot-tia-colors" class="palette-color-fields"></div>
       </div>
     </div>
-    <div id="ot-inside-color" class="palette-color-fields"></div>
+    <div class="palette-color-fields flex-column align-items-start gap-1">
+      <div id="ot-bitmap-bg-color-group" class="d-none">
+        <label for="ot-bitmap-bg-color">Background</label>
+        <input id="ot-bitmap-bg-color" type="color" class="form-control form-control-color form-control-sm p-1"
+          value="#002580" title="背景色" />
+      </div>
+      <div id="ot-inside-color" class="palette-color-fields"></div>
+    </div>
   </div>
 
   <!-- 行3: Center X / Y -->
@@ -379,13 +386,6 @@
           title="Orbit trapに使用する画像を選択 (矩形領域にマッピングされます)" />
         <canvas id="ot-bitmap-preview" width="40" height="40" class="border rounded d-none"
           style="image-rendering:pixelated"></canvas>
-      </div>
-      <div class="row g-2 align-items-end">
-        <div class="col-4">
-          <label for="ot-bitmap-bg-color" class="col-form-label py-0 d-block" style="font-size:0.8em">Background</label>
-          <input id="ot-bitmap-bg-color" type="color" class="form-control form-control-color form-control-sm w-100 p-1"
-            value="#002580" title="背景色" />
-        </div>
       </div>
     </div>
   </div>

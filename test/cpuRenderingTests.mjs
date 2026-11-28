@@ -73,6 +73,17 @@ test('custom palettes start with the corresponding Mandelbrot and Cross colors',
   assert.deepEqual(customTrap._colorFn(0), crossTrap._colorFn(0))
 })
 
+test('Bitmap Orbit Trap uses Background even with no image selected', () => {
+  const palette = new CustomOrbitTrapPalette()
+  const rgba = new Uint8ClampedArray(8)
+  const values = Int32Array.of(2, 5)
+  const trapValues = Float32Array.of(0, 0.25)
+  palette.inSetColor = [17, 34, 51]
+  palette.updateTrapSpec({ shape: TRAP_SHAPE.BITMAP, bitmapBackgroundColor: '#aabbcc' })
+  palette.renderPixels(rgba, null, values, null, null, null, false, null, null, trapValues)
+  assert.deepEqual(rgba, Uint8ClampedArray.of(17, 34, 51, 255, 170, 187, 204, 255))
+})
+
 test('history-free generic expressions leave supplied history untouched', () => {
   for (const expr of ['cos(z*z)+c', 'z*z+c+0.01*n']) {
     const history = { z: [] }

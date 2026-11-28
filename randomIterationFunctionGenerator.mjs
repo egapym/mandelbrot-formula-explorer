@@ -258,7 +258,10 @@ export function generateRandomIterationFunction(configInput = {}, random = Math.
         const argument = argumentOperator
           ? `(${leaves[leafIndex]} ${argumentOperator} ${operand(random, config)})`
           : leaves[leafIndex]
-        leaves[leafIndex] = applyRegularFunction(argument, pickRegularFunction(random, config), random, config)
+        const selectedFunction = pickRegularFunction(random, config)
+        // Absolute-value bars cannot be nested in the parser's formula syntax.
+        if (selectedFunction.id === 'abs' && argument.includes('|')) return
+        leaves[leafIndex] = applyRegularFunction(argument, selectedFunction, random, config)
       }
       addFunctionToRandomLeaf()
 

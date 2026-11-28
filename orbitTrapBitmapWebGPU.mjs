@@ -1262,8 +1262,8 @@ fn colorFromTrap(iterValue: f32, trapValue: f32) -> u32 {
     return spec.bitmap.w;
   }
 
-  if (spec.dims.w != 5u && spec.extra.x == 7u && spec.bitmap.x > 0u && spec.bitmap.y > 0u) {
-    if (trapValue >= -0.5) {
+  if (spec.dims.w != 5u && spec.extra.x == 7u) {
+    if (spec.bitmap.x == 0u || spec.bitmap.y == 0u || trapValue >= -0.5) {
       return spec.bitmap.z;
     }
 
